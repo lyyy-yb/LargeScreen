@@ -1,0 +1,351 @@
+@import url("./reset.less");
+@import url("./variables.less");
+
+.ant-app {
+  width: 100%;
+  height: 100%;
+}
+
+// L7 Popup 样式
+.l7-popup-tip {
+  opacity: 0.85;
+  border-top-color: rgba(10, 60, 130, 0.9) !important;
+}
+
+.l7-popup-content {
+  padding: 4px 10px 4px 8px !important;
+  background-color: rgba(10, 60, 130, 0.9) !important;
+  width: 264px;
+  opacity: 0.85;
+  border-radius: 10px !important;
+  border: 1px solid @border-light;
+  backdrop-filter: blur(4px);
+}
+
+// 登录输入框
+.login-s-input {
+  height: 60px;
+  line-height: 60px;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 67px;
+  border: 1px solid @border-color;
+  margin-top: 20px;
+
+  .ant-input-group-addon {
+    padding: 0 24px;
+    color: #FFFFFF;
+    border: none;
+  }
+
+  .ant-input-suffix {
+    padding: 0 20px;
+  }
+
+  .ant-input-password-icon {
+    color: #FFFFFF;
+  }
+
+  .ant-input-outlined:focus, .ant-input-outlined:focus-within {
+    box-shadow: none;
+  }
+
+  .ant-input, .ant-input-outlined {
+    background: transparent;
+    height: 59px;
+    line-height: 59px;
+    color: rgba(255, 255, 255, 0.80);
+    border: none;
+
+    &::placeholder {
+      color: rgba(255, 255, 255, 0.40);
+    }
+  }
+}
+
+// Select 组件：统一顶栏、表单和下拉浮层的深色科技风
+.model_from_sel,
+.screen-select,
+.top-s-antd-sel {
+  .ant-select-selector {
+    background: rgba(0, 56, 129, 0.86) !important;
+    color: @text-bright !important;
+    border-color: @border-color !important;
+    border-radius: 6px !important;
+    box-shadow: inset 0 0 12px rgba(1, 194, 255, 0.08) !important;
+  }
+
+  .ant-select-selection-placeholder {
+    color: rgba(255, 255, 255, 0.45);
+  }
+
+  .ant-select-selection-item {
+    color: @text-light;
+  }
+
+  .ant-select-arrow {
+    color: @text-light;
+  }
+
+  &:not(.ant-select-disabled):hover .ant-select-selector,
+  &.ant-select-focused .ant-select-selector {
+    border-color: @accent-cyan !important;
+    box-shadow: 0 0 0 2px rgba(3, 251, 253, 0.12) !important;
+  }
+}
+
+.screen-select.ant-select-disabled,
+.top-s-antd-sel.ant-select-disabled {
+  background: rgba(0, 56, 129, 0.72) !important;
+  border-color: rgba(80, 115, 154, 0.72) !important;
+  color: rgba(168, 214, 255, 0.58) !important;
+  --ant-color-text-disabled: rgba(168, 214, 255, 0.58);
+  opacity: 1;
+}
+
+.screen-select .ant-select-content,
+.top-s-antd-sel .ant-select-content {
+  color: inherit !important;
+}
+
+.model_from_sel_opt,
+.screen-select-popup {
+  background: rgba(7, 43, 91, 0.98) !important;
+  border: 1px solid rgba(93, 131, 178, 0.5);
+  border-radius: 8px;
+  box-shadow: 0 12px 28px rgba(0, 10, 35, 0.45);
+
+  .ant-select-item-option-content {
+    color: @text-light;
+  }
+
+  .ant-select-item-option-active:not(.ant-select-item-option-disabled) {
+    background: @hover-bg;
+  }
+
+  .ant-select-item-option-selected {
+    background: rgba(26, 90, 176, 0.8);
+  }
+}
+
+// Table 组件
+.ant-table-header {
+  border-radius: 0;
+  background: linear-gradient(180deg, rgba(61, 138, 212, 0.9) 0%, rgba(26, 90, 176, 0.9) 100%);
+}
+
+.ant-table-placeholder {
+  background: transparent;
+  .ant-empty-description {
+    color: @accent-blue;
+  }
+}
+
+.ant-table-cell {
+  background: transparent;
+  color: @text-cyan;
+
+  &::before {
+    background: transparent;
+  }
+}
+
+.ant-table {
+  background: transparent;
+
+  .ant-checkbox-inner {
+    background: transparent;
+    border-color: rgba(255, 255, 255, 0.40);
+  }
+}
+
+.ant-table-thead > tr > th {
+  padding: 10px 16px;
+  border: none;
+  color: #ffffff;
+  font-weight: 500;
+}
+
+.ant-table-tbody > tr > td {
+  color: @text-bright;
+  border-bottom: 1px dashed rgba(118, 255, 255, 0.25);
+}
+
+.ant-table-tbody > tr:hover > td {
+  background: rgba(53, 136, 255, 0.15);
+}
+
+// Modal 组件
+.ant-modal-title {
+  background: @primary-bg;
+  color: @text-light;
+}
+
+.ant-modal-content {
+  background: rgba(15, 65, 140, 0.95);
+  border: 1px solid rgba(61, 138, 212, 0.6);
+  border-radius: 12px;
+  backdrop-filter: blur(8px);
+}
+
+.ant-modal-confirm-title {
+  color: #ffffff;
+}
+
+.ant-modal-confirm-content {
+  color: @text-bright;
+}
+
+// Form 组件
+.ant-form-item-label > label {
+  color: @accent-blue;
+}
+
+// Input 组件
+.model_from_input {
+  background: @panel-bg-solid;
+  border-color: @border-color;
+  color: @text-bright;
+  border-radius: 6px;
+
+  &::placeholder {
+    color: rgba(255, 255, 255, 0.40);
+  }
+
+  &:hover {
+    border-color: @accent-blue;
+  }
+
+  &:focus {
+    border-color: @accent-blue;
+    box-shadow: 0 0 0 2px rgba(1, 194, 255, 0.15);
+  }
+}
+
+// Button 组件
+.ant-btn-primary {
+  background: linear-gradient(135deg, #01C2FF 0%, #1a5ab0 100%);
+  border: none;
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(1, 194, 255, 0.3);
+
+  &:hover {
+    background: linear-gradient(135deg, #33d4ff 0%, #2a6db5 100%);
+    box-shadow: 0 4px 12px rgba(1, 194, 255, 0.4);
+  }
+}
+
+.ant-btn-default {
+  background: rgba(10, 60, 130, 0.6);
+  border-color: @border-color;
+  color: @text-light;
+  border-radius: 6px;
+
+  &:hover {
+    border-color: @accent-blue;
+    color: @accent-blue;
+  }
+}
+
+// DatePicker
+.model_date_picker {
+  background: @panel-bg-solid;
+  border-color: @border-color;
+  border-radius: 6px;
+
+  .ant-picker-input {
+    color: @text-bright;
+
+    ::placeholder {
+      color: @text-light;
+    }
+  }
+
+  .ant-picker-separator,
+  .ant-picker-suffix {
+    color: @accent-blue;
+  }
+
+  &:hover {
+    border-color: @accent-blue;
+  }
+}
+
+// 城市标签弹窗
+.city-label-popup-wrapper {
+  .l7-popup-content {
+    background: rgba(10, 60, 130, 0.9) !important;
+    border: 1px solid rgba(3, 251, 253, 0.3);
+    border-radius: 8px;
+    padding: 8px 12px !important;
+    width: auto !important;
+    min-width: 90px;
+    backdrop-filter: blur(4px);
+  }
+
+  .l7-popup-tip {
+    border-top-color: rgba(10, 60, 130, 0.9) !important;
+  }
+}
+
+.city-label-popup {
+  .city-label-name {
+    color: #03FBFD;
+    font-size: 14px;
+    font-weight: bold;
+    text-align: center;
+    margin-bottom: 4px;
+  }
+
+  .city-label-info {
+    color: #A0C7FF;
+    font-size: 11px;
+    line-height: 18px;
+  }
+}
+
+// Progress
+.ant-progress-text-outer {
+  color: @text-bright;
+}
+
+// 面板头部背景
+.box-header-bg {
+  background-image: url('@/assets/images/b-h-bg.png');
+  background-repeat: no-repeat;
+  background-position: left;
+}
+
+// 搜索输入框
+.table_search {
+  .ant-input-outlined {
+    background: @panel-bg-solid;
+    border-color: @border-color;
+    color: @text-bright;
+
+    &::placeholder {
+      color: rgba(255, 255, 255, 0.40);
+    }
+  }
+}
+
+// 路由只做进入动画，避免依赖 animationend 导致切换后停在透明状态
+.route-page-enter {
+  animation: routeFadeIn 0.22s ease-out both;
+}
+
+@keyframes routeFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .route-page-enter {
+    animation: none;
+  }
+}

@@ -1,0 +1,103 @@
+import { request } from './request'
+
+// ========== 雷达 ==========
+// 雷达列表
+export function leidaList(params?: object) {
+  return request.get('/dpSys/hbdp/leida/list', { params })
+}
+// 突发点
+export function alarmPointAll(params?: object) {
+  return request.get('/dpSys/hbdp/leida/alarmPoint', { params })
+}
+
+// ========== 无人机 ==========
+// 无人机机场列表
+export function dockList(params?: object) {
+  return request.get('/dpSys/hbdp/wurenji/dockList', { params })
+}
+// 飞行任务列表
+export function listFlyJob(params?: object) {
+  return request.get('/dpSys/hbdp/wurenji/listFlyJob', { params })
+}
+// 飞行计划列表
+export function listFlyPlan(params?: object) {
+  return request.get('/dpSys/hbdp/wurenji/listFlyPlan', { params })
+}
+// 飞行结果列表
+export function listFlyResult(params?: object) {
+  return request.get('/dpSys/hbdp/wurenji/listFlyResult', { params })
+}
+// 无人机派遣
+export function wrjPatrol(data: object) {
+  return request.post('/dpSys/hbdp/wurenji/patrol', data)
+}
+
+// ========== 走航 ==========
+// 走航车列表
+export function zouhangList() {
+  return request.get('/dpSys/hbdp/zouhang/list')
+}
+// 走航任务详情
+export function taskDetail(params?: object) {
+  return request.get('/dpSys/hbdp/zouhang/taskDetail', { params })
+}
+// 走航任务列表
+export function taskList(params?: object) {
+  return request.get('/dpSys/hbdp/zouhang/taskList', { params })
+}
+
+// ========== 污染源 ==========
+// 删除污染源
+export function wurandelete(data: object, params?: object) {
+  return request.post('/dpSys/hbdp/wuranyuan/delete', data, { params })
+}
+// 选项列表-污染源类型
+export function options4leixing(params?: object) {
+  return request.get('/dpSys/hbdp/wuranyuan/options4leixing', { params })
+}
+// 选项列表-污染源街道
+export function options4xiangzhen(params?: object) {
+  return request.get('/dpSys/hbdp/wuranyuan/options4xiangzhen', { params })
+}
+// 分页查询污染源
+export function wuranPage(params?: object) {
+  return request.get('/dpSys/hbdp/wuranyuan/page', { params })
+}
+// 污染源列表
+export function wuranList(params?: object) {
+  return request.get('/dpSys/hbdp/wuranyuan/query', { params })
+}
+// 根据经纬度查最近污染源
+export function wuranListByLngLat(params?: object) {
+  return request.get('/dpSys/hbdp/wuranyuan/listByLngAndlat', { params })
+}
+// 污染源图片视频资源查询
+export function wuranQuerySource(params?: object) {
+  return request.get('/dpSys/hbdp/wuranyuan/querySource', { params })
+}
+// 污染源增加图片视频资源
+export function wuranAddSource(data: object) {
+  return request.post('/dpSys/hbdp/wuranyuan/addSource', data)
+}
+// 污染源上传资源
+export function wuranUploadSource(formData: FormData) {
+  return request.post('/dpSys/hbdp/wuranyuan/uploadSource', formData)
+}
+// 问题闭环处置流程更新
+export function wtbhczUploadSource(formData: FormData) {
+  return request.post('/dpSys/hbdp/wuranyuan/uploadSourceWtbhcz', formData)
+}
+// 修改污染源
+export function wuranEdit(data: object) {
+  return request.post('/dpSys/hbdp/wuranyuan/edit', data)
+}
+// 新增污染源
+export function wuranAdd(data: object) {
+  return request.post('/dpSys/hbdp/wuranyuan/add', data)
+}
+
+// ========== 年度总结 ==========
+// 年度总结信息查询
+export function getYearInfo(params?: object) {
+  return request.get('/dpSys/ndzj/info', { params })
+}
