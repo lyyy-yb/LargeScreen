@@ -5,6 +5,9 @@ import { ArrowLeftOutlined, CarOutlined } from '@ant-design/icons'
 import { Scene, HeatmapLayer, Source } from '@antv/l7'
 import type { ILayer } from '@antv/l7'
 import L7MapView from '@/components/L7MapView'
+import RegionSelector from '@/components/RegionSelector'
+import { useAppStore } from '@/stores'
+import { cities, districts } from '@/utils/city'
 
 const { Option } = Select
 
@@ -58,6 +61,9 @@ const generateHeatData = () => {
 
 export default function Patrol() {
   const navigate = useNavigate()
+  const regionContext = useAppStore(state => state.regionContext)
+  const mapSelection = regionContext?.mapSelection
+  const querySelection = regionContext?.querySelection
   const [cars, setCars] = useState<CarItem[]>(initCars)
   const [curCarCode, setCurCarCode] = useState('HYD1009')
   const [wakingCar, setWakingCar] = useState<string | null>(null)
@@ -118,16 +124,28 @@ export default function Patrol() {
     { lng: 120.15, lat: 30.27, name: 'HYD1009', color: '#22C55E', size: 12 },
     { lng: 120.21, lat: 30.25, name: 'HYD1010', color: '#EF4444', size: 12 },
   ]
+  const visibleCars = cars
+    .filter(item => !querySelection?.cityName || item.belongUnit.includes(querySelection.cityName))
+    .filter(() => !querySelection?.countyName)
+  const visibleTaskHistory = querySelection?.countyName ? [] : taskHistory
+  const mapCounty = districts.find(item => String(item.adcode) === mapSelection?.countyCode)
+  const mapCity = cities.find(item => item.adcode === mapSelection?.cityCode)
+  const mapCenter: [number, number] = mapCounty
+    ? [mapCounty.lng, mapCounty.lat]
+    : mapCity
+      ? [mapCity.lng, mapCity.lat]
+      : [120.582886, 29.991549]
 
   return (
     <div className="w-full h-full relative overflow-hidden" style={{ background: '#1a5ab0' }}>
-      <L7MapView id="patrol-map" center={[120.15, 30.25]} zoom={11} minZoom={8} maxZoom={14} showTiles markers={markers} onSceneLoaded={handleSceneLoaded} />
+      <L7MapView id="patrol-map" center={mapCenter} zoom={mapCounty ? 11 : mapCity ? 9 : 7.5} minZoom={6} maxZoom={14} showTiles markers={markers} onSceneLoaded={handleSceneLoaded} />
       {/* 返回 */}
       <div className="absolute top-15px left-20px z-50">
         <Button type="text" icon={<ArrowLeftOutlined />} onClick={() => navigate('/monitor')} className="!text-[#03FBFD] !bg-[rgba(255,255,255,0.1)] hover:!bg-[rgba(255,255,255,0.2)] !rounded-2xl">返回监控大屏</Button>
       </div>
       {/* 顶部因子选择 */}
       <div className="absolute top-45px left-1/2 -translate-x-1/2 z-50 flex gap-2 bg-[rgba(0,56,129,0.8)] px-4 py-2 rounded-xl border border-[rgba(255,255,255,0.3)] items-center">
+        <RegionSelector />
         <span className="text-[#A0C7FF] text-12px">监测因子</span>
         <Select value={wageVal} onChange={(v) => { setWageVal(v); setShowHeatmap(false) }} className="w-110px screen-select" classNames={{ popup: { root: 'screen-select-popup' } }} size="small">
           {factorOptions.map(o => <Option key={o.value} value={o.value}>{o.label}</Option>)}
@@ -137,7 +155,7 @@ export default function Patrol() {
       <div className="absolute left-20px top-70px bottom-20px z-50 w-320px pointer-events-none">
         <div className="bg-[rgba(0,56,129,0.85)] h-full rounded-20px border border-[rgba(255,255,255,0.3)] px-4 py-3 overflow-y-auto pointer-events-auto">
           <div className="text-[#A0C7FF] text-16px font-bold mb-3">走航车辆</div>
-          {cars.map(item => (
+          {visibleCars.map(item => (
             <div key={item.id} className={`flex items-center gap-3 py-3 px-2 rounded-lg border-b border-dashed border-[rgba(255,255,255,0.2)] cursor-pointer transition-all ${curCarCode === item.mnCode ? 'bg-[rgba(1,194,255,0.2)]' : 'hover:bg-[rgba(255,255,255,0.05)]'}`} onClick={() => handleSelectCar(item.mnCode)}>
               <CarOutlined className="text-22px text-[#A0C7FF]" />
               <div className="flex-1">
@@ -161,7 +179,7 @@ export default function Patrol() {
         <div className="bg-[rgba(0,56,129,0.85)] h-full rounded-20px border border-[rgba(255,255,255,0.3)] px-3 py-2 flex flex-col">
           <div className="text-[#A0C7FF] text-16px font-bold py-2 border-b border-dashed border-[rgba(255,255,255,0.3)]">历史任务</div>
           <div className="flex-1 overflow-y-auto pointer-events-auto py-1">
-            {taskHistory.map((item, idx) => (
+            {visibleTaskHistory.map((item, idx) => (
               <div key={idx} className="py-3 border-b border-dashed border-[rgba(255,255,255,0.15)] cursor-pointer hover:bg-[rgba(255,255,255,0.05)]" onClick={() => showDetailToMap(item.date)}>
                 <div className="flex items-center justify-between">
                   <span className="text-[#A8D6FF] text-13px">{item.date} 走航</span>

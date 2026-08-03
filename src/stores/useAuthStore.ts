@@ -2,15 +2,19 @@ import { create } from 'zustand'
 import { devtools } from 'zustand/middleware'
 import { getLocalInfo, setLocalInfo, removeLocalInfo } from '@/utils/storage'
 import { TOKEN, USERNAME } from '@/utils/enum'
+import type { RoleLevel, UserInfo } from '@/types/auth'
 
 interface AuthState {
   token: string | null
   username: string | null
+  user: UserInfo | null
   roles: string[]
+  roleLevel: RoleLevel | null
   accessibleFeatures: string[]
+  initialized: boolean
   setToken: (token: string) => void
   setUsername: (username: string) => void
-  setPermission: (roles: string[], features: string[]) => void
+  setSession: (user: UserInfo, roles: string[], features: string[], roleLevel: RoleLevel) => void
   logout: () => void
   isLoggedIn: () => boolean
 }
@@ -20,8 +24,11 @@ export const useAuthStore = create<AuthState>()(
     (set, get) => ({
       token: getLocalInfo<string>(TOKEN),
       username: getLocalInfo<string>(USERNAME),
-      roles: getLocalInfo<string[]>('ROLES') || [],
-      accessibleFeatures: getLocalInfo<string[]>('FEATURES') || [],
+      user: null,
+      roles: [],
+      roleLevel: null,
+      accessibleFeatures: [],
+      initialized: false,
 
       setToken: (token: string) => {
         setLocalInfo(TOKEN, token)
@@ -33,10 +40,10 @@ export const useAuthStore = create<AuthState>()(
         set({ username })
       },
 
-      setPermission: (roles: string[], features: string[]) => {
-        setLocalInfo('ROLES', roles)
-        setLocalInfo('FEATURES', features)
-        set({ roles, accessibleFeatures: features })
+      setSession: (user, roles, accessibleFeatures, roleLevel) => {
+        const username = user.userName
+        setLocalInfo(USERNAME, username)
+        set({ user, username, roles, accessibleFeatures, roleLevel, initialized: true })
       },
 
       logout: () => {
@@ -44,7 +51,15 @@ export const useAuthStore = create<AuthState>()(
         removeLocalInfo(USERNAME)
         removeLocalInfo('ROLES')
         removeLocalInfo('FEATURES')
-        set({ token: null, username: null, roles: [], accessibleFeatures: [] })
+        set({
+          token: null,
+          username: null,
+          user: null,
+          roles: [],
+          roleLevel: null,
+          accessibleFeatures: [],
+          initialized: false,
+        })
       },
 
       isLoggedIn: () => {

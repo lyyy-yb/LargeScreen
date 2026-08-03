@@ -15,6 +15,9 @@ interface L7MapViewProps {
   cityData?: Array<{ name: string; lng: number; lat: number; [key: string]: any }>
   /** 点位数据 */
   markers?: Array<{ lng: number; lat: number; name: string; color?: string; size?: number }>
+  /** 点位图标 URL（传入则用图片图标替代圆形） */
+  markerIconUrl?: string
+  /** 地图场景加载完成回调（可用于注册点击事件等） */
   onSceneLoaded?: (scene: Scene) => void
 }
 
@@ -28,10 +31,81 @@ export default function L7MapView({
   showTiles = true,
   cityData = [],
   markers = [],
+  markerIconUrl,
   onSceneLoaded,
 }: L7MapViewProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const sceneRef = useRef<Scene | null>(null)
+  const cameraRef = useRef({ center, zoom })
+  const markerDataRef = useRef(markers)
+  const markerIconRef = useRef(markerIconUrl)
+  const markerLayersRef = useRef<Parameters<Scene['removeLayer']>[0][]>([])
+  const markerRenderVersionRef = useRef(0)
+  const [centerLng, centerLat] = center
+
+  const renderMarkers = async (
+    scene: Scene,
+    data: NonNullable<L7MapViewProps['markers']>,
+    iconUrl?: string,
+  ) => {
+    const renderVersion = ++markerRenderVersionRef.current
+    await Promise.all(markerLayersRef.current.map(layer => scene.removeLayer(layer)))
+    markerLayersRef.current = []
+    if (!data.length || sceneRef.current !== scene || renderVersion !== markerRenderVersionRef.current) return
+
+    if (iconUrl) {
+      if (!scene.hasImage('marker-icon')) await scene.addImage('marker-icon', iconUrl)
+      if (sceneRef.current !== scene || renderVersion !== markerRenderVersionRef.current) return
+      const pointLayer = new PointLayer({ zIndex: 10 })
+        .source(data, {
+          parser: { type: 'json', x: 'lng', y: 'lat' },
+        })
+        .shape('marker-icon')
+        .size(22)
+      const markerLabelLayer = new PointLayer({ zIndex: 11 })
+        .source(data, {
+          parser: { type: 'json', x: 'lng', y: 'lat' },
+        })
+        .shape('name', 'text')
+        .color('#A8D6FF')
+        .size(11)
+        .style({
+          textAnchor: 'top',
+          textOffset: [0, 16],
+          stroke: '#003366',
+          strokeWidth: 1.5,
+        })
+      scene.addLayer(pointLayer)
+      scene.addLayer(markerLabelLayer)
+      markerLayersRef.current = [pointLayer, markerLabelLayer]
+      return
+    }
+
+    const pointLayer = new PointLayer({ zIndex: 10 })
+      .source(data, {
+        parser: { type: 'json', x: 'lng', y: 'lat' },
+      })
+      .shape('circle')
+      .color('color', (color: string) => color || '#03FBFD')
+      .size('size', (size: number) => size || 10)
+      .style({ opacity: 0.9, strokeWidth: 1, stroke: '#fff' })
+    const markerLabelLayer = new PointLayer({ zIndex: 11 })
+      .source(data, {
+        parser: { type: 'json', x: 'lng', y: 'lat' },
+      })
+      .shape('name', 'text')
+      .color('#A8D6FF')
+      .size(11)
+      .style({
+        textAnchor: 'bottom',
+        textOffset: [0, -8],
+        stroke: '#003366',
+        strokeWidth: 1.5,
+      })
+    scene.addLayer(pointLayer)
+    scene.addLayer(markerLabelLayer)
+    markerLayersRef.current = [pointLayer, markerLabelLayer]
+  }
 
   useEffect(() => {
     if (!containerRef.current) return
@@ -50,6 +124,8 @@ export default function L7MapView({
 
     scene.on('loaded', () => {
       sceneRef.current = scene
+      const latestCamera = cameraRef.current
+      scene.setZoomAndCenter(latestCamera.zoom, latestCamera.center)
 
       // 加载卫星瓦片
       if (showTiles) {
@@ -95,45 +171,32 @@ export default function L7MapView({
         scene.addLayer(cityPointLayer)
       }
 
-      // 点位标记
-      if (markers.length > 0) {
-        const pointLayer = new PointLayer({ zIndex: 10 })
-          .source(markers, {
-            parser: { type: 'json', x: 'lng', y: 'lat' },
-          })
-          .shape('circle')
-          .color('color', (c: string) => c || '#03FBFD')
-          .size('size', (s: number) => s || 10)
-          .style({ opacity: 0.9, strokeWidth: 1, stroke: '#fff' })
-        scene.addLayer(pointLayer)
-
-        // 点位名称标注
-        const markerLabelLayer = new PointLayer({ zIndex: 11 })
-          .source(markers, {
-            parser: { type: 'json', x: 'lng', y: 'lat' },
-          })
-          .shape('name', 'text')
-          .color('#A8D6FF')
-          .size(11)
-          .style({
-            textAnchor: 'bottom',
-            textOffset: [0, -8],
-            stroke: '#003366',
-            strokeWidth: 1.5,
-          })
-        scene.addLayer(markerLabelLayer)
-      }
+      void renderMarkers(scene, markerDataRef.current, markerIconRef.current)
 
       onSceneLoaded?.(scene)
     })
 
     return () => {
+      markerRenderVersionRef.current += 1
+      markerLayersRef.current = []
       scene.destroy()
       sceneRef.current = null
     }
     // 地图实例按页面挂载一次；路由切换会卸载组件并创建新实例。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  useEffect(() => {
+    const latestCenter: [number, number] = [centerLng, centerLat]
+    cameraRef.current = { center: latestCenter, zoom }
+    sceneRef.current?.setZoomAndCenter(zoom, latestCenter)
+  }, [centerLat, centerLng, zoom])
+
+  useEffect(() => {
+    markerDataRef.current = markers
+    markerIconRef.current = markerIconUrl
+    if (sceneRef.current) void renderMarkers(sceneRef.current, markers, markerIconUrl)
+  }, [markerIconUrl, markers])
 
   return (
     <div

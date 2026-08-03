@@ -1,15 +1,19 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Button, Select, Modal, Popover, QRCode, message } from 'antd'
 import { ArrowLeftOutlined, EnvironmentOutlined, ExclamationCircleOutlined, SendOutlined, WarningFilled } from '@ant-design/icons'
 import L7MapView from '@/components/L7MapView'
+import FlyListModel from '@/components/MapBox/FlyListModel'
 import { leidaList, alarmPointAll, wuranList, dockList } from '@/servers/mapBox'
-import { cities } from '@/utils/city'
-
-const { Option } = Select
+import { cities, districts } from '@/utils/city'
+import RegionSelector from '@/components/RegionSelector'
+import { useAppStore } from '@/stores'
+import { toRegionQuery } from '@/utils/region'
+import { PointLayer, type Scene } from '@antv/l7'
 
 interface AlarmItem { dapLat: number; dapLng: number; times: number; address: string; type: number }
 interface PollutionItem { name: string; weizhi: string; leixing: string; hangye: string; xianzhuang: string; lng: number; lat: number }
+interface RadarStation { bsiId: string; bsiName: string; bsiLng: number; bsiLat: number; bsiLocation?: string; status?: string }
 
 const mockTfList: AlarmItem[] = [
   { dapLat: 30.264, dapLng: 120.264, times: 25, address: '萧山区工业园区', type: 1 },
@@ -112,9 +116,9 @@ function AlarmPointPanel({
 
 export default function Radar() {
   const navigate = useNavigate()
-  const [curProvince, setCurProvince] = useState('浙江省')
-  const [curCity, setCurCity] = useState('杭州市')
-  const [curDistrict, setCurDistrict] = useState('')
+  const regionContext = useAppStore(state => state.regionContext)
+  const querySelection = regionContext?.querySelection
+  const mapSelection = regionContext?.mapSelection
   const [wxVisible, setWxVisible] = useState(false)
   const [wxInfo, setWxInfo] = useState<AlarmItem | null>(null)
   const [filterLeixing, setFilterLeixing] = useState('')
@@ -123,30 +127,29 @@ export default function Radar() {
   const [cgList, setCgList] = useState<AlarmItem[]>(mockCgList)
   const [pollutionList, setPollutionList] = useState<PollutionItem[]>(mockPollutionList)
   const [docks, setDocks] = useState(mockDocks)
+  // 雷达列表与当前选中雷达（借鉴原项目：进页查雷达列表并自动飞到雷达位置）
+  const [radarList, setRadarList] = useState<RadarStation[]>([])
+  const [selectedBsiId, setSelectedBsiId] = useState('')
+  const [sceneReady, setSceneReady] = useState(false)
+  const sceneRef = useRef<Scene | null>(null)
+  const radarLayersRef = useRef<{ scan: any; icon: any }>({ scan: null, icon: null })
 
-  // 加载雷达和告警数据
+  // 派遣无人机巡逻（右键菜单）
+  const [flyVisible, setFlyVisible] = useState(false)
+  const [flyLngLat, setFlyLngLat] = useState<{ lng: number; lat: number }>({ lng: 0, lat: 0 })
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; lng: number; lat: number } | null>(null)
+
+  // 加载污染源/无人机场数据与 mock 点位
   useEffect(() => {
     const loadData = async () => {
-      const cityName = cities.find(_ => _.name === curCity)?.name || curCity
-      const districtName = curDistrict || ''
-      const params = { city: cityName, district: districtName }
-      try {
-        const radarRes = await leidaList(params)
-        if (radarRes?.resultCode === 0 && Array.isArray(radarRes.data)) {
-          if (radarRes.data[0]) {
-            const alarmRes = await alarmPointAll({ BsiId: radarRes.data[0].bsiId, hour: 1 })
-            if (alarmRes?.resultCode === 0 && Array.isArray(alarmRes.data)) {
-              const cg: AlarmItem[] = [], tf: AlarmItem[] = []
-              alarmRes.data.forEach((item: any) => {
-                if (item.type === 1) cg.push(item)
-                else if (item.type === 2) tf.push(item)
-              })
-              setCgList(cg.length ? cg : mockCgList)
-              setTfList(tf.length ? tf : mockTfList)
-            }
-          }
-        }
-      } catch (e) { console.warn('雷达API不可用，使用mock', e) }
+      if (!querySelection) return
+      const params = toRegionQuery(querySelection)
+      const isHangzhouScope = !querySelection.cityName || querySelection.cityName === '杭州市'
+      const matchesCounty = (value: string) => !querySelection.countyName || value.includes(querySelection.countyName)
+      setCgList(isHangzhouScope ? mockCgList.filter(item => matchesCounty(item.address)) : [])
+      setTfList(isHangzhouScope ? mockTfList.filter(item => matchesCounty(item.address)) : [])
+      setPollutionList(isHangzhouScope ? mockPollutionList.filter(item => matchesCounty(item.weizhi)) : [])
+      setDocks(isHangzhouScope && !querySelection.countyName ? mockDocks : [])
       try {
         const wuRes = await wuranList(params)
         if (wuRes?.resultCode === 0 && Array.isArray(wuRes.data) && wuRes.data.length) {
@@ -161,7 +164,79 @@ export default function Radar() {
       } catch (e) { console.warn('无人机API不可用，使用mock', e) }
     }
     loadData()
-  }, [curCity, curDistrict])
+  }, [querySelection])
+
+  // 进入页面查询雷达列表（借鉴原项目 antd-demo）：默认选中第一台雷达，后续自动飞到其位置
+  useEffect(() => {
+    let cancelled = false
+    const params = querySelection ? toRegionQuery(querySelection) : {}
+    leidaList(params)
+      .then(res => {
+        if (cancelled) return
+        const list: RadarStation[] = (Array.isArray(res?.data) ? res.data : []).filter(
+          (item: RadarStation) => Number.isFinite(item?.bsiLng) && Number.isFinite(item?.bsiLat),
+        )
+        setRadarList(list)
+        setSelectedBsiId(list[0] ? String(list[0].bsiId) : '')
+      })
+      .catch(e => console.warn('雷达列表查询失败', e))
+    return () => { cancelled = true }
+  }, [querySelection])
+
+  // 按选中雷达查询突发/常规告警点位
+  useEffect(() => {
+    if (!selectedBsiId) return
+    let cancelled = false
+    alarmPointAll({ BsiId: selectedBsiId, hour: 1 })
+      .then(res => {
+        if (cancelled || res?.resultCode !== 0 || !Array.isArray(res.data)) return
+        const cg: AlarmItem[] = []
+        const tf: AlarmItem[] = []
+        res.data.forEach((item: AlarmItem) => {
+          if (item.type === 1) cg.push(item)
+          else if (item.type === 2) tf.push(item)
+        })
+        setCgList(cg.length ? cg : mockCgList)
+        setTfList(tf.length ? tf : mockTfList)
+      })
+      .catch(() => { /* 告警点位查询失败保留当前列表 */ })
+    return () => { cancelled = true }
+  }, [selectedBsiId])
+
+  // 绘制雷达扫描动画 + 图标层（与原项目 showRadar 一致）
+  const renderRadarLayers = useCallback(async (scene: Scene, list: RadarStation[]) => {
+    if (radarLayersRef.current.scan) { scene.removeLayer(radarLayersRef.current.scan); radarLayersRef.current.scan = null }
+    if (radarLayersRef.current.icon) { scene.removeLayer(radarLayersRef.current.icon); radarLayersRef.current.icon = null }
+    if (!list.length) return
+    if (!scene.hasImage('radar-station-icon')) await scene.addImage('radar-station-icon', '/marker/radar-on.png')
+    const scanLayer = new PointLayer({ zIndex: 9, name: 'radar-page-scan-layer', enablePropagation: false, pickingBuffer: 2 })
+      .source(list, { parser: { type: 'json', x: 'bsiLng', y: 'bsiLat' } })
+      .shape('radar')
+      .size(6000)
+      .color('rgba(2, 248, 250, 0.50)')
+      .style({ speed: 1, unit: 'meter' })
+      .animate(true)
+    scene.addLayer(scanLayer)
+    const iconLayer = new PointLayer({ zIndex: 10, name: 'radar-page-icon-layer', enablePropagation: false, pickingBuffer: 2 })
+      .source(list, { parser: { type: 'json', x: 'bsiLng', y: 'bsiLat' } })
+      .shape('radar-station-icon')
+      .size(18)
+    scene.addLayer(iconLayer)
+    radarLayersRef.current = { scan: scanLayer, icon: iconLayer }
+  }, [])
+
+  // 雷达列表变化 → 重绘雷达图层
+  useEffect(() => {
+    if (!sceneReady || !sceneRef.current) return
+    void renderRadarLayers(sceneRef.current, radarList)
+  }, [sceneReady, radarList, renderRadarLayers])
+
+  // 选中雷达变化 → 自动飞到雷达位置（原项目 setZoomAndCenter(12, 雷达经纬度)）
+  useEffect(() => {
+    if (!sceneReady || !sceneRef.current || !selectedBsiId) return
+    const target = radarList.find(item => String(item.bsiId) === String(selectedBsiId))
+    if (target) sceneRef.current.setZoomAndCenter(12, [target.bsiLng, target.bsiLat])
+  }, [sceneReady, radarList, selectedBsiId])
 
   const showWX = (obj: AlarmItem) => { setWxInfo(obj); setWxVisible(true) }
   const flyTo = (obj: AlarmItem) => { message.info(`定位到: ${obj.address}`) }
@@ -185,26 +260,79 @@ export default function Radar() {
     </div>
   )
 
+  // 地图右键 → 显示上下文菜单（无人机派遣入口）
+  const handleSceneLoaded = useCallback((scene: Scene) => {
+    sceneRef.current = scene
+    setSceneReady(true)
+    // 阻止地图默认右键菜单
+    scene.on('contextmenu', (ev: any) => {
+      ev.originalEvent?.preventDefault()
+      // 阻止事件冒泡到 window 的 contextmenu 监听，避免菜单刚打开就被关闭
+      ev.originalEvent?.stopPropagation()
+      if (ev.lngLat) {
+        // 大屏存在 transform 缩放，需将视口坐标换算为地图容器内未缩放的设计坐标，否则菜单位置会按缩放倍数偏移
+        const container = scene.getContainer()
+        const oe = ev.originalEvent
+        let x = ev.x
+        let y = ev.y
+        if (container && oe) {
+          const rect = container.getBoundingClientRect()
+          const sx = rect.width / container.offsetWidth || 1
+          const sy = rect.height / container.offsetHeight || 1
+          x = (oe.clientX - rect.left) / sx
+          y = (oe.clientY - rect.top) / sy
+        }
+        const [w, h] = scene.getSize()
+        x = Math.max(0, Math.min(x, w - 160))
+        y = Math.max(0, Math.min(y, h - 46))
+        setContextMenu({ x, y, lng: ev.lngLat.lng, lat: ev.lngLat.lat })
+      }
+    })
+  }, [])
+
+  // 点击其他区域 / 再次右键关闭右键菜单
+  useEffect(() => {
+    const close = () => setContextMenu(null)
+    window.addEventListener('click', close)
+    window.addEventListener('contextmenu', close)
+    return () => { window.removeEventListener('click', close); window.removeEventListener('contextmenu', close) }
+  }, [])
+
   const filteredPollution = filterLeixing ? pollutionList.filter(i => i.leixing === filterLeixing) : pollutionList
 
   const markers = [
     ...tfList.map(i => ({ lng: i.dapLng, lat: i.dapLat, name: i.address, color: '#FFB024', size: 14 })),
     ...cgList.map(i => ({ lng: i.dapLng, lat: i.dapLat, name: i.address, color: '#FF3936', size: 10 })),
   ]
+  const mapCounty = districts.find(item => String(item.adcode) === mapSelection?.countyCode)
+  const mapCity = cities.find(item => item.adcode === mapSelection?.cityCode)
+  const mapCenter: [number, number] = mapCounty
+    ? [mapCounty.lng, mapCounty.lat]
+    : mapCity
+      ? [mapCity.lng, mapCity.lat]
+      : [120.582886, 29.991549]
+  const mapZoom = mapCounty ? 11 : mapCity ? 9 : 7.5
 
   return (
     <div className="w-full h-full relative overflow-hidden" style={{ background: '#1a5ab0' }}>
-      <L7MapView id="radar-map" center={[120.15, 30.22]} zoom={10} minZoom={8} maxZoom={14} showTiles markers={markers} />
+      <L7MapView id="radar-map" center={mapCenter} zoom={mapZoom} minZoom={6} maxZoom={14} showTiles markers={markers} onSceneLoaded={handleSceneLoaded} />
       {/* 返回按钮 */}
       <div className="absolute top-15px left-20px z-50">
         <Button type="text" icon={<ArrowLeftOutlined />} onClick={() => navigate('/monitor')} className="!text-[#03FBFD] !bg-[rgba(255,255,255,0.1)] hover:!bg-[rgba(255,255,255,0.2)] !rounded-2xl">返回监控大屏</Button>
       </div>
       {/* 顶部选择器 */}
       <div className="absolute top-45px left-1/2 -translate-x-1/2 z-50 flex gap-2 bg-[rgba(0,56,129,0.8)] px-4 py-2 rounded-xl border border-[rgba(255,255,255,0.3)]">
-        <Select value={curProvince} onChange={setCurProvince} className="w-100px screen-select" classNames={{ popup: { root: 'screen-select-popup' } }} size="small"><Option value="浙江省">浙江省</Option></Select>
-        <Select value={curCity} onChange={setCurCity} className="w-100px screen-select" classNames={{ popup: { root: 'screen-select-popup' } }} size="small"><Option value="杭州市">杭州市</Option><Option value="宁波市">宁波市</Option></Select>
-        <Select value={curDistrict} onChange={setCurDistrict} className="w-100px screen-select" classNames={{ popup: { root: 'screen-select-popup' } }} size="small" allowClear placeholder="区县"><Option value="西湖区">西湖区</Option><Option value="萧山区">萧山区</Option><Option value="余杭区">余杭区</Option><Option value="滨江区">滨江区</Option><Option value="富阳区">富阳区</Option></Select>
-        <Select defaultValue="" className="w-120px screen-select" classNames={{ popup: { root: 'screen-select-popup' } }} size="small"><Option value="">全部雷达</Option><Option value="RD01">西湖雷达站</Option><Option value="RD02">萧山雷达站</Option></Select>
+        <RegionSelector />
+        <Select
+          value={selectedBsiId || undefined}
+          onChange={(value: string) => setSelectedBsiId(value)}
+          placeholder="全部雷达"
+          allowClear
+          className="w-150px screen-select"
+          classNames={{ popup: { root: 'screen-select-popup' } }}
+          size="small"
+          options={radarList.map(item => ({ value: String(item.bsiId), label: item.bsiName || String(item.bsiId) }))}
+        />
       </div>
       {/* 左侧 - 突发/常规点位 */}
       <div className="absolute left-20px top-70px bottom-58px z-50 w-360px flex flex-col gap-3 pointer-events-none">
@@ -275,6 +403,36 @@ export default function Radar() {
           <div className="text-left mt-3 space-y-1 text-13px"><p><span className="text-[#76FFFF]">经度：</span><span className="text-[#D5F9F9]">{wxInfo?.dapLng}</span></p><p><span className="text-[#76FFFF]">纬度：</span><span className="text-[#D5F9F9]">{wxInfo?.dapLat}</span></p></div>
         </div>
       </Modal>
+      {/* 右键上下文菜单 - 无人机派遣 */}
+      {contextMenu && (
+        <div
+          className="absolute z-[9999] min-w-150px rounded-lg shadow-xl overflow-hidden"
+          style={{ left: contextMenu.x, top: contextMenu.y, background: 'rgba(4,22,52,0.95)', border: '1px solid rgba(0,180,255,0.35)', backdropFilter: 'blur(8px)' }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div
+            className="flex items-center gap-2 px-4 py-2.5 cursor-pointer text-[#A8D6FF] text-13px hover:bg-[rgba(1,194,255,0.15)] transition-colors"
+            onClick={() => {
+              setFlyLngLat({ lng: contextMenu.lng, lat: contextMenu.lat })
+              setContextMenu(null)
+              setFlyVisible(true)
+            }}
+          >
+            <SendOutlined className="text-[#01C2FF]" />
+            <span>无人机派遣</span>
+          </div>
+        </div>
+      )}
+      {/* 派遣无人机巡逻弹窗（右键菜单触发） */}
+      {flyVisible && (
+        <FlyListModel
+          visible={flyVisible}
+          setVisible={setFlyVisible}
+          curCity={mapSelection?.cityCode || ''}
+          curDistrict={mapSelection?.countyCode || ''}
+          lngLat={flyLngLat}
+        />
+      )}
       {contextHolder}
     </div>
   )

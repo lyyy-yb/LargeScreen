@@ -1,11 +1,16 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Button, Select, Tag, message } from 'antd'
-import { ArrowLeftOutlined, RocketOutlined, VideoCameraOutlined, EnvironmentOutlined, DashboardOutlined } from '@ant-design/icons'
+import { Button, Tag, message } from 'antd'
+import { ArrowLeftOutlined, RocketOutlined, VideoCameraOutlined, EnvironmentOutlined, DashboardOutlined, SendOutlined } from '@ant-design/icons'
 import L7MapView from '@/components/L7MapView'
 import { dockList, listFlyJob, listFlyPlan } from '@/servers/mapBox'
-
-const { Option } = Select
+import RegionSelector from '@/components/RegionSelector'
+import { useAppStore } from '@/stores'
+import { toRegionQuery } from '@/utils/region'
+import { cities, districts } from '@/utils/city'
+import FlyListModel from '@/components/MapBox/FlyListModel'
+import type { RegionSelection } from '@/types/region'
+import type { Scene } from '@antv/l7'
 
 interface DockItem { dockCode: string; dockName: string; dockAddress: string; dockLat: number; dockLng: number; status: string }
 interface TaskItem { jobID: string; jobName: string; jobTime: string; jobStatus: string; dockCode: string }
@@ -47,12 +52,6 @@ const statusObj: Record<string, { message: string; color: string }> = {
   '5': { message: '失败', color: '#f12a27' },
 }
 
-const initDocks: DockItem[] = [
-  { dockCode: 'DOCK001', dockName: '临平交通-塘栖机场', dockAddress: '临平区塘栖镇临平大道', dockLat: 30.419, dockLng: 120.299, status: '在线' },
-  { dockCode: 'DOCK002', dockName: '良渚街道综合信息指挥室', dockAddress: '余杭区良渚街道良渚路376号', dockLat: 30.319, dockLng: 120.141, status: '在线' },
-  { dockCode: 'DOCK003', dockName: '萧山国际机场无人机基地', dockAddress: '萧山区空港大道', dockLat: 30.236, dockLng: 120.434, status: '离线' },
-]
-
 const createSensorData = (): SensorData => ({
   pm25: 25 + Math.round(Math.random() * 30),
   pm10: 50 + Math.round(Math.random() * 40),
@@ -76,37 +75,105 @@ const flyPlanList: PlanItem[] = [
   { planId: 'PLAN008', planName: '景区巡查-西溪湿地', startDate: '2025-11-28', flyTime: '08:00', dockCode: 'DOCK002', lineName: '景区巡查-西溪湿地' },
 ]
 
+const ZHEJIANG_CENTER: [number, number] = [120.582886, 29.991549]
+
+function isValidCoordinate(lng: number, lat: number) {
+  return Number.isFinite(lng) && Number.isFinite(lat) &&
+    lng >= -180 && lng <= 180 && lat >= -90 && lat <= 90
+}
+
+function getRegionCamera(selection?: RegionSelection) {
+  const county = districts.find(item =>
+    String(item.adcode) === selection?.countyCode ||
+    (!!selection?.countyName && item.name === selection.countyName),
+  )
+  if (county) return { center: [county.lng, county.lat] as [number, number], zoom: 11.5 }
+
+  const city = cities.find(item =>
+    item.adcode === selection?.cityCode ||
+    (!!selection?.cityName && item.name === selection.cityName),
+  )
+  if (city) return { center: [city.lng, city.lat] as [number, number], zoom: 9 }
+
+  return { center: ZHEJIANG_CENTER, zoom: 7.5 }
+}
+
 export default function Drone() {
   const navigate = useNavigate()
-  const [docks, setDocks] = useState<DockItem[]>(initDocks)
+  const [docks, setDocks] = useState<DockItem[]>([])
   const [dockCode, setDockCode] = useState<string | null>(null)
   const [sensorData, setSensorData] = useState<SensorData>(mockSensor)
   const [showVideos, setShowVideos] = useState(false)
   const [showRoute, setShowRoute] = useState(false)
-  const [curProvince] = useState('浙江省')
-  const [curCity, setCurCity] = useState('杭州市')
+  const regionContext = useAppStore(state => state.regionContext)
+  const querySelection = regionContext?.querySelection
+  const mapSelection = regionContext?.mapSelection
   const [refreshStatus, setRefreshStatus] = useState<string | null>(null)
+
+  // 地图中心控制（首次加载数据后飞到机场）
+  const [mapCenter, setMapCenter] = useState<[number, number] | undefined>(undefined)
+  const [mapZoom, setMapZoom] = useState<number | undefined>(undefined)
+  const mapSceneRef = useRef<Scene | null>(null)
+  const moveMapTo = useCallback((center: [number, number], zoom: number) => {
+    const scene = mapSceneRef.current
+    if (scene) {
+      scene.setZoom(zoom)
+      scene.panTo(center)
+    } else {
+      setMapCenter(center)
+      setMapZoom(zoom)
+    }
+  }, [])
+
+  // 派遣无人机巡逻（右键菜单）
+  const [flyVisible, setFlyVisible] = useState(false)
+  const [flyLngLat, setFlyLngLat] = useState<{ lng: number; lat: number }>({ lng: 0, lat: 0 })
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; lng: number; lat: number } | null>(null)
 
   // 加载无人机数据
   useEffect(() => {
+    let cancelled = false
     const loadDroneData = async () => {
+      if (!querySelection) return
+      const params = toRegionQuery(querySelection)
+      let loadedDocks: DockItem[] = []
       try {
-        const res = await dockList({ city: curCity })
+        const res = await dockList(params)
         if (res?.resultCode === 0 && Array.isArray(res.data)) {
-          console.log('无人机机场数据已加载:', res.data.length)
+          loadedDocks = (res.data as DockItem[]).map((item) => ({
+            ...item,
+            dockLng: Number(item.dockLng),
+            dockLat: Number(item.dockLat),
+            status: ((item as { status?: string }).status) || '未知',
+          }))
         }
-      } catch (e) { console.warn('无人机API不可用，使用mock', e) }
+      } catch (e) {
+        console.warn('无人机机场列表加载失败', e)
+      }
+
+      if (cancelled) return
+      setDocks(loadedDocks)
+      setDockCode(null)
+      const firstDock = loadedDocks.find(item => isValidCoordinate(item.dockLng, item.dockLat))
+      if (firstDock) {
+        moveMapTo([firstDock.dockLng, firstDock.dockLat], 13)
+      } else {
+        const regionCamera = getRegionCamera(querySelection)
+        moveMapTo(regionCamera.center, regionCamera.zoom)
+      }
+
       try {
-        const jobRes = await listFlyJob({})
+        const jobRes = await listFlyJob(params)
         if (jobRes?.resultCode === 0) console.log('飞行任务数据已加载')
       } catch { /* mock */ }
       try {
-        const planRes = await listFlyPlan({})
+        const planRes = await listFlyPlan(params)
         if (planRes?.resultCode === 0) console.log('飞行计划数据已加载')
       } catch { /* mock */ }
     }
-    loadDroneData()
-  }, [curCity])
+    void loadDroneData()
+    return () => { cancelled = true }
+  }, [moveMapTo, querySelection])
 
   // 模拟传感器实时数据
   useEffect(() => {
@@ -134,22 +201,75 @@ export default function Drone() {
   const flyTo = (item: DockItem) => {
     setDockCode(item.dockCode)
     setSensorData(createSensorData())
+    if (isValidCoordinate(item.dockLng, item.dockLat)) {
+      moveMapTo([item.dockLng, item.dockLat], 13)
+    }
     message.info(`定位到: ${item.dockName}`)
   }
 
-  const markers = docks.map(d => ({ lng: d.dockLng, lat: d.dockLat, name: d.dockName, color: d.status === '在线' ? '#22C55E' : '#EF4444', size: 14 }))
+  const markers = useMemo(
+    () => docks
+      .filter(item => isValidCoordinate(item.dockLng, item.dockLat))
+      .map(d => ({ lng: d.dockLng, lat: d.dockLat, name: d.dockName, color: d.status === '在线' ? '#22C55E' : '#EF4444', size: 14 })),
+    [docks],
+  )
+  const visibleTasks = taskList.filter(item =>
+    (!querySelection?.cityName || querySelection.cityName === '杭州市') &&
+    (!querySelection?.countyName || item.jobName.includes(querySelection.countyName))
+  )
+  const visiblePlans = flyPlanList.filter(item =>
+    (!querySelection?.cityName || querySelection.cityName === '杭州市') &&
+    (!querySelection?.countyName || item.planName.includes(querySelection.countyName))
+  )
+  const regionCamera = getRegionCamera(mapSelection ?? querySelection)
+
+  // 地图右键 → 显示上下文菜单（无人机派遣入口）
+  const handleSceneLoaded = useCallback((scene: Scene) => {
+    mapSceneRef.current = scene
+    // 阻止地图默认右键菜单
+    scene.on('contextmenu', (ev: any) => {
+      ev.originalEvent?.preventDefault()
+      // 阻止事件冒泡到 window 的 contextmenu 监听，避免菜单刚打开就被关闭
+      ev.originalEvent?.stopPropagation()
+      if (ev.lngLat) {
+        // 大屏存在 transform 缩放，需将视口坐标换算为地图容器内未缩放的设计坐标，否则菜单位置会按缩放倍数偏移
+        const container = scene.getContainer()
+        const oe = ev.originalEvent
+        let x = ev.x
+        let y = ev.y
+        if (container && oe) {
+          const rect = container.getBoundingClientRect()
+          const sx = rect.width / container.offsetWidth || 1
+          const sy = rect.height / container.offsetHeight || 1
+          x = (oe.clientX - rect.left) / sx
+          y = (oe.clientY - rect.top) / sy
+        }
+        const [w, h] = scene.getSize()
+        x = Math.max(0, Math.min(x, w - 160))
+        y = Math.max(0, Math.min(y, h - 46))
+        setContextMenu({ x, y, lng: ev.lngLat.lng, lat: ev.lngLat.lat })
+      }
+    })
+  }, [])
+
+  // 点击其他区域 / 再次右键关闭右键菜单
+  useEffect(() => {
+    const close = () => setContextMenu(null)
+    window.addEventListener('click', close)
+    window.addEventListener('contextmenu', close)
+    return () => { window.removeEventListener('click', close); window.removeEventListener('contextmenu', close) }
+  }, [])
 
   return (
     <div className="w-full h-full relative overflow-hidden" style={{ background: '#1a5ab0' }}>
-      <L7MapView id="drone-map" center={[120.25, 30.30]} zoom={10} minZoom={8} maxZoom={14} showTiles markers={markers} />
+      <L7MapView id="drone-map" center={mapCenter ?? regionCamera.center} zoom={mapZoom ?? regionCamera.zoom} minZoom={6} maxZoom={14} showTiles markers={markers} markerIconUrl="/marker/drone-on.png" onSceneLoaded={handleSceneLoaded} />
       {/* 返回 */}
       <div className="absolute top-15px left-20px z-50">
         <Button type="text" icon={<ArrowLeftOutlined />} onClick={() => navigate('/monitor')} className="!text-[#03FBFD] !bg-[rgba(255,255,255,0.1)] hover:!bg-[rgba(255,255,255,0.2)] !rounded-2xl">返回监控大屏</Button>
       </div>
       {/* 顶部选择器 */}
       <div className="absolute top-45px left-1/2 -translate-x-1/2 z-50 flex gap-2 bg-[rgba(0,56,129,0.8)] px-4 py-2 rounded-xl border border-[rgba(255,255,255,0.3)]">
-        <Select value={curProvince} className="w-100px screen-select" classNames={{ popup: { root: 'screen-select-popup' } }} size="small" disabled><Option value="浙江省">浙江省</Option></Select>
-        <Select value={curCity} onChange={setCurCity} className="w-100px screen-select" classNames={{ popup: { root: 'screen-select-popup' } }} size="small"><Option value="杭州市">杭州市</Option><Option value="宁波市">宁波市</Option></Select>
+        <RegionSelector />
       </div>
       {/* 左侧 - 机场列表 */}
       <div className="absolute left-20px top-70px bottom-20px z-50 w-340px pointer-events-none">
@@ -200,31 +320,31 @@ export default function Drone() {
       )}
       {/* 右侧 - 飞行任务 + 待执飞 */}
       <div className="absolute right-20px top-70px bottom-20px z-50 w-340px flex flex-col gap-3 pointer-events-none">
-        <div className="bg-[rgba(0,56,129,0.85)] flex-1 rounded-20px border border-[rgba(255,255,255,0.3)] px-3 py-2 flex flex-col overflow-hidden">
-          <div className="text-[#A0C7FF] text-16px font-bold py-2 border-b border-dashed border-[rgba(255,255,255,0.3)]">飞行任务</div>
-          <div className="flex-1 overflow-y-auto pointer-events-auto py-1">
-            {taskList.map(item => (
-              <div key={item.jobID} className="flex items-center justify-between py-3 border-b border-dashed border-[rgba(255,255,255,0.15)] cursor-pointer hover:bg-[rgba(255,255,255,0.05)]" onClick={() => message.info(`查看任务: ${item.jobName}`)}>
-                <div>
+        <div className="bg-[rgba(0,56,129,0.85)] flex-1 rounded-20px px-3 py-2 flex flex-col overflow-hidden pointer-events-auto">
+          <div className="text-[#A0C7FF] text-16px font-bold py-2">飞行任务</div>
+          <div className="flex-1 overflow-y-auto space-y-2 py-1">
+            {visibleTasks.map(item => (
+              <div key={item.jobID} className="rounded-xl p-3 cursor-pointer transition-all bg-[rgba(0,0,0,0.2)] border border-[rgba(255,255,255,0.15)] hover:bg-[rgba(255,255,255,0.06)]" onClick={() => message.info(`查看任务: ${item.jobName}`)}>
+                <div className="flex items-center justify-between mb-1">
                   <div className="text-[#A8D6FF] text-13px">{item.jobName}</div>
-                  <div className="text-[rgba(168,214,255,0.5)] text-11px mt-0.5">{item.jobTime}</div>
+                  <span className="px-2 py-0.5 rounded text-12px text-white" style={{ backgroundColor: statusObj[item.jobStatus]?.color }}>{statusObj[item.jobStatus]?.message}</span>
                 </div>
-                <span className="px-2 py-0.5 rounded text-12px text-white" style={{ backgroundColor: statusObj[item.jobStatus]?.color }}>{statusObj[item.jobStatus]?.message}</span>
+                <div className="text-[rgba(168,214,255,0.5)] text-11px">{item.jobTime}</div>
               </div>
             ))}
           </div>
         </div>
-        <div className="bg-[rgba(0,56,129,0.85)] flex-1 rounded-20px border border-[rgba(255,255,255,0.3)] px-3 py-2 flex flex-col overflow-hidden">
-          <div className="text-[#A0C7FF] text-16px font-bold py-2 border-b border-dashed border-[rgba(255,255,255,0.3)]">待执飞任务</div>
-          <div className="flex-1 overflow-y-auto pointer-events-auto py-1">
-            {flyPlanList.map(item => (
-              <div key={item.planId} className="flex items-center justify-between py-3 border-b border-dashed border-[rgba(255,255,255,0.15)]">
-                <div>
+        <div className="bg-[rgba(0,56,129,0.85)] flex-1 rounded-20px px-3 py-2 flex flex-col overflow-hidden pointer-events-auto">
+          <div className="text-[#A0C7FF] text-16px font-bold py-2">待执飞任务</div>
+          <div className="flex-1 overflow-y-auto space-y-2 py-1">
+            {visiblePlans.map(item => (
+              <div key={item.planId} className="rounded-xl p-3 transition-all bg-[rgba(0,0,0,0.2)] border border-[rgba(255,255,255,0.15)] hover:bg-[rgba(255,255,255,0.06)]">
+                <div className="flex items-center justify-between mb-1">
                   <div className="text-[#A8D6FF] text-13px">{item.lineName}</div>
-                  <div className="text-[rgba(168,214,255,0.5)] text-11px mt-0.5">{item.dockCode} | {item.flyTime}</div>
+                  <div className="text-[#01C2FF] text-12px cursor-pointer hover:underline" onClick={() => message.info(`查看计划: ${item.planName}`)}>详情</div>
                 </div>
-                <div className="text-right">
-                  <div className="text-[#01C2FF] text-12px cursor-pointer hover:underline">详情</div>
+                <div className="flex items-center justify-between">
+                  <div className="text-[rgba(168,214,255,0.5)] text-11px">{item.dockCode} | {item.flyTime}</div>
                   <div className="text-[rgba(168,214,255,0.5)] text-11px">{item.startDate}</div>
                 </div>
               </div>
@@ -279,6 +399,36 @@ export default function Drone() {
           </div>
         </div>
       </div>
+      {/* 右键上下文菜单 - 无人机派遣 */}
+      {contextMenu && (
+        <div
+          className="absolute z-[9999] min-w-150px rounded-lg shadow-xl overflow-hidden"
+          style={{ left: contextMenu.x, top: contextMenu.y, background: 'rgba(4,22,52,0.95)', border: '1px solid rgba(0,180,255,0.35)', backdropFilter: 'blur(8px)' }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div
+            className="flex items-center gap-2 px-4 py-2.5 cursor-pointer text-[#A8D6FF] text-13px hover:bg-[rgba(1,194,255,0.15)] transition-colors"
+            onClick={() => {
+              setFlyLngLat({ lng: contextMenu.lng, lat: contextMenu.lat })
+              setContextMenu(null)
+              setFlyVisible(true)
+            }}
+          >
+            <SendOutlined className="text-[#01C2FF]" />
+            <span>无人机派遣</span>
+          </div>
+        </div>
+      )}
+      {/* 派遣无人机巡逻弹窗（右键菜单触发） */}
+      {flyVisible && (
+        <FlyListModel
+          visible={flyVisible}
+          setVisible={setFlyVisible}
+          curCity={mapSelection?.cityCode || ''}
+          curDistrict={mapSelection?.countyCode || ''}
+          lngLat={flyLngLat}
+        />
+      )}
     </div>
   )
 }

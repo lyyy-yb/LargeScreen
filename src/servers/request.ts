@@ -5,13 +5,17 @@ import type {
   InternalAxiosRequestConfig,
   AxiosRequestConfig
 } from 'axios'
-import { getLocalInfo, removeLocalInfo } from '@/utils/storage'
+import { clearLocalInfo, getLocalInfo } from '@/utils/storage'
 import { TOKEN } from '@/utils/enum'
 
 export interface ServerResult<T = unknown> {
   resultCode: number
   message: string
   data: T
+  /** 若依风格返回体兼容字段 */
+  code?: number
+  token?: string
+  msg?: string
 }
 
 interface RequestInterceptors<T> {
@@ -62,7 +66,7 @@ class AxiosRequest {
         const url = res.config.url || ''
         this.abortControllerMap.delete(url)
         if (res?.status === 401) {
-          removeLocalInfo(TOKEN)
+          clearLocalInfo()
           window.location.href = '/login'
         }
         return res.data
@@ -72,7 +76,7 @@ class AxiosRequest {
           const url = err.config?.url || ''
           this.abortControllerMap.delete(url)
           if (err.response?.status === 401) {
-            removeLocalInfo(TOKEN)
+            clearLocalInfo()
             window.location.href = '/login'
           }
         }
@@ -121,7 +125,7 @@ function createRequest(url: string, tokenKey: string) {
       requestInterceptors(res) {
         const tokenLocal = getLocalInfo<string>(tokenKey) || ''
         if (res?.headers && tokenLocal) {
-          res.headers.token = tokenLocal
+          res.headers.Authorization = 'Bearer ' + tokenLocal
         }
         return res
       },

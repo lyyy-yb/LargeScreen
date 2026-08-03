@@ -1,11 +1,14 @@
-import { useState } from 'react'
-import { Button, Table, Modal, Form, Input, Select, Switch, Card, InputNumber, message } from 'antd'
-import { PlusOutlined, EditOutlined, EyeOutlined, AlertFilled, FilterOutlined } from '@ant-design/icons'
+import { useCallback, useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
+import { Button, Table, Modal, Form, Input, Select, Switch, InputNumber, App } from 'antd'
+import { PlusOutlined, EditOutlined, EyeOutlined, DeleteOutlined, ArrowLeftOutlined } from '@ant-design/icons'
+import { cleanRuleApi } from '@/servers/business'
+import type { CleanRuleDTO } from '@/types/business'
 
 const { Option } = Select
 
 interface CleanRule {
-  id: string
+  id: number | string
   ruleName: string
   dataType: string
   fieldName: string
@@ -14,7 +17,17 @@ interface CleanRule {
   enabled: boolean
   priority: number
   description: string
-  config: Record<string, any>
+  config: Record<string, unknown>
+}
+
+function parseConfig(config: CleanRuleDTO['config']): Record<string, unknown> {
+  if (!config) return {}
+  if (typeof config === 'object') return config
+  try {
+    return JSON.parse(config) as Record<string, unknown>
+  } catch {
+    return {}
+  }
 }
 
 const dataTypeOptions = [
@@ -48,7 +61,8 @@ const fieldOptions: Record<string, { value: string; label: string }[]> = {
     { value: 'pm25', label: 'PM2.5' }, { value: 'pm10', label: 'PM10' },
     { value: 'tsp', label: 'TSP' }, { value: 'so2', label: 'SO\u2082' },
     { value: 'no2', label: 'NO\u2082' }, { value: 'co', label: 'CO' },
-    { value: 'o3', label: 'O\u2083' }, { value: 'monitorTime', label: '监测时间' },
+    { value: 'o3', label: 'O\u2083' }, { value: 'vocs', label: 'VOCs' },
+    { value: 'monitorTime', label: '监测时间' },
   ],
   mobile_monitor_car: [
     { value: 'latitude', label: '纬度' }, { value: 'longitude', label: '经度' },
@@ -85,17 +99,57 @@ const fieldOptions: Record<string, { value: string; label: string }[]> = {
   ],
 }
 
-const mockData: CleanRule[] = [
-  { id: '1', ruleName: 'PM2.5浓度范围校验', dataType: 'air_quality_station', fieldName: 'pm25', ruleType: 'range', action: 'discard', enabled: true, priority: 1, description: 'PM2.5浓度值必须在0-1000 \u03bcg/m\u00b3范围内', config: { min: 0, max: 1000 } },
-  { id: '2', ruleName: 'GPS坐标有效性校验', dataType: 'mobile_monitor_car', fieldName: 'latitude', ruleType: 'range', action: 'mark', enabled: true, priority: 2, description: '纬度必须在-90到90之间', config: { min: -90, max: 90 } },
-  { id: '3', ruleName: '高度范围校验', dataType: 'drone_sensor', fieldName: 'altitude', ruleType: 'range', action: 'alert', enabled: true, priority: 1, description: '飞行高度不能超过500米', config: { min: 0, max: 500 } },
-  { id: '4', ruleName: '功率因数校验', dataType: 'power_monitor', fieldName: 'powerFactor', ruleType: 'range', action: 'correct', enabled: true, priority: 2, description: '功率因数必须在0-1之间', config: { min: 0, max: 1 } },
-  { id: '5', ruleName: '监测时间必填', dataType: 'manual_import', fieldName: 'checkTime', ruleType: 'required', action: 'discard', enabled: true, priority: 1, description: '检测时间为必填字段', config: {} },
-  { id: '6', ruleName: '报警级别枚举校验', dataType: 'radar_station', fieldName: 'alarmLevel', ruleType: 'enum', action: 'mark', enabled: false, priority: 3, description: '报警级别只能为低、中、高', config: { values: ['低', '中', '高'] } },
-]
-
 export default function CleanRule() {
-  const [data, setData] = useState<CleanRule[]>(mockData)
+  const navigate = useNavigate()
+  const { message, modal } = App.useApp()
+  const [data, setData] = useState<CleanRule[]>([])
+  const [loading, setLoading] = useState(false)
+  const [pageNum, setPageNum] = useState(1)
+  const [pageSize, setPageSize] = useState(15)
+  const [total, setTotal] = useState(0)
+  const [searchName, setSearchName] = useState('')
+  const [appliedName, setAppliedName] = useState('')
+  const [filterDataType, setFilterDataType] = useState<string | undefined>(undefined)
+  const [filterRuleType, setFilterRuleType] = useState<string | undefined>(undefined)
+  const [filterAction, setFilterAction] = useState<string | undefined>(undefined)
+  const [filterEnabled, setFilterEnabled] = useState<0 | 1 | undefined>(undefined)
+
+  const loadList = useCallback(async () => {
+    setLoading(true)
+    try {
+      const res = await cleanRuleApi.list({
+        pageNum,
+        pageSize,
+        ruleName: appliedName || undefined,
+        dataType: filterDataType,
+        ruleType: filterRuleType,
+        action: filterAction,
+        enabled: filterEnabled,
+      })
+      const result = res.data
+      setData((result?.records ?? []).map(item => ({
+        ...item,
+        description: item.description ?? '',
+        enabled: item.enabled === 1,
+        config: parseConfig(item.config),
+      })))
+      setTotal(result?.total ?? 0)
+    } catch {
+      setData([])
+      setTotal(0)
+    } finally {
+      setLoading(false)
+    }
+  }, [pageNum, pageSize, appliedName, filterDataType, filterRuleType, filterAction, filterEnabled])
+
+  useEffect(() => {
+    queueMicrotask(() => void loadList())
+  }, [loadList])
+
+  const applySearch = (value?: string) => {
+    setAppliedName((value ?? searchName).trim())
+    setPageNum(1)
+  }
   const [isModalVisible, setIsModalVisible] = useState(false)
   const [isDetailModalVisible, setIsDetailModalVisible] = useState(false)
   const [editingItem, setEditingItem] = useState<CleanRule | null>(null)
@@ -112,51 +166,91 @@ export default function CleanRule() {
   const showEditModal = (record: CleanRule) => {
     setEditingItem(record)
     setSelectedDataType(record.dataType)
-    form.setFieldsValue(record)
+    const cfg = parseConfig(record.config)
+    form.setFieldsValue({
+      ...record,
+      min: typeof cfg.min === 'number' ? cfg.min : undefined,
+      max: typeof cfg.max === 'number' ? cfg.max : undefined,
+      enumValues: Array.isArray(cfg.values) ? cfg.values.join(',') : cfg.values,
+      pattern: typeof cfg.pattern === 'string' ? cfg.pattern : undefined,
+    })
     setIsModalVisible(true)
   }
 
-  const showDetailModal = (record: CleanRule) => {
+  const showDetailModal = async (record: CleanRule) => {
     setEditingItem(record)
     setIsDetailModalVisible(true)
+    try {
+      const res = await cleanRuleApi.detail(Number(record.id))
+      if (res.data) {
+        setEditingItem({
+          ...res.data,
+          description: res.data.description ?? '',
+          enabled: res.data.enabled === 1,
+          config: parseConfig(res.data.config),
+        })
+      }
+    } catch { /* 详情获取失败时保留表格行数据 */ }
   }
 
   const handleOk = () => {
-    form.validateFields().then(values => {
-      const config: Record<string, any> = {}
-      if (values.ruleType === 'range') {
-        config.min = values.min
-        config.max = values.max
-      } else if (values.ruleType === 'enum') {
-        config.values = values.enumValues?.split(',').map((v: string) => v.trim()) || []
-      } else if (values.ruleType === 'format') {
-        config.pattern = values.pattern
+    form.validateFields().then(async (values) => {
+      try {
+        const config: Record<string, unknown> = {}
+        if (values.ruleType === 'range') {
+          config.min = values.min
+          config.max = values.max
+        } else if (values.ruleType === 'enum') {
+          config.values = values.enumValues?.split(',').map((v: string) => v.trim()) || []
+        } else if (values.ruleType === 'format') {
+          config.pattern = values.pattern
+        }
+        const payload = {
+          ...values,
+          enabled: (values.enabled ? 1 : 0) as 0 | 1,
+          config: JSON.stringify(config),
+        }
+        if (editingItem) {
+          await cleanRuleApi.edit({ ...payload, id: Number(editingItem.id) })
+          message.success('编辑成功')
+        } else {
+          await cleanRuleApi.add(payload)
+          message.success('新增成功')
+        }
+        setIsModalVisible(false)
+        form.resetFields()
+        loadList()
+      } catch {
+        message.error('保存失败，请重试')
       }
-      const newRule: CleanRule = { ...values, id: editingItem?.id || String(Date.now()), config }
-      if (editingItem) {
-        setData(data.map(item => item.id === editingItem.id ? newRule : item))
-        message.success('编辑成功')
-      } else {
-        setData([...data, newRule])
-        message.success('新增成功')
-      }
-      setIsModalVisible(false)
-      form.resetFields()
-    })
+    }).catch(() => {})
   }
 
-  const handleDelete = (id: string) => {
-    Modal.confirm({
+  const handleDelete = (id: string | number) => {
+    modal.confirm({
       title: '确认删除',
       content: '确定要删除该清洗规则吗？',
       okText: '确定',
       cancelText: '取消',
-      onOk: () => { setData(data.filter(item => item.id !== id)); message.success('删除成功') },
+      onOk: async () => {
+        try {
+          await cleanRuleApi.remove(Number(id))
+          message.success('删除成功')
+          loadList()
+        } catch {
+          message.error('删除失败')
+        }
+      },
     })
   }
 
-  const toggleStatus = (id: string, enabled: boolean) => {
-    setData(data.map(item => item.id === id ? { ...item, enabled: !enabled } : item))
+  const toggleStatus = async (id: string | number, enabled: boolean) => {
+    try {
+      await cleanRuleApi.changeStatus(Number(id), enabled ? 0 : 1)
+      loadList()
+    } catch {
+      message.error('状态更新失败')
+    }
   }
 
   const handleDataTypeChange = (value: string) => {
@@ -168,53 +262,185 @@ export default function CleanRule() {
     { title: '规则名称', dataIndex: 'ruleName', key: 'ruleName', width: 180 },
     { title: '数据类型', dataIndex: 'dataType', key: 'dataType', width: 120, render: (text: string) => dataTypeOptions.find(opt => opt.value === text)?.label || text },
     { title: '字段名称', dataIndex: 'fieldName', key: 'fieldName', width: 100, render: (text: string, record: CleanRule) => fieldOptions[record.dataType]?.find(opt => opt.value === text)?.label || text },
-    { title: '规则类型', dataIndex: 'ruleType', key: 'ruleType', width: 120, render: (text: string) => ruleTypeOptions.find(opt => opt.value === text)?.label || text },
-    { title: '处理动作', dataIndex: 'action', key: 'action', width: 100, render: (text: string) => actionOptions.find(opt => opt.value === text)?.label || text },
-    { title: '优先级', dataIndex: 'priority', key: 'priority', width: 80, align: 'center' as const },
-    { title: '状态', dataIndex: 'enabled', key: 'enabled', width: 80, render: (text: boolean, record: CleanRule) => (<Switch checked={text} onChange={() => toggleStatus(record.id, text)} checkedChildren="启用" unCheckedChildren="禁用" />) },
-    { title: '操作', key: 'actions', width: 200, render: (_: unknown, record: CleanRule) => (
-      <div className="flex gap-2">
-        <Button size="small" icon={<EyeOutlined />} onClick={() => showDetailModal(record)}>详情</Button>
-        <Button size="small" icon={<EditOutlined />} onClick={() => showEditModal(record)}>编辑</Button>
-        <Button size="small" icon={<AlertFilled />} danger onClick={() => handleDelete(record.id)}>删除</Button>
-      </div>
-    )},
+    { title: '规则类型', dataIndex: 'ruleType', key: 'ruleType', width: 110, render: (text: string) => ruleTypeOptions.find(opt => opt.value === text)?.label || text },
+    { title: '处理动作', dataIndex: 'action', key: 'action', width: 80, render: (text: string) => actionOptions.find(opt => opt.value === text)?.label || text },
+    { title: '优先级', dataIndex: 'priority', key: 'priority', width: 60, align: 'center' as const },
+    { title: '状态', dataIndex: 'enabled', key: 'enabled', width: 70, render: (text: boolean, record: CleanRule) => (<Switch checked={text} onChange={() => toggleStatus(record.id, text)} checkedChildren="启用" unCheckedChildren="禁用" />) },
+    {
+      title: '操作', key: 'actions', width: 160, align: 'center' as const, render: (_: unknown, record: CleanRule) => (
+        <div className="flex items-center gap-1 justify-center">
+          <Button type="link" size="small" icon={<EyeOutlined />} className="!text-[#03FBFD] !p-0 hover:!text-white" onClick={() => showDetailModal(record)}>详情</Button>
+          <Button type="link" size="small" icon={<EditOutlined />} className="!text-[#03FBFD] !p-0 hover:!text-white" onClick={() => showEditModal(record)}>编辑</Button>
+          <Button type="link" size="small" danger icon={<DeleteOutlined />} className="!p-0" onClick={() => handleDelete(record.id)}>删除</Button>
+        </div>
+      )
+    },
   ]
 
   return (
-    <div className="w-full h-full bg-gradient-to-br from-[#000a1a] via-[#001a33] to-[#002a5c] p-6 overflow-y-auto">
-      <div className="flex justify-between items-center mb-6">
-        <div className="flex items-center gap-3">
-          <FilterOutlined className="text-purple-400 text-2xl" />
-          <h2 className="text-2xl font-bold text-[#03FBFD]">数据清洗规则管理</h2>
+    <div className="alert-page-container">
+      <div className="alert-header-bar">
+        <div className="header-left">
+          <Button
+            type="text"
+            icon={<ArrowLeftOutlined />}
+            onClick={() => navigate('/monitor')}
+            className="!text-[#03FBFD] hover:!text-white !px-2 !h-28px"
+          >
+            返回监控大屏
+          </Button>
         </div>
-        <Button type="primary" icon={<PlusOutlined />} onClick={showAddModal}>新增规则</Button>
+
+        <div className="header-right">
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
+            onClick={showAddModal}
+            style={{
+              background: 'linear-gradient(90deg, #1890ff 0%, #03fbfd 100%)',
+              borderColor: '#03fbfd',
+              fontWeight: 600,
+              boxShadow: '0 0 10px rgba(3, 251, 253, 0.3)',
+            }}
+          >
+            新增规则
+          </Button>
+        </div>
       </div>
 
-      <Card className="bg-[rgba(0,56,129,0.6)] border border-[rgba(255,255,255,0.3)]">
-        <Table dataSource={data} columns={columns} rowKey="id" pagination={{ pageSize: 10 }} size="small" />
-      </Card>
+      <div className="flex items-center justify-center flex-shrink-0 mb-2">
+        <div className="alert-center-title" style={{ position: 'static', transform: 'none' }}>
+          <span className="title-diamond">◆</span>
+          <span>数据清洗规则管理</span>
+          <span className="title-diamond">◆</span>
+        </div>
+      </div>
 
-      <Modal title={editingItem ? '编辑清洗规则' : '新增清洗规则'} open={isModalVisible} onOk={handleOk} onCancel={() => { setIsModalVisible(false); form.resetFields() }} width={600} okText="确定" cancelText="取消">
-        <Form form={form} layout="vertical">
+      <div className="flex items-center gap-3 flex-shrink-0 mb-3">
+        <Input.Search
+          placeholder="搜索规则名称"
+          value={searchName}
+          onChange={e => setSearchName(e.target.value)}
+          onSearch={applySearch}
+          onClear={() => applySearch('')}
+          allowClear
+          className="max-w-220px model_from_input"
+        />
+        <Select
+          className="w-160px model_from_sel" classNames={{ popup: { root: 'alert-rule-dropdown' } }}
+          placeholder="筛选数据类型"
+          value={filterDataType}
+          onChange={v => { setFilterDataType(v); setPageNum(1) }}
+          options={dataTypeOptions}
+          allowClear
+        />
+        <Select
+          className="w-160px model_from_sel" classNames={{ popup: { root: 'alert-rule-dropdown' } }}
+          placeholder="筛选规则类型"
+          value={filterRuleType}
+          onChange={v => { setFilterRuleType(v); setPageNum(1) }}
+          options={ruleTypeOptions}
+          allowClear
+        />
+        <Select
+          className="w-160px model_from_sel" classNames={{ popup: { root: 'alert-rule-dropdown' } }}
+          placeholder="筛选处理动作"
+          value={filterAction}
+          onChange={v => { setFilterAction(v); setPageNum(1) }}
+          options={actionOptions}
+          allowClear
+        />
+        <Select
+          className="w-140px model_from_sel" classNames={{ popup: { root: 'alert-rule-dropdown' } }}
+          placeholder="筛选状态"
+          value={filterEnabled}
+          onChange={v => { setFilterEnabled(v); setPageNum(1) }}
+          options={[
+            { value: 1, label: '启用' },
+            { value: 0, label: '禁用' },
+          ]}
+          allowClear
+        />
+      </div>
+
+      <div className="tech-table-wrapper">
+        <Table
+          dataSource={data}
+          columns={columns}
+          rowKey="id"
+          loading={loading}
+          pagination={{
+            current: pageNum,
+            pageSize,
+            total,
+            showSizeChanger: true,
+            onChange: (p, ps) => { setPageNum(p); setPageSize(ps) },
+          }}
+          size="small"
+          scroll={{ x: 880 }}
+        />
+      </div>
+
+      <Modal
+        title={<span className="alert-rule-modal-title">{editingItem ? '编辑规则' : '新增规则'}</span>}
+        open={isModalVisible}
+        onCancel={() => { setIsModalVisible(false); form.resetFields() }}
+        width={860}
+        className="alert-rule-modal"
+        footer={[
+          <Button key="cancel" onClick={() => { setIsModalVisible(false); form.resetFields() }}>取消</Button>,
+          <Button key="ok" type="primary" onClick={handleOk}>确定</Button>,
+        ]}
+      >
+        <Form
+          form={form}
+          layout="horizontal"
+          labelCol={{ style: { width: 100, textAlign: 'right', color: '#03FBFD', paddingRight: 10 } }}
+          className="alert-rule-form pt-2"
+        >
           <Form.Item label="规则名称" name="ruleName" rules={[{ required: true, message: '请输入规则名称' }]}>
-            <Input placeholder="请输入规则名称" />
+            <Input className="model_from_input" placeholder="请输入规则名称" />
           </Form.Item>
-          <Form.Item label="数据类型" name="dataType" rules={[{ required: true, message: '请选择数据类型' }]}>
-            <Select placeholder="请选择数据类型" onChange={handleDataTypeChange}>
-              {dataTypeOptions.map(opt => <Option key={opt.value} value={opt.value}>{opt.label}</Option>)}
-            </Select>
+
+          <div className="grid grid-cols-2 gap-x-2">
+            <Form.Item label="数据类型" name="dataType" rules={[{ required: true, message: '请选择数据类型' }]}>
+              <Select className="model_from_sel" popupClassName="alert-rule-dropdown" placeholder="请选择数据类型" onChange={handleDataTypeChange}>
+                {dataTypeOptions.map(opt => <Option key={opt.value} value={opt.value}>{opt.label}</Option>)}
+              </Select>
+            </Form.Item>
+            <Form.Item label="字段名称" name="fieldName" rules={[{ required: true, message: '请选择字段名称' }]}>
+              <Select className="model_from_sel" popupClassName="alert-rule-dropdown" placeholder="请选择字段名称">
+                {selectedDataType && fieldOptions[selectedDataType]?.map(opt => <Option key={opt.value} value={opt.value}>{opt.label}</Option>)}
+              </Select>
+            </Form.Item>
+          </div>
+
+          <div className="grid grid-cols-2 gap-x-2">
+            <Form.Item label="规则类型" name="ruleType" rules={[{ required: true, message: '请选择规则类型' }]}>
+              <Select className="model_from_sel" popupClassName="alert-rule-dropdown" placeholder="请选择规则类型">
+                {ruleTypeOptions.map(opt => <Option key={opt.value} value={opt.value}>{opt.label}</Option>)}
+              </Select>
+            </Form.Item>
+            <Form.Item label="处理动作" name="action" rules={[{ required: true, message: '请选择处理动作' }]}>
+              <Select className="model_from_sel" popupClassName="alert-rule-dropdown" placeholder="请选择处理动作">
+                {actionOptions.map(opt => <Option key={opt.value} value={opt.value}>{opt.label}</Option>)}
+              </Select>
+            </Form.Item>
+          </div>
+
+          <div className="grid grid-cols-2 gap-x-2">
+            <Form.Item label="优先级" name="priority" rules={[{ required: true, message: '请输入优先级' }]}>
+              <InputNumber min={1} max={100} className="w-full model_from_input" placeholder="数值越小越优先" />
+            </Form.Item>
+            <Form.Item label="是否启用" name="enabled" valuePropName="checked" initialValue={true}>
+              <Switch checkedChildren="启用" unCheckedChildren="禁用" />
+            </Form.Item>
+          </div>
+
+          <Form.Item label="描述说明" name="description">
+            <Input.TextArea className="model_from_input" rows={3} placeholder="请输入描述" />
           </Form.Item>
-          <Form.Item label="字段名称" name="fieldName" rules={[{ required: true, message: '请选择字段名称' }]}>
-            <Select placeholder="请选择字段名称">
-              {selectedDataType && fieldOptions[selectedDataType]?.map(opt => (<Option key={opt.value} value={opt.value}>{opt.label}</Option>))}
-            </Select>
-          </Form.Item>
-          <Form.Item label="规则类型" name="ruleType" rules={[{ required: true, message: '请选择规则类型' }]}>
-            <Select placeholder="请选择规则类型">
-              {ruleTypeOptions.map(opt => <Option key={opt.value} value={opt.value}>{opt.label}</Option>)}
-            </Select>
-          </Form.Item>
+
           <Form.Item noStyle shouldUpdate={(prevValues, currentValues) => prevValues.ruleType !== currentValues.ruleType}>
             {({ getFieldValue }) => {
               const ruleType = getFieldValue('ruleType')
@@ -233,32 +459,27 @@ export default function CleanRule() {
               return null
             }}
           </Form.Item>
-          <Form.Item label="处理动作" name="action" rules={[{ required: true, message: '请选择处理动作' }]}>
-            <Select placeholder="请选择处理动作">
-              {actionOptions.map(opt => <Option key={opt.value} value={opt.value}>{opt.label}</Option>)}
-            </Select>
-          </Form.Item>
-          <Form.Item label="优先级" name="priority" rules={[{ required: true, message: '请输入优先级' }]}>
-            <InputNumber min={1} max={10} className="w-full" />
-          </Form.Item>
-          <Form.Item label="描述" name="description">
-            <Input.TextArea placeholder="请输入描述" rows={3} />
-          </Form.Item>
         </Form>
       </Modal>
 
-      <Modal title="规则详情" open={isDetailModalVisible} onCancel={() => setIsDetailModalVisible(false)} width={600} footer={null}>
+      <Modal
+        title={<span className="alert-rule-modal-title">清洗规则详情</span>}
+        open={isDetailModalVisible}
+        onCancel={() => setIsDetailModalVisible(false)}
+        footer={null}
+        width={550}
+        className="alert-rule-modal"
+      >
         {editingItem && (
-          <div className="space-y-4">
-            <div className="flex justify-between"><span className="text-gray-400">规则名称</span><span>{editingItem.ruleName}</span></div>
-            <div className="flex justify-between"><span className="text-gray-400">数据类型</span><span>{dataTypeOptions.find(opt => opt.value === editingItem.dataType)?.label}</span></div>
-            <div className="flex justify-between"><span className="text-gray-400">字段名称</span><span>{fieldOptions[editingItem.dataType]?.find(opt => opt.value === editingItem.fieldName)?.label}</span></div>
-            <div className="flex justify-between"><span className="text-gray-400">规则类型</span><span>{ruleTypeOptions.find(opt => opt.value === editingItem.ruleType)?.label}</span></div>
-            <div className="flex justify-between"><span className="text-gray-400">处理动作</span><span>{actionOptions.find(opt => opt.value === editingItem.action)?.label}</span></div>
-            <div className="flex justify-between"><span className="text-gray-400">优先级</span><span>{editingItem.priority}</span></div>
-            <div className="flex justify-between"><span className="text-gray-400">状态</span><span className={editingItem.enabled ? 'text-green-500' : 'text-gray-400'}>{editingItem.enabled ? '已启用' : '已禁用'}</span></div>
-            <div className="flex justify-between"><span className="text-gray-400">规则配置</span><span className="font-mono text-sm">{JSON.stringify(editingItem.config)}</span></div>
-            <div className="pt-2"><span className="text-gray-400 block mb-2">描述</span><p className="bg-[rgba(0,56,129,0.3)] p-3 rounded">{editingItem.description}</p></div>
+          <div className="space-y-3 p-4 rounded text-white/85" style={{ backgroundColor: 'rgba(3,251,253,0.05)', border: '1px solid rgba(3,251,253,0.15)' }}>
+            <div className="flex justify-between"><span className="text-[#03FBFD]">规则名称</span><span>{editingItem.ruleName}</span></div>
+            <div className="flex justify-between"><span className="text-[#03FBFD]">数据类型</span><span>{dataTypeOptions.find(o => o.value === editingItem.dataType)?.label}</span></div>
+            <div className="flex justify-between"><span className="text-[#03FBFD]">字段名称</span><span>{fieldOptions[editingItem.dataType]?.find(o => o.value === editingItem.fieldName)?.label || editingItem.fieldName}</span></div>
+            <div className="flex justify-between"><span className="text-[#03FBFD]">规则类型</span><span>{ruleTypeOptions.find(o => o.value === editingItem.ruleType)?.label}</span></div>
+            <div className="flex justify-between"><span className="text-[#03FBFD]">处理动作</span><span>{actionOptions.find(o => o.value === editingItem.action)?.label}</span></div>
+            <div className="flex justify-between"><span className="text-[#03FBFD]">优先级</span><span>{editingItem.priority}</span></div>
+            <div className="flex justify-between"><span className="text-[#03FBFD]">状态</span><span className={editingItem.enabled ? 'text-green-400' : 'text-gray-400'}>{editingItem.enabled ? '已启用' : '已禁用'}</span></div>
+            <div><span className="text-[#03FBFD] block mb-1">描述</span><p className="text-white/70 text-sm">{editingItem.description}</p></div>
           </div>
         )}
       </Modal>

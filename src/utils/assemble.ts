@@ -85,7 +85,7 @@ export const customDiv = (feature: any, isFlag = false) => {
         <button id="I_W_CKSXT" class="marker_popup_btn">查看摄像头</button>
       </div>
     `
-  } else if ('wrjC' === feature.imgName) {
+  } else if ('drone-on' === feature.imgName) {
     div.innerHTML = `
       <div class="marker_popup_title">${feature.dockName}</div>
       <p class="marker_popup_p">机场地市：${feature.dockCode}</p>

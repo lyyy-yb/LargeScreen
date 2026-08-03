@@ -14,12 +14,8 @@ export default defineConfig(({ mode }) => {
     vitePlugins.push(
       legacy({
         targets: [
-          'Android > 39',
-          'Chrome >= 60',
-          'Safari >= 10.1',
-          'iOS >= 10.3',
-          'Firefox >= 54',
-          'Edge >= 15',
+          'Chrome >= 88',
+          'Firefox >= 74',
         ],
         additionalLegacyPolyfills: ['regenerator-runtime/runtime'],
       }),
@@ -47,17 +43,17 @@ export default defineConfig(({ mode }) => {
       port: 5556,
       proxy: {
         '^/offMap': {
-          target: 'http://223.6.249.178:5555/offMap',
+          target: 'http://218.244.154.247:5555/offMap',
           changeOrigin: true,
           rewrite: (path) => path.replace(new RegExp('^/offMap/'), '/'),
         },
         '^/dpSys': {
-          target: 'http://223.6.249.178:5555/dpSys',
+          target: 'http://218.244.154.247:8089',
           changeOrigin: true,
           rewrite: (path) => path.replace(new RegExp('^/dpSys/'), '/'),
         },
         '^/upImg': {
-          target: 'http://223.6.249.178:5555/upImg',
+          target: 'http://218.244.154.247:5555/upImg',
           changeOrigin: true,
           rewrite: (path) => path.replace(new RegExp('^/upImg/'), '/'),
         },

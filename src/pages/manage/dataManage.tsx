@@ -1,6 +1,7 @@
 import { useState } from 'react'
-import { Button, Modal, Form, Input, Select, Tag, message } from 'antd'
-import { EyeOutlined, WarningOutlined, DatabaseOutlined } from '@ant-design/icons'
+import { useNavigate } from 'react-router-dom'
+import { Button, Table, Modal, Form, Input, Select, Tag, message } from 'antd'
+import { EyeOutlined, WarningOutlined, ImportOutlined, ArrowLeftOutlined } from '@ant-design/icons'
 
 interface AirQualityRecord { id: string; monitorTime: string; pm25: number; o3: number; temperature: number; pressure: number; humidity: number; windSpeed: number; windDirection: string; rainfall: number; dataLevel: 'minute' | 'hour' }
 interface MobileCarRecord { id: string; monitorTime: string; totalSuspendedParticulates: number; fineParticulates: number; latitude: number; longitude: number; roadDustLoad: number }
@@ -86,6 +87,7 @@ const mockDataSources: DataSource[] = [
 ]
 
 export default function DataManage() {
+  const navigate = useNavigate()
   const [dataSources] = useState<DataSource[]>(mockDataSources)
   const [selectedType, setSelectedType] = useState('')
   const [selectedStatus, setSelectedStatus] = useState('')
@@ -132,61 +134,90 @@ export default function DataManage() {
   const tdStyle = { color: 'rgba(255,255,255,0.75)' } as const
 
   return (
-    <div className="w-full h-full bg-gradient-to-br from-[#000a1a] via-[#001a33] to-[#002a5c] p-6 overflow-y-auto">
-      <div className="flex items-center gap-3 mb-6">
-        <DatabaseOutlined className="text-cyan-400 text-2xl" />
-        <h2 className="text-2xl font-bold text-[#03FBFD]">数据管理</h2>
+    <div className="alert-page-container">
+      <div className="alert-header-bar">
+        <div className="header-left">
+          <Button
+            type="text"
+            icon={<ArrowLeftOutlined />}
+            onClick={() => navigate('/monitor')}
+            className="!text-[#03FBFD] hover:!text-white !px-2 !h-28px"
+          >
+            返回监控大屏
+          </Button>
+        </div>
+
+        <div className="header-right" />
       </div>
 
-      <div className="flex gap-4 mb-4">
-        <Input placeholder="搜索数据源名称、类型..." value={searchText} onChange={e => setSearchText(e.target.value)} className="max-w-xs" />
-        <Select placeholder="选择接入类型" value={selectedType} onChange={setSelectedType} className="w-180px" allowClear>
+      <div className="flex items-center justify-center flex-shrink-0 mb-2">
+        <div className="alert-center-title" style={{ position: 'static', transform: 'none' }}>
+          <span className="title-diamond">◆</span>
+          <span>数据管理</span>
+          <span className="title-diamond">◆</span>
+        </div>
+      </div>
+
+      <div className="flex gap-4 mb-3 flex-shrink-0">
+        <Input placeholder="搜索数据源名称、类型..." value={searchText} onChange={e => setSearchText(e.target.value)} className="max-w-xs model_from_input" />
+        <Select placeholder="选择接入类型" value={selectedType} onChange={setSelectedType} className="w-180px model_from_sel" popupClassName="alert-rule-dropdown" allowClear>
           <Select.Option value="">全部数据源</Select.Option>
           {typeOptions.map(opt => <Select.Option key={opt.value} value={opt.value}>{opt.label}</Select.Option>)}
         </Select>
-        <Select placeholder="选择连接状态" value={selectedStatus} onChange={setSelectedStatus} className="w-140px" allowClear>
+        <Select placeholder="选择连接状态" value={selectedStatus} onChange={setSelectedStatus} className="w-140px model_from_sel" popupClassName="alert-rule-dropdown" allowClear>
           <Select.Option value="">全部状态</Select.Option>
           <Select.Option value="online">在线</Select.Option>
           <Select.Option value="offline">离线</Select.Option>
         </Select>
       </div>
 
-      <div className="overflow-x-auto">
-        <table className="w-full text-white" style={{ borderCollapse: 'collapse' }}>
-          <thead>
-            <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.2)' }}>
-              <th className="p-3 text-left font-semibold">数据源ID</th>
-              <th className="p-3 text-left font-semibold">数据源名称</th>
-              <th className="p-3 text-left font-semibold">接入类型</th>
-              <th className="p-3 text-left font-semibold">接入协议</th>
-              <th className="p-3 text-left font-semibold">创建时间</th>
-              <th className="p-3 text-center font-semibold">连接状态</th>
-              <th className="p-3 text-center font-semibold">数据量</th>
-              <th className="p-3 text-center font-semibold">操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            {filteredSources.map(source => (
-              <tr key={source.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.1)' }}>
-                <td className="p-3">{source.id}</td>
-                <td className="p-3">{source.name}</td>
-                <td className="p-3">{source.typeLabel}</td>
-                <td className="p-3">{source.protocolLabel || '-'}</td>
-                <td className="p-3">{source.createdAt}</td>
-                <td className="p-3 text-center"><span className="flex items-center gap-2 justify-center">{getStatusIcon(source.connectionStatus)}<span className={source.connectionStatus === 'online' ? 'text-green-500' : 'text-red-500'}>{source.connectionStatus === 'online' ? '在线' : '离线'}</span></span></td>
-                <td className="p-3 text-center"><Tag color="blue">{source.records.length} 条</Tag></td>
-                <td className="p-3 text-center">
-                  <Button size="small" icon={<EyeOutlined />} onClick={() => handleViewDetail(source)}>详情</Button>
-                  {['air_quality_station', 'mobile_monitor_car', 'drone_video'].includes(source.type) || (source.type === 'manual_import') ? <Button size="small" className="ml-2" onClick={() => handleManualImport(source)}>导入</Button> : null}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+      <div className="tech-table-wrapper">
+        <Table
+          dataSource={filteredSources}
+          columns={[
+            { title: '数据源ID', dataIndex: 'id', key: 'id', width: 90 },
+            { title: '数据源名称', dataIndex: 'name', key: 'name', width: 180 },
+            { title: '接入类型', dataIndex: 'typeLabel', key: 'typeLabel', width: 120 },
+            { title: '接入协议', dataIndex: 'protocolLabel', key: 'protocolLabel', width: 100, render: (v: string) => v || '-' },
+            { title: '创建时间', dataIndex: 'createdAt', key: 'createdAt', width: 150 },
+            {
+              title: '连接状态', dataIndex: 'connectionStatus', key: 'connectionStatus', width: 90, align: 'center' as const,
+              render: (status: string) => (
+                <span className="flex items-center gap-1 justify-center">
+                  {getStatusIcon(status)}
+                  <span className={status === 'online' ? 'text-green-400' : 'text-red-400'}>{status === 'online' ? '在线' : '离线'}</span>
+                </span>
+              )
+            },
+            { title: '数据量', dataIndex: 'records', key: 'records', width: 80, align: 'center' as const, render: (records: any[]) => <Tag color="blue">{records?.length || 0} 条</Tag> },
+            {
+              title: '操作', key: 'actions', width: 130, align: 'center' as const,
+              render: (_: any, source: DataSource) => (
+                <div className="flex items-center gap-1 justify-center">
+                  <Button type="link" size="small" icon={<EyeOutlined />} className="!text-[#03FBFD] !p-0 hover:!text-white" onClick={() => handleViewDetail(source)}>详情</Button>
+                  {['air_quality_station', 'mobile_monitor_car', 'drone_video'].includes(source.type) || (source.type === 'manual_import') ? (
+                    <Button type="link" size="small" icon={<ImportOutlined />} className="!text-[#52C41A] !p-0 hover:!text-green-300" onClick={() => handleManualImport(source)}>导入</Button>
+                  ) : null}
+                </div>
+              )
+            }
+          ]}
+          rowKey="id"
+          size="small"
+          pagination={{ defaultPageSize: 15, showSizeChanger: true }}
+          scroll={{ x: 940 }}
+        />
       </div>
 
       {/* 数据源详情弹窗 */}
-      <Modal title={<span className="text-[#03FBFD] font-bold">{selectedSource?.name} - 数据列表</span>} open={showDetailModal} onCancel={() => { setShowDetailModal(false); setSelectedSource(null) }} footer={null} width={1000}>
+      <Modal
+        title={<span className="alert-rule-modal-title">{selectedSource ? `${selectedSource.name} - 数据列表` : '数据列表'}</span>}
+        open={showDetailModal}
+        onCancel={() => { setShowDetailModal(false); setSelectedSource(null) }}
+        footer={null}
+        width={1000}
+        className="alert-rule-modal"
+      >
         {selectedSource && (
           <div className="space-y-4">
             <div className="p-4 rounded bg-cyan-500/5 border border-cyan-500/15">
@@ -210,7 +241,7 @@ export default function DataManage() {
               </div>
             )}
 
-            <div className="overflow-x-auto max-h-400px overflow-y-auto">
+            <div className="tech-table-wrapper overflow-x-auto max-h-400px overflow-y-auto">
               {selectedSource.type === 'air_quality_station' ? (
                 <table className="w-full" style={{ borderCollapse: 'collapse' }}>
                   <thead><tr style={{ borderBottom: '1px solid rgba(3,251,253,0.2)' }}>
@@ -334,46 +365,46 @@ export default function DataManage() {
       </Modal>
 
       {/* 手工导入 */}
-      <Modal title={<span className="text-[#03FBFD] font-bold">手工导入数据</span>} open={showImportModal} onCancel={() => { setShowImportModal(false); setImportSource(null) }} footer={null} width={600}>
+      <Modal title={<span className="alert-rule-modal-title">手工导入数据</span>} open={showImportModal} onCancel={() => { setShowImportModal(false); setImportSource(null) }} footer={null} width={650} className="alert-rule-modal">
         {importSource && (
-          <Form form={importForm} layout="vertical" onFinish={submitImport}>
+          <Form form={importForm} layout="vertical" onFinish={submitImport} className="alert-rule-form pt-2">
             <div className="mb-4 p-3 rounded bg-cyan-500/8 border border-cyan-500/15">
               <div className="text-sm text-white/75"><span className="text-[#03FBFD]">目标数据源：</span>{importSource.name}</div>
             </div>
-            <Form.Item name="monitorTime" label="监测时间" rules={[{ required: true, message: '请输入监测时间' }]}><Input placeholder="格式：2023-12-01 00:00:00" /></Form.Item>
+            <Form.Item name="monitorTime" label={<span className="text-[#03FBFD]">监测时间</span>} rules={[{ required: true, message: '请输入监测时间' }]}><Input className="model_from_input" placeholder="格式：2023-12-01 00:00:00" /></Form.Item>
             {importSource.type === 'air_quality_station' && (
               <div className="grid grid-cols-2 gap-4">
-                <Form.Item name="pm25" label="PM2.5 (μg/m³)" rules={[{ required: true }]}><Input type="number" /></Form.Item>
-                <Form.Item name="o3" label="O3 (μg/m³)" rules={[{ required: true }]}><Input type="number" /></Form.Item>
-                <Form.Item name="temperature" label="温度 (℃)" rules={[{ required: true }]}><Input type="number" /></Form.Item>
-                <Form.Item name="humidity" label="湿度 (%)" rules={[{ required: true }]}><Input type="number" /></Form.Item>
-                <Form.Item name="windSpeed" label="风速 (m/s)" rules={[{ required: true }]}><Input type="number" /></Form.Item>
-                <Form.Item name="windDirection" label="主导风向" rules={[{ required: true }]}><Select placeholder="请选择"><Select.Option value="北风">北风</Select.Option><Select.Option value="南风">南风</Select.Option><Select.Option value="东风">东风</Select.Option><Select.Option value="西风">西风</Select.Option></Select></Form.Item>
+                <Form.Item name="pm25" label={<span className="text-[#03FBFD]">PM2.5 (μg/m³)</span>} rules={[{ required: true }]}><Input className="model_from_input" type="number" /></Form.Item>
+                <Form.Item name="o3" label={<span className="text-[#03FBFD]">O3 (μg/m³)</span>} rules={[{ required: true }]}><Input className="model_from_input" type="number" /></Form.Item>
+                <Form.Item name="temperature" label={<span className="text-[#03FBFD]">温度 (℃)</span>} rules={[{ required: true }]}><Input className="model_from_input" type="number" /></Form.Item>
+                <Form.Item name="humidity" label={<span className="text-[#03FBFD]">湿度 (%)</span>} rules={[{ required: true }]}><Input className="model_from_input" type="number" /></Form.Item>
+                <Form.Item name="windSpeed" label={<span className="text-[#03FBFD]">风速 (m/s)</span>} rules={[{ required: true }]}><Input className="model_from_input" type="number" /></Form.Item>
+                <Form.Item name="windDirection" label={<span className="text-[#03FBFD]">主导风向</span>} rules={[{ required: true }]}><Select className="model_from_sel" popupClassName="alert-rule-dropdown" placeholder="请选择"><Select.Option value="北风">北风</Select.Option><Select.Option value="南风">南风</Select.Option><Select.Option value="东风">东风</Select.Option><Select.Option value="西风">西风</Select.Option></Select></Form.Item>
               </div>
             )}
             {importSource.type === 'mobile_monitor_car' && (
               <div className="grid grid-cols-2 gap-4">
-                <Form.Item name="totalSuspendedParticulates" label="总悬浮颗粒物" rules={[{ required: true }]}><Input type="number" /></Form.Item>
-                <Form.Item name="fineParticulates" label="细微颗粒物" rules={[{ required: true }]}><Input type="number" /></Form.Item>
-                <Form.Item name="latitude" label="纬度" rules={[{ required: true }]}><Input type="number" /></Form.Item>
-                <Form.Item name="longitude" label="经度" rules={[{ required: true }]}><Input type="number" /></Form.Item>
-                <Form.Item name="roadDustLoad" label="道路尘负荷" rules={[{ required: true }]}><Input type="number" /></Form.Item>
+                <Form.Item name="totalSuspendedParticulates" label={<span className="text-[#03FBFD]">总悬浮颗粒物</span>} rules={[{ required: true }]}><Input className="model_from_input" type="number" /></Form.Item>
+                <Form.Item name="fineParticulates" label={<span className="text-[#03FBFD]">细微颗粒物</span>} rules={[{ required: true }]}><Input className="model_from_input" type="number" /></Form.Item>
+                <Form.Item name="latitude" label={<span className="text-[#03FBFD]">纬度</span>} rules={[{ required: true }]}><Input className="model_from_input" type="number" /></Form.Item>
+                <Form.Item name="longitude" label={<span className="text-[#03FBFD]">经度</span>} rules={[{ required: true }]}><Input className="model_from_input" type="number" /></Form.Item>
+                <Form.Item name="roadDustLoad" label={<span className="text-[#03FBFD]">道路尘负荷</span>} rules={[{ required: true }]}><Input className="model_from_input" type="number" /></Form.Item>
               </div>
             )}
             {importSource.name.includes('MS') && (
               <div className="grid grid-cols-2 gap-4">
-                <Form.Item name="longitude" label="经度" rules={[{ required: true }]}><Input type="number" /></Form.Item>
-                <Form.Item name="latitude" label="纬度" rules={[{ required: true }]}><Input type="number" /></Form.Item>
-                <Form.Item name="tvocs" label="TVOCs (ppb)" rules={[{ required: true }]}><Input type="number" /></Form.Item>
+                <Form.Item name="longitude" label={<span className="text-[#03FBFD]">经度</span>} rules={[{ required: true }]}><Input className="model_from_input" type="number" /></Form.Item>
+                <Form.Item name="latitude" label={<span className="text-[#03FBFD]">纬度</span>} rules={[{ required: true }]}><Input className="model_from_input" type="number" /></Form.Item>
+                <Form.Item name="tvocs" label={<span className="text-[#03FBFD]">TVOCs (ppb)</span>} rules={[{ required: true }]}><Input className="model_from_input" type="number" /></Form.Item>
               </div>
             )}
             {importSource.name.includes('NOX') && (
               <div className="grid grid-cols-2 gap-4">
-                <Form.Item name="nox" label="NOX (μg/m³)" rules={[{ required: true }]}><Input type="number" /></Form.Item>
-                <Form.Item name="no2" label="NO2 (μg/m³)" rules={[{ required: true }]}><Input type="number" /></Form.Item>
-                <Form.Item name="no" label="NO (μg/m³)" rules={[{ required: true }]}><Input type="number" /></Form.Item>
-                <Form.Item name="longitude" label="经度" rules={[{ required: true }]}><Input type="number" /></Form.Item>
-                <Form.Item name="latitude" label="纬度" rules={[{ required: true }]}><Input type="number" /></Form.Item>
+                <Form.Item name="nox" label={<span className="text-[#03FBFD]">NOX (μg/m³)</span>} rules={[{ required: true }]}><Input className="model_from_input" type="number" /></Form.Item>
+                <Form.Item name="no2" label={<span className="text-[#03FBFD]">NO2 (μg/m³)</span>} rules={[{ required: true }]}><Input className="model_from_input" type="number" /></Form.Item>
+                <Form.Item name="no" label={<span className="text-[#03FBFD]">NO (μg/m³)</span>} rules={[{ required: true }]}><Input className="model_from_input" type="number" /></Form.Item>
+                <Form.Item name="longitude" label={<span className="text-[#03FBFD]">经度</span>} rules={[{ required: true }]}><Input className="model_from_input" type="number" /></Form.Item>
+                <Form.Item name="latitude" label={<span className="text-[#03FBFD]">纬度</span>} rules={[{ required: true }]}><Input className="model_from_input" type="number" /></Form.Item>
               </div>
             )}
             <div className="flex justify-end gap-4 mt-4">
@@ -385,9 +416,9 @@ export default function DataManage() {
       </Modal>
 
       {/* 数据记录详情 */}
-      <Modal title={<span className="text-[#03FBFD] font-bold">数据详情</span>} open={!!selectedRecord} onCancel={() => setSelectedRecord(null)} footer={null}>
+      <Modal title={<span className="alert-rule-modal-title">数据详情</span>} open={!!selectedRecord} onCancel={() => setSelectedRecord(null)} footer={null} className="alert-rule-modal">
         {selectedRecord && (
-          <div className="space-y-3">
+          <div className="space-y-3 p-4 rounded text-white/85" style={{ backgroundColor: 'rgba(3,251,253,0.05)', border: '1px solid rgba(3,251,253,0.15)' }}>
             <div className="text-sm text-white/75"><span className="text-[#03FBFD] font-medium">任务ID：</span>{selectedRecord.id}</div>
             <div className="text-sm text-white/75"><span className="text-[#03FBFD] font-medium">任务名称：</span>{selectedRecord.name}</div>
             <div className="text-sm text-white/75"><span className="text-[#03FBFD] font-medium">执行时间：</span>{selectedRecord.accessTime}</div>
@@ -401,23 +432,23 @@ export default function DataManage() {
       </Modal>
 
       {/* 转预警 */}
-      <Modal title={<span className="text-[#03FBFD] font-bold">转预警</span>} open={showAlertModal} onCancel={() => setShowAlertModal(false)} footer={null} width={600}>
+      <Modal title={<span className="alert-rule-modal-title">转预警</span>} open={showAlertModal} onCancel={() => setShowAlertModal(false)} footer={null} width={600} className="alert-rule-modal">
         {selectedRecord && (
-          <Form form={alertForm} layout="vertical" onFinish={submitAlert}>
+          <Form form={alertForm} layout="vertical" onFinish={submitAlert} className="alert-rule-form pt-2">
             <div className="mb-4 p-3 rounded bg-cyan-500/8 border border-cyan-500/15">
               <div className="text-sm text-white/75"><span className="text-[#03FBFD]">数据名称：</span>{selectedRecord.name}</div>
               <div className="text-sm text-white/75"><span className="text-[#03FBFD]">设备ID：</span>{selectedRecord.deviceId}</div>
             </div>
-            <Form.Item name="alertLevel" label="预警级别" rules={[{ required: true, message: '请选择预警级别' }]}>
-              <Select placeholder="请选择预警级别">
+            <Form.Item name="alertLevel" label={<span className="text-[#03FBFD]">预警级别</span>} rules={[{ required: true, message: '请选择预警级别' }]}>
+              <Select className="model_from_sel" popupClassName="alert-rule-dropdown" placeholder="请选择预警级别">
                 <Select.Option value="level1">一级预警（严重）</Select.Option>
                 <Select.Option value="level2">二级预警（较重）</Select.Option>
                 <Select.Option value="level3">三级预警（一般）</Select.Option>
-                <Select.Option value="level4">四级预警（轻微）</Select.Option>
+                <Select.Option value="level4">轻微预警（轻微）</Select.Option>
               </Select>
             </Form.Item>
-            <Form.Item name="reason" label="预警原因" rules={[{ required: true, message: '请输入预警原因' }]}><Input.TextArea rows={3} placeholder="请输入污染情况描述" /></Form.Item>
-            <Form.Item name="suggestion" label="处置建议"><Input.TextArea rows={2} placeholder="请输入处置建议（可选）" /></Form.Item>
+            <Form.Item name="reason" label={<span className="text-[#03FBFD]">预警原因</span>} rules={[{ required: true, message: '请输入预警原因' }]}><Input.TextArea className="model_from_input" rows={3} placeholder="请输入污染情况描述" /></Form.Item>
+            <Form.Item name="suggestion" label={<span className="text-[#03FBFD]">处置建议</span>}><Input.TextArea className="model_from_input" rows={2} placeholder="请输入处置建议（可选）" /></Form.Item>
             <div className="flex justify-end gap-4">
               <Button onClick={() => setShowAlertModal(false)}>取消</Button>
               <Button type="primary" htmlType="submit">确认转预警</Button>

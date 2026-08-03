@@ -1,4 +1,5 @@
 import { request } from './request'
+import dayjs from 'dayjs'
 
 // ========== 雷达 ==========
 // 雷达列表
@@ -15,13 +16,17 @@ export function alarmPointAll(params?: object) {
 export function dockList(params?: object) {
   return request.get('/dpSys/hbdp/wurenji/dockList', { params })
 }
-// 飞行任务列表
+// 飞行任务列表（startDate 必传，默认近30天）
 export function listFlyJob(params?: object) {
-  return request.get('/dpSys/hbdp/wurenji/listFlyJob', { params })
+  return request.get('/dpSys/hbdp/wurenji/listFlyJob', {
+    params: { startDate: dayjs().subtract(30, 'day').format('YYYY-MM-DD'), ...params },
+  })
 }
-// 飞行计划列表
+// 飞行计划列表（startDate 必传，默认近30天）
 export function listFlyPlan(params?: object) {
-  return request.get('/dpSys/hbdp/wurenji/listFlyPlan', { params })
+  return request.get('/dpSys/hbdp/wurenji/listFlyPlan', {
+    params: { startDate: dayjs().subtract(30, 'day').format('YYYY-MM-DD'), ...params },
+  })
 }
 // 飞行结果列表
 export function listFlyResult(params?: object) {

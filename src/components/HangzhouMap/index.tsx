@@ -1,10 +1,36 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Scene, PointLayer, PolygonLayer, LineLayer } from "@antv/l7";
-import { Map as L7Map } from "@antv/l7-maps";
+import { Mapbox } from "@antv/l7-maps";
+
 import { Choropleth } from "@antv/l7plot";
 import { districts } from '@/utils/city';
 
-const HangzhouMap = () => {
+interface HangzhouMapProps {
+  showOverlays?: boolean
+}
+
+function createSectorCoordinates(
+  lng: number,
+  lat: number,
+  radius: number,
+  startAngle: number,
+  sweepAngle: number,
+) {
+  const points: number[][] = [[lng, lat]]
+  const steps = 22
+  for (let step = 0; step <= steps; step += 1) {
+    const angle = ((startAngle + (sweepAngle * step) / steps) * Math.PI) / 180
+    points.push([
+      lng + radius * Math.cos(angle),
+      lat + radius * Math.sin(angle),
+    ])
+  }
+  points.push([lng, lat])
+  return [points]
+}
+
+const HangzhouMap: React.FC<HangzhouMapProps> = ({ showOverlays = false }) => {
+
   const containerRef = useRef<HTMLDivElement>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
 
@@ -20,45 +46,43 @@ const HangzhouMap = () => {
 
     const hangzhouDistricts = districts.filter((d) => d.parent === 330100);
 
-    const districtData = hangzhouDistricts.map((d) => ({
+    const districtPalette = [
+      '#126ab1', '#0d78bd', '#0b5f9e', '#1680c2', '#106ead',
+      '#0c64a8', '#1883c4', '#0b5b9a', '#1176b7', '#0d67a4',
+      '#157dbb', '#0b609d', '#1372b3',
+    ]
+    const districtData = hangzhouDistricts.map((d, index) => ({
       name: d.name,
       adcode: d.adcode,
-      value: Math.floor(Math.random() * 30) + 35,
+      value: 36 + (index * 9) % 38,
+      height: 19000 + (index % 4) * 4200,
+      fill: districtPalette[index % districtPalette.length],
       lng: d.lng,
       lat: d.lat,
     }));
 
     const scene = new Scene({
       id: containerRef.current,
-      map: new L7Map({
-        style: {
-          version: 8,
-          name: "dark",
-          sources: {},
-          layers: [
-            {
-              id: "background",
-              type: "background",
-              paint: {
-                "background-color": "#0a1628",
-              },
-            },
-          ],
-        },
-        center: [119.8, 29.85],
-        zoom: 8.2,
+      map: new Mapbox({
+        style: 'blank',
+        center: [119.88, 29.86],
+        zoom: 8.55,
+        pitch: 28,
+        rotation: -6,
         minZoom: 7.0,
         maxZoom: 12,
-        pitch: 0,
-        bearing: 0,
       }),
       logoVisible: false,
     });
+    scene.setBgColor('#03122c');
+
 
     scene.on("loaded", () => {
       setMapLoaded(true);
+      let districtGeoData: any = null;
 
       const choropleth = new Choropleth({
+        zIndex: 4,
         source: {
           data: districtData,
           joinBy: {
@@ -73,152 +97,222 @@ const HangzhouMap = () => {
           level: "city",
           adcode: 330100,
         },
+        chinaBorder: false,
+        // 行政边界数据已本地化到 public/map，避免访问外部 HTTPS 资源
+        customFetchGeoData: async ({ adcode }) => {
+          const response = await fetch(`/map/${adcode}_full.json`)
+          const geoData = await response.json()
+          if (String(adcode) === '330100') districtGeoData = geoData
+          return geoData
+        },
+        autoFit: false,
         color: {
           field: "value",
-          value: ["#00e400", "#7ed321", "#a8e063", "#ffdc00", "#ff7e00", "#ff4757"],
-          scale: { type: "quantile" },
+          value: districtPalette,
         },
         style: {
-          opacity: 0.7,
-          stroke: "#00d4ff",
-          lineWidth: 2,
-          lineOpacity: 0.9,
+          opacity: 0.78,
+          stroke: "#47d7f4",
+          lineWidth: 1.05,
+          lineOpacity: 0.92,
         },
+
         label: {
           visible: true,
           field: "name",
           style: {
-            fill: "#ffffff",
-            opacity: 0.9,
+            fill: "#d1f6ff",
+            opacity: 0.95,
             fontSize: 12,
-            stroke: "#0a1628",
-            strokeWidth: 3,
+            fontWeight: "bold",
+            stroke: "#03264f",
+            strokeWidth: 3.5,
             textAllowOverlap: false,
           },
         },
         state: {
-          active: { stroke: "#00ffff", lineWidth: 2 },
+          active: { fill: "#25a8e8", stroke: "#ffffff", lineWidth: 2.2 },
         },
       });
+      choropleth.on("loaded", () => {
+        if (!districtGeoData?.features?.length) return
+
+        const metricsByAdcode = new Map(districtData.map(item => [String(item.adcode), item]))
+        const styledGeoData = {
+          ...districtGeoData,
+          features: districtGeoData.features.map((feature: any) => {
+            const adcode = String(feature.properties?.adcode ?? '')
+            const metric = metricsByAdcode.get(adcode)
+            return {
+              ...feature,
+              properties: {
+                ...feature.properties,
+                height: metric?.height ?? 22000,
+                fill: metric?.fill ?? '#0a62a6',
+              },
+            }
+          }),
+        }
+
+        const districtWallLayer = new LineLayer({ zIndex: 1 })
+          .source(styledGeoData)
+          .shape("wall")
+          .size(23000)
+          .style({
+            heightfixed: true,
+            opacity: 0.72,
+            sourceColor: "#05336d",
+            targetColor: "rgba(0, 219, 255, 0.62)",
+          })
+        scene.addLayer(districtWallLayer)
+
+        const districtPrismLayer = new PolygonLayer({ zIndex: 2, autoFit: false })
+          .source(styledGeoData)
+          .shape("extrude")
+          .size(26000)
+          .color("fill")
+          .style({
+            heightfixed: true,
+            pickLight: true,
+            opacity: 0.96,
+            sourceColor: "#042f68",
+            targetColor: "#23b5e8",
+          })
+        scene.addLayer(districtPrismLayer)
+
+        const districtTopLineLayer = new LineLayer({ zIndex: 3 })
+          .source(styledGeoData)
+          .shape("line")
+          .color("#62e8ff")
+          .size(1.35)
+          .style({
+            raisingHeight: 26000,
+            opacity: 0.9,
+          })
+        scene.addLayer(districtTopLineLayer)
+      })
       choropleth.addToScene(scene);
 
       const airQualityStations = [
-        { lng: 120.15, lat: 30.28, pm25: 45, o3: 35, temperature: 18, humidity: 65, name: "西湖区监测站", district: "西湖区" },
-        { lng: 120.35, lat: 30.15, pm25: 62, o3: 48, temperature: 20, humidity: 58, name: "萧山区监测站", district: "萧山区" },
-        { lng: 119.98, lat: 30.45, pm25: 38, o3: 32, temperature: 16, humidity: 72, name: "余杭区监测站", district: "余杭区" },
-        { lng: 120.05, lat: 29.95, pm25: 55, o3: 42, temperature: 22, humidity: 52, name: "富阳区监测站", district: "富阳区" },
-        { lng: 120.25, lat: 30.10, pm25: 78, o3: 55, temperature: 24, humidity: 48, name: "滨江区监测站", district: "滨江区" },
-        { lng: 120.10, lat: 30.35, pm25: 42, o3: 38, temperature: 17, humidity: 68, name: "拱墅区监测站", district: "拱墅区" },
-        { lng: 120.40, lat: 30.22, pm25: 58, o3: 45, temperature: 21, humidity: 55, name: "钱塘区监测站", district: "钱塘区" },
-        { lng: 119.85, lat: 30.18, pm25: 35, o3: 30, temperature: 15, humidity: 75, name: "临安区监测站", district: "临安区" },
-        { lng: 120.00, lat: 30.05, pm25: 48, o3: 40, temperature: 19, humidity: 62, name: "桐庐县监测站", district: "桐庐县" },
-        { lng: 119.65, lat: 29.85, pm25: 40, o3: 33, temperature: 16, humidity: 70, name: "建德市监测站", district: "建德市" },
-        { lng: 120.20, lat: 29.65, pm25: 36, o3: 31, temperature: 14, humidity: 78, name: "淳安县监测站", district: "淳安县" },
+        { lng: 120.15, lat: 30.28, pm25: 5.6, name: "西湖区监测站", district: "西湖区" },
+        { lng: 120.35, lat: 30.15, pm25: 5.6, name: "萧山区监测站", district: "萧山区" },
+        { lng: 119.98, lat: 30.45, pm25: 5.6, name: "余杭区监测站", district: "余杭区" },
+        { lng: 120.05, lat: 29.95, pm25: 5.6, name: "富阳区监测站", district: "富阳区" },
+        { lng: 120.25, lat: 30.10, pm25: 5.6, name: "滨江区监测站", district: "滨江区" },
+        { lng: 120.10, lat: 30.35, pm25: 5.6, name: "拱墅区监测站", district: "拱墅区" },
+        { lng: 120.40, lat: 30.22, pm25: 5.6, name: "钱塘区监测站", district: "钱塘区" },
+        { lng: 119.85, lat: 30.18, pm25: 5.6, name: "临安区监测站", district: "临安区" },
+        { lng: 120.00, lat: 30.05, pm25: 5.6, name: "桐庐县监测站", district: "桐庐县" },
+        { lng: 119.65, lat: 29.85, pm25: 5.6, name: "建德市监测站", district: "建德市" },
+        { lng: 120.20, lat: 29.65, pm25: 5.6, name: "淳安县监测站", district: "淳安县" },
       ];
 
-      const airStationLayer = new PointLayer({ zIndex: 2 })
+      const airStationLayer = new PointLayer({ zIndex: 8 })
         .source(airQualityStations, {
-          parser: {
-            type: "json",
-            x: "lng",
-            y: "lat",
-          },
+          parser: { type: "json", x: "lng", y: "lat" },
         })
         .shape("circle")
-        .size("pm25", (v: number) => {
-          return Math.max(10, Math.min(22, v * 0.3));
-        })
-        .color("pm25", (v: number) => {
-          if (v <= 35) return "#00e400";
-          if (v <= 75) return "#ffff00";
-          if (v <= 115) return "#ff7e00";
-          if (v <= 150) return "#ff0000";
-          if (v <= 250) return "#99004c";
-          return "#7e0023";
-        })
+        .size(6.5)
+        .color("pm25", (value: number) => value > 35 ? "#ffd744" : "#2df0a7")
         .style({
-          opacity: 0.9,
-          stroke: "#ffffff",
-          strokeWidth: 2,
-          shadowColor: (v: any) => {
-            const pm25 = v.pm25;
-            if (pm25 <= 35) return "rgba(0, 228, 0, 0.6)";
-            if (pm25 <= 75) return "rgba(255, 255, 0, 0.6)";
-            if (pm25 <= 115) return "rgba(255, 126, 0, 0.6)";
-            return "rgba(255, 0, 0, 0.6)";
-          },
-          shadowBlur: 15,
+          opacity: 0.95,
+          stroke: "#d9ffff",
+          strokeWidth: 1.2,
+          shadowColor: "rgba(22, 235, 202, 0.8)",
+          shadowBlur: 8,
         });
 
       scene.addLayer(airStationLayer);
 
+      const auxiliaryNodes = hangzhouDistricts.flatMap((district, districtIndex) => {
+        const nodeColors = ["#21e6a4", "#f4db35", "#9aabba"]
+        return [
+          {
+            lng: district.lng + 0.045,
+            lat: district.lat + 0.028,
+            color: nodeColors[districtIndex % nodeColors.length],
+          },
+          {
+            lng: district.lng - 0.038,
+            lat: district.lat - 0.024,
+            color: nodeColors[(districtIndex + 1) % nodeColors.length],
+          },
+        ]
+      })
+
+      const auxiliaryNodeLayer = new PointLayer({ zIndex: 8 })
+        .source(auxiliaryNodes, {
+          parser: { type: "json", x: "lng", y: "lat" },
+        })
+        .shape("circle")
+        .size(4.2)
+        .color("color")
+        .style({
+          opacity: 0.86,
+          stroke: "#d8ffff",
+          strokeWidth: 0.7,
+          shadowBlur: 5,
+        })
+      scene.addLayer(auxiliaryNodeLayer)
+
       const quantumRadarStations = [
-        { lng: 120.18, lat: 30.30, name: "西湖雷达站", status: "online", coverageRadius: 5 },
-        { lng: 120.30, lat: 30.18, name: "萧山雷达站", status: "online", coverageRadius: 4 },
-        { lng: 120.00, lat: 30.42, name: "余杭雷达站", status: "offline", coverageRadius: 4.5 },
-        { lng: 120.22, lat: 30.05, name: "滨江雷达站", status: "online", coverageRadius: 5 },
+        { lng: 119.85, lat: 30.18, name: "临安雷达站", status: "online", radius: 0.20, start: 90, sweep: 180, coverageColor: "#14d8c7" },
+        { lng: 120.05, lat: 29.95, name: "富阳雷达站", status: "online", radius: 0.19, start: -90, sweep: 180, coverageColor: "#1cd6cc" },
+        { lng: 120.35, lat: 30.15, name: "萧山雷达站", status: "online", radius: 0.20, start: -90, sweep: 185, coverageColor: "#1ee0cd" },
+        { lng: 120.15, lat: 30.28, name: "西湖雷达站", status: "online", radius: 0.18, start: 82, sweep: 180, coverageColor: "#1acbd5" },
+        { lng: 119.62, lat: 29.78, name: "淳安雷达站", status: "online", radius: 0.18, start: -90, sweep: 185, coverageColor: "#21d4c7" },
       ];
 
       const radarCoverageData = quantumRadarStations.map((station, idx) => {
-        const points = [];
-        const radius = station.coverageRadius * 0.01;
-        for (let i = 0; i <= 360; i += 10) {
-          const angle = (i * Math.PI) / 180;
-          points.push([
-            station.lng + radius * Math.cos(angle),
-            station.lat + radius * Math.sin(angle),
-          ]);
-        }
         return {
           id: idx,
           name: station.name,
           lng: station.lng,
           lat: station.lat,
           status: station.status,
-          coordinates: [points],
+          coverageColor: station.coverageColor,
+          coordinates: createSectorCoordinates(
+            station.lng,
+            station.lat,
+            station.radius,
+            station.start,
+            station.sweep,
+          ),
         };
       });
 
-      const radarCoverageLayer = new PolygonLayer({ zIndex: 1 })
+      const radarCoverageLayer = new PolygonLayer({ zIndex: 5 })
         .source(radarCoverageData, {
-          parser: {
-            type: "json",
-            coordinates: "coordinates",
-          },
+          parser: { type: "json", coordinates: "coordinates" },
         })
-        .color("status", (v: string) => {
-          return v === "online" ? "rgba(138, 43, 226, 0.2)" : "rgba(100, 100, 100, 0.1)";
-        })
+        .color("coverageColor")
         .style({
-          opacity: 0.5,
-          stroke: (v: any) => (v.status === "online" ? "#8a2be2" : "#666666"),
-          strokeWidth: 2,
-          strokeOpacity: 0.7,
+          opacity: 0.22,
+          stroke: "#48f4e7",
+          strokeWidth: 0.8,
+          strokeOpacity: 0.45,
         });
 
       scene.addLayer(radarCoverageLayer);
 
-      const radarPointLayer = new PointLayer({ zIndex: 4 })
+      const radarPointLayer = new PointLayer({ zIndex: 9 })
         .source(quantumRadarStations, {
-          parser: {
-            type: "json",
-            x: "lng",
-            y: "lat",
-          },
+          parser: { type: "json", x: "lng", y: "lat" },
         })
         .shape("circle")
-        .size("status", (v: string) => (v === "online" ? 20 : 16))
-        .color("status", (v: string) => (v === "online" ? "#8a2be2" : "#666666"))
+        .size(7)
+        .color("#ffdc38")
         .style({
-          opacity: 0.9,
+          opacity: 0.95,
           stroke: "#ffffff",
-          strokeWidth: 3,
-          shadowColor: (v: any) =>
-            v.status === "online" ? "rgba(138, 43, 226, 0.8)" : "rgba(100, 100, 100, 0.5)",
-          shadowBlur: 20,
+          strokeWidth: 1.2,
+          shadowColor: "rgba(255, 220, 56, 0.92)",
+          shadowBlur: 8,
         });
 
       scene.addLayer(radarPointLayer);
+
+
 
       const droneAirports = [
         { lng: 120.10, lat: 30.25, name: "临平机场", status: "online" },
@@ -228,7 +322,7 @@ const HangzhouMap = () => {
         { lng: 120.22, lat: 30.08, name: "滨江机场", status: "offline" },
       ];
 
-      const droneAirportLayer = new PointLayer({ zIndex: 5 })
+      const droneAirportLayer = new PointLayer({ zIndex: 10 })
         .source(droneAirports, {
           parser: {
             type: "json",
@@ -237,15 +331,15 @@ const HangzhouMap = () => {
           },
         })
         .shape("circle")
-        .size("status", (v: string) => (v === "online" ? 18 : 14))
-        .color("status", (v: string) => (v === "online" ? "#00d4ff" : "#666666"))
+        .size("status", (v: string) => (v === "online" ? 7 : 6))
+        .color("status", (v: string) => (v === "online" ? "#20e5a5" : "#8c9bad"))
         .style({
           opacity: 0.9,
-          stroke: "#ffffff",
-          strokeWidth: 2,
+          stroke: "#e6ffff",
+          strokeWidth: 1.1,
           shadowColor: (v: any) =>
-            v.status === "online" ? "rgba(0, 212, 255, 0.8)" : "rgba(100, 100, 100, 0.5)",
-          shadowBlur: 15,
+            v.status === "online" ? "rgba(32, 229, 165, 0.8)" : "rgba(100, 100, 100, 0.5)",
+          shadowBlur: 7,
         });
 
       scene.addLayer(droneAirportLayer);
@@ -273,10 +367,10 @@ const HangzhouMap = () => {
         },
         {
           id: "FLT003",
-          name: "富阳区航拍巡查",
-          from: { lng: 120.08, lat: 29.98 },
-          to: { lng: 120.00, lat: 30.05 },
-          currentPos: { lng: 120.04, lat: 30.02 },
+          name: "淳安—富阳航拍巡查",
+          from: { lng: 119.52, lat: 29.76 },
+          to: { lng: 119.88, lat: 30.02 },
+          currentPos: { lng: 119.69, lat: 29.89 },
           progress: 38,
           startTime: "14:45",
           estimatedTime: "15:30",
@@ -292,7 +386,7 @@ const HangzhouMap = () => {
         progress: task.progress,
       }));
 
-      const flightPathLayer = new LineLayer({ zIndex: 3 })
+      const flightPathLayer = new LineLayer({ zIndex: 7 })
         .source(flightPathData, {
           parser: {
             type: "json",
@@ -300,16 +394,18 @@ const HangzhouMap = () => {
           },
         })
         .color("#00d4ff")
-        .size(3)
+        .size(1.5)
         .style({
-          opacity: 0.6,
+          opacity: 0.84,
           lineCap: "round",
           lineJoin: "round",
+          lineType: "dash",
+          dashArray: [3, 3],
         });
 
       scene.addLayer(flightPathLayer);
 
-      const dronePositionLayer = new PointLayer({ zIndex: 7 })
+      const dronePositionLayer = new PointLayer({ zIndex: 11 })
         .source(activeFlightTasks, {
           parser: {
             type: "json",
@@ -318,14 +414,14 @@ const HangzhouMap = () => {
           },
         })
         .shape("circle")
-        .size(16)
-        .color("#00ff88")
+        .size(7.5)
+        .color("#00efff")
         .style({
           opacity: 0.95,
           stroke: "#ffffff",
-          strokeWidth: 3,
-          shadowColor: "rgba(0, 255, 136, 0.9)",
-          shadowBlur: 20,
+          strokeWidth: 1.2,
+          shadowColor: "rgba(0, 239, 255, 0.9)",
+          shadowBlur: 9,
         });
 
       scene.addLayer(dronePositionLayer);
@@ -338,7 +434,7 @@ const HangzhouMap = () => {
         { lng: 120.25, lat: 30.10, level: "level1", ruleName: "PM2.5严重超标", district: "滨江区" },
       ];
 
-      const alertLayer = new PointLayer({ zIndex: 6 })
+      const alertLayer = new PointLayer({ zIndex: 12 })
         .source(alertPoints, {
           parser: {
             type: "json",
@@ -349,12 +445,13 @@ const HangzhouMap = () => {
         .shape("triangle")
         .size("level", (v: string) => {
           switch (v) {
-            case "level1": return 28;
-            case "level2": return 24;
-            case "level3": return 20;
-            default: return 22;
+            case "level1": return 8;
+            case "level2": return 7;
+            case "level3": return 6;
+            default: return 6.5;
           }
         })
+
         .color("level", (v: string) => {
           switch (v) {
             case "level1": return "#ff0000";
@@ -367,7 +464,7 @@ const HangzhouMap = () => {
         .style({
           opacity: 0.95,
           stroke: "#ffffff",
-          strokeWidth: 3,
+          strokeWidth: 1.4,
           shadowColor: (v: any) => {
             switch (v.level) {
               case "level1": return "rgba(255, 0, 0, 0.8)";
@@ -376,7 +473,7 @@ const HangzhouMap = () => {
               default: return "rgba(0, 212, 255, 0.8)";
             }
           },
-          shadowBlur: 20,
+          shadowBlur: 9,
         });
 
       scene.addLayer(alertLayer);
@@ -388,7 +485,7 @@ const HangzhouMap = () => {
   }, []);
 
   return (
-    <div className="relative w-full h-full" style={{ minHeight: "600px" }}>
+    <div className="hangzhou-map relative w-full h-full" style={{ minHeight: "600px" }}>
       <div ref={containerRef} className="w-full h-full" style={{ minHeight: "600px", height: "100%" }} />
 
       {!mapLoaded && (
@@ -397,105 +494,109 @@ const HangzhouMap = () => {
         </div>
       )}
 
-      <div className="absolute top-4 right-4 bg-black/70 backdrop-blur-md rounded-xl p-3 border border-red-500/30 shadow-lg z-10">
-        <div className="flex items-center gap-2 text-red-400 font-bold text-sm mb-2">
-          <svg className="w-3 h-3 text-red-400" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M12 2L20 20H4L12 2Z" />
-          </svg>
-          <span>预警点位</span>
-        </div>
-        <div className="flex items-center gap-2 mb-1">
-          <svg className="w-4 h-4" viewBox="0 0 24 24">
-            <path d="M12 2L20 20H4L12 2Z" fill="#dc2626" stroke="white" strokeWidth="2" />
-          </svg>
-          <span className="text-white text-xs">一级预警</span>
-        </div>
-        <div className="flex items-center gap-2 mb-1">
-          <svg className="w-4 h-4" viewBox="0 0 24 24">
-            <path d="M12 2L20 20H4L12 2Z" fill="#f97316" stroke="white" strokeWidth="2" />
-          </svg>
-          <span className="text-white text-xs">二级预警</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <svg className="w-4 h-4" viewBox="0 0 24 24">
-            <path d="M12 2L20 20H4L12 2Z" fill="#eab308" stroke="white" strokeWidth="2" />
-          </svg>
-          <span className="text-white text-xs">三级预警</span>
-        </div>
-      </div>
-
-      <div className="absolute top-4 left-4 bg-black/70 backdrop-blur-md rounded-xl p-3 border border-green-500/30 shadow-lg z-10">
-        <div className="flex items-center gap-2 text-green-400 font-bold text-sm mb-2">
-          <div className="w-2 h-2 rounded-full bg-green-400"></div>
-          <span>空气质量检测站</span>
-        </div>
-        <div className="flex items-center gap-2 mb-1">
-          <div className="w-3 h-3 rounded-full bg-green-500 shadow-md shadow-green-500/50"></div>
-          <span className="text-white text-xs">优 (0-35)</span>
-        </div>
-        <div className="flex items-center gap-2 mb-1">
-          <div className="w-3 h-3 rounded-full bg-yellow-500 shadow-md shadow-yellow-500/50"></div>
-          <span className="text-white text-xs">良 (36-75)</span>
-        </div>
-        <div className="flex items-center gap-2 mb-1">
-          <div className="w-3 h-3 rounded-full bg-orange-500 shadow-md shadow-orange-500/50"></div>
-          <span className="text-white text-xs">轻度污染</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="w-3 h-3 rounded-full bg-red-500 shadow-md shadow-red-500/50"></div>
-          <span className="text-white text-xs">中度及以上</span>
-        </div>
-      </div>
-
-      <div className="absolute bottom-4 right-4 bg-black/70 backdrop-blur-md rounded-xl p-3 border border-purple-500/30 shadow-lg z-10">
-        <div className="flex items-center gap-2 text-purple-400 font-bold text-sm mb-2">
-          <div className="w-2 h-2 rounded-full bg-purple-400"></div>
-          <span>光量子雷达站</span>
-        </div>
-        <div className="flex items-center gap-2 mb-1">
-          <div className="w-3 h-3 rounded-full bg-purple-500 shadow-md shadow-purple-500/50"></div>
-          <span className="text-white text-xs">在线</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="w-3 h-3 rounded-full bg-gray-500 shadow-md shadow-gray-500/50"></div>
-          <span className="text-white text-xs">离线</span>
-        </div>
-        <div className="mt-2 pt-2 border-t border-white/10">
-          <div className="text-white/50 text-xs">紫色区域为雷达覆盖范围</div>
-        </div>
-      </div>
-
-      <div className="absolute top-4 left-[160px] bg-black/70 backdrop-blur-md rounded-xl p-3 border border-cyan-500/30 shadow-lg z-10">
-        <div className="flex items-center gap-2 text-cyan-400 font-bold text-sm mb-2">
-          <div className="w-2 h-2 rounded-full bg-cyan-400"></div>
-          <span>无人机机场</span>
-        </div>
-        <div className="flex items-center gap-2 mb-1">
-          <div className="w-3 h-3 rounded-full bg-cyan-500 shadow-md shadow-cyan-500/50"></div>
-          <span className="text-white text-xs">在线</span>
-        </div>
-        <div className="flex items-center gap-2 mb-2">
-          <div className="w-3 h-3 rounded-full bg-gray-500 shadow-md shadow-gray-500/50"></div>
-          <span className="text-white text-xs">离线</span>
-        </div>
-        <div className="pt-2 border-t border-white/10">
-          <div className="flex items-center gap-2 mb-1">
-            <div className="w-6 h-[2px] bg-cyan-500"></div>
-            <span className="text-white text-xs">飞行路线</span>
+      {showOverlays && (
+        <>
+          <div className="absolute top-4 right-4 bg-black/70 backdrop-blur-md rounded-xl p-3 border border-red-500/30 shadow-lg z-10">
+            <div className="flex items-center gap-2 text-red-400 font-bold text-sm mb-2">
+              <svg className="w-3 h-3 text-red-400" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 2L20 20H4L12 2Z" />
+              </svg>
+              <span>预警点位</span>
+            </div>
+            <div className="flex items-center gap-2 mb-1">
+              <svg className="w-4 h-4" viewBox="0 0 24 24">
+                <path d="M12 2L20 20H4L12 2Z" fill="#dc2626" stroke="white" strokeWidth="2" />
+              </svg>
+              <span className="text-white text-xs">一级预警</span>
+            </div>
+            <div className="flex items-center gap-2 mb-1">
+              <svg className="w-4 h-4" viewBox="0 0 24 24">
+                <path d="M12 2L20 20H4L12 2Z" fill="#f97316" stroke="white" strokeWidth="2" />
+              </svg>
+              <span className="text-white text-xs">二级预警</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <svg className="w-4 h-4" viewBox="0 0 24 24">
+                <path d="M12 2L20 20H4L12 2Z" fill="#eab308" stroke="white" strokeWidth="2" />
+              </svg>
+              <span className="text-white text-xs">三级预警</span>
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full bg-green-400 shadow-md shadow-green-400/50"></div>
-            <span className="text-white text-xs">飞行中无人机</span>
-          </div>
-        </div>
-      </div>
 
-      <div className="absolute bottom-4 left-4 bg-black/70 backdrop-blur-md rounded-xl p-3 border border-cyan-500/30 shadow-lg z-10">
-        <div className="text-cyan-400 font-bold text-sm">杭州市环境监测分布</div>
-        <div className="text-white/60 text-xs mt-1">共 11 个空气质量检测站</div>
-        <div className="text-white/60 text-xs">4 个光量子雷达站 | 5 个无人机机场</div>
-        <div className="text-green-400 text-xs mt-1">3 个飞行任务进行中</div>
-      </div>
+          <div className="absolute top-4 left-4 bg-black/70 backdrop-blur-md rounded-xl p-3 border border-green-500/30 shadow-lg z-10">
+            <div className="flex items-center gap-2 text-green-400 font-bold text-sm mb-2">
+              <div className="w-2 h-2 rounded-full bg-green-400"></div>
+              <span>空气质量检测站</span>
+            </div>
+            <div className="flex items-center gap-2 mb-1">
+              <div className="w-3 h-3 rounded-full bg-green-500 shadow-md shadow-green-500/50"></div>
+              <span className="text-white text-xs">优 (0-35)</span>
+            </div>
+            <div className="flex items-center gap-2 mb-1">
+              <div className="w-3 h-3 rounded-full bg-yellow-500 shadow-md shadow-yellow-500/50"></div>
+              <span className="text-white text-xs">良 (36-75)</span>
+            </div>
+            <div className="flex items-center gap-2 mb-1">
+              <div className="w-3 h-3 rounded-full bg-orange-500 shadow-md shadow-orange-500/50"></div>
+              <span className="text-white text-xs">轻度污染</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full bg-red-500 shadow-md shadow-red-500/50"></div>
+              <span className="text-white text-xs">中度及以上</span>
+            </div>
+          </div>
+
+          <div className="absolute bottom-4 right-4 bg-black/70 backdrop-blur-md rounded-xl p-3 border border-purple-500/30 shadow-lg z-10">
+            <div className="flex items-center gap-2 text-purple-400 font-bold text-sm mb-2">
+              <div className="w-2 h-2 rounded-full bg-purple-400"></div>
+              <span>光量子雷达站</span>
+            </div>
+            <div className="flex items-center gap-2 mb-1">
+              <div className="w-3 h-3 rounded-full bg-purple-500 shadow-md shadow-purple-500/50"></div>
+              <span className="text-white text-xs">在线</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full bg-gray-500 shadow-md shadow-gray-500/50"></div>
+              <span className="text-white text-xs">离线</span>
+            </div>
+            <div className="mt-2 pt-2 border-t border-white/10">
+              <div className="text-white/50 text-xs">紫色区域为雷达覆盖范围</div>
+            </div>
+          </div>
+
+          <div className="absolute top-4 left-[160px] bg-black/70 backdrop-blur-md rounded-xl p-3 border border-cyan-500/30 shadow-lg z-10">
+            <div className="flex items-center gap-2 text-cyan-400 font-bold text-sm mb-2">
+              <div className="w-2 h-2 rounded-full bg-cyan-400"></div>
+              <span>无人机机场</span>
+            </div>
+            <div className="flex items-center gap-2 mb-1">
+              <div className="w-3 h-3 rounded-full bg-cyan-500 shadow-md shadow-cyan-500/50"></div>
+              <span className="text-white text-xs">在线</span>
+            </div>
+            <div className="flex items-center gap-2 mb-2">
+              <div className="w-3 h-3 rounded-full bg-gray-500 shadow-md shadow-gray-500/50"></div>
+              <span className="text-white text-xs">离线</span>
+            </div>
+            <div className="pt-2 border-t border-white/10">
+              <div className="flex items-center gap-2 mb-1">
+                <div className="w-6 h-[2px] bg-cyan-500"></div>
+                <span className="text-white text-xs">飞行路线</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="w-3 h-3 rounded-full bg-green-400 shadow-md shadow-green-400/50"></div>
+                <span className="text-white text-xs">飞行中无人机</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="absolute bottom-4 left-4 bg-black/70 backdrop-blur-md rounded-xl p-3 border border-cyan-500/30 shadow-lg z-10">
+            <div className="text-cyan-400 font-bold text-sm">杭州市环境监测分布</div>
+            <div className="text-white/60 text-xs mt-1">共 11 个空气质量检测站</div>
+            <div className="text-white/60 text-xs">4 个光量子雷达站 | 5 个无人机机场</div>
+            <div className="text-green-400 text-xs mt-1">3 个飞行任务进行中</div>
+          </div>
+        </>
+      )}
     </div>
   );
 };

@@ -10,8 +10,11 @@ html, body, #root {
   overflow: hidden;
 }
 
+// 不引入外部 HTTPS 字体（Google Fonts），正式环境为 HTTP 部署，部分用户网络无法访问 HTTPS 资源；
+// 直接使用本地字体栈回退。
+
 body {
-  font-family: "Microsoft YaHei", "微软雅黑", "Microsoft YaHei UI", sans-serif;
+  font-family: "Source Han Sans", "Source Han Sans CN", "Source Han Sans-Bold", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
   font-size: 16px;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;

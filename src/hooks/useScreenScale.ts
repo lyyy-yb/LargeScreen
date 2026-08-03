@@ -11,9 +11,11 @@ export function useScreenScale(options: ScaleOptions = {}) {
   const calculateScale = useCallback(() => {
     const screenWidth = window.innerWidth
     const screenHeight = window.innerHeight
-    const scaleX = screenWidth / designWidth
-    const scaleY = screenHeight / designHeight
-    return Math.min(scaleX, scaleY)
+    // 不保持横竖比例：X/Y 各自独立拉伸铺满视口，避免等比缩放产生的留白/变形难看问题
+    return {
+      scaleX: screenWidth / designWidth,
+      scaleY: screenHeight / designHeight,
+    }
   }, [designWidth, designHeight])
 
   const [scale, setScale] = useState(calculateScale)
@@ -24,5 +26,5 @@ export function useScreenScale(options: ScaleOptions = {}) {
     return () => window.removeEventListener('resize', handleResize)
   }, [calculateScale])
 
-  return { scale, designWidth, designHeight }
+  return { scaleX: scale.scaleX, scaleY: scale.scaleY, designWidth, designHeight }
 }

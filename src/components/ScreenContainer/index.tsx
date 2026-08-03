@@ -12,7 +12,7 @@ export default function ScreenContainer({
   designWidth = 1600,
   designHeight = 900,
 }: ScreenContainerProps) {
-  const { scale } = useScreenScale({ designWidth, designHeight })
+  const { scaleX, scaleY } = useScreenScale({ designWidth, designHeight })
 
   return (
     <div className="w-full h-full flex items-center justify-center overflow-hidden bg-[#00162d]">
@@ -21,7 +21,7 @@ export default function ScreenContainer({
         style={{
           width: designWidth,
           height: designHeight,
-          transform: `scale(${scale})`,
+          transform: `scale(${scaleX}, ${scaleY})`,
           transformOrigin: 'center center',
         }}
       >

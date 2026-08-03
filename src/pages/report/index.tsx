@@ -1,8 +1,10 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useMemo, useRef } from 'react'
 import { Chart } from '@antv/g2'
 import { Progress, Table, Tag } from 'antd'
 import type { TableColumnsType } from 'antd'
 import { AlertFilled, ArrowUpOutlined, ArrowDownOutlined } from '@ant-design/icons'
+import RegionSelector from '@/components/RegionSelector'
+import { useAppStore } from '@/stores'
 
 interface LeftItemType { name: string; per: number; all: number; done: number; list?: LeftItemType[] }
 interface RightItemType { key: number; '完成率': number; '风险预警': '无' | '绿' | '橙' | '红' | '黄'; '乡镇（街道）': string; '任务数': number; '已完成': number }
@@ -69,6 +71,20 @@ const comparisonData = [
 ]
 
 export default function Report() {
+  const selection = useAppStore(state => state.regionContext?.selection)
+  const effectiveTableData = useMemo(() => {
+    const reportTableData = selection?.townName
+      ? mockTableData.filter(item => item['乡镇（街道）'] === selection.townName)
+      : selection?.countyName && selection.countyName !== '余姚市'
+        ? []
+        : mockTableData
+    return reportTableData.length
+      ? reportTableData
+      : selection?.townName
+        ? [{ key: 1, '乡镇（街道）': selection.townName, '任务数': 0, '已完成': 0, '完成率': 0, '风险预警': '无' as const }]
+        : reportTableData
+  }, [selection])
+  const reportAreaName = selection?.townName || selection?.countyName || selection?.cityName || selection?.provinceName || '浙江省'
   const waterRef = useRef<HTMLDivElement>(null)
   const barRef = useRef<HTMLDivElement>(null)
   const chartRef = useRef<Chart | null>(null)
@@ -95,7 +111,7 @@ export default function Report() {
       const chart = new Chart({ container: barRef.current, autoFit: true })
       chart.theme({ type: 'classicDark' })
       chart.interval()
-        .data(mockTableData)
+        .data(effectiveTableData)
         .encode('x', '乡镇（街道）')
         .encode('y', '完成率')
         .axis({
@@ -121,7 +137,7 @@ export default function Report() {
       tChart.render()
     }
     return () => { chartRef.current?.destroy(); trendChartRef.current?.destroy() }
-  }, [])
+  }, [effectiveTableData])
 
   const columns: TableColumnsType<RightItemType> = [
     { title: '序号', dataIndex: 'key', width: 60 },
@@ -142,13 +158,16 @@ export default function Report() {
 
   return (
     <div className="h-full w-full pt-60px pb-20px px-20px flex bg-#004385 box-border">
+      <div className="absolute top-62px left-1/2 -translate-x-1/2 z-50">
+        <RegionSelector />
+      </div>
       {/* 左侧面板 */}
       <div className="w-36% bg-[rgba(6,45,97,0.5)]">
         <div className="w-full h-120px flex px-20px py-20px">
           <div ref={waterRef} className="w-120px h-120px brightness-130" />
           <div className="w-[calc(100%-140px)] flex flex-col justify-around">
             <div>
-              <span className="c-#fff text-20px">{summary.name}</span> <Tag color="cyan">完成率</Tag>
+              <span className="c-#fff text-20px">{reportAreaName}年度任务汇总</span> <Tag color="cyan">完成率</Tag>
             </div>
             <div className="inline-flex justify-between">
               <div>
@@ -221,7 +240,7 @@ export default function Report() {
             <div className="text-16px font-bold c-#A0C7FF mb-6px">月度趋势分析</div>
             <div ref={trendRef} className="h-220px w-full" />
           </div>
-          <Table<RightItemType> pagination={false} columns={columns} dataSource={mockTableData} size="small" />
+          <Table<RightItemType> pagination={false} columns={columns} dataSource={effectiveTableData} size="small" />
         </div>
       </div>
     </div>

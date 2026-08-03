@@ -1,16 +1,29 @@
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Avatar, Dropdown, Space } from 'antd'
 import type { MenuProps } from 'antd'
 import { UserOutlined, SettingOutlined } from '@ant-design/icons'
-import { useAuthStore } from '@/stores'
+import dayjs from 'dayjs'
+import { useAppStore, useAuthStore } from '@/stores'
 import hBg from '@/assets/images/bg/h-bg.png'
 
 export default function Header() {
   const navigate = useNavigate()
   const { username, logout } = useAuthStore()
+  const resetRegionContext = useAppStore(state => state.resetRegionContext)
+  const [currentTime, setCurrentTime] = useState(() => dayjs().format('YYYY / MM / DD HH:mm'))
+
+  useEffect(() => {
+    const timer = window.setInterval(
+      () => setCurrentTime(dayjs().format('YYYY / MM / DD HH:mm')),
+      60_000,
+    )
+    return () => window.clearInterval(timer)
+  }, [])
 
   const handleLogout = () => {
     logout()
+    resetRegionContext()
     navigate('/login')
   }
 
@@ -57,17 +70,21 @@ export default function Header() {
   }
 
   return (
-    <header className="h-40px shrink-0 relative flex justify-center bg-gradient-to-r from-[#3d8ad4] via-[#1a5ab0] to-[#3d8ad4]">
+    <header className="screen-header h-52px shrink-0 relative flex justify-center bg-gradient-to-r from-[#3d8ad4] via-[#1a5ab0] to-[#3d8ad4]">
+      <time className="absolute left-18px top-10px z-100 text-[#2af3ff] text-13px font-mono tracking-wide">
+        {currentTime}
+      </time>
+
       {/* 标题图片 - 与demo一致的装饰性标题 */}
       <img
         src={hBg}
-        className="z-99 object-contain h-80px"
+        className="z-99 pointer-events-none object-contain h-86px"
         draggable={false}
         alt="颗粒物量子溯源管控平台"
       />
 
       {/* 右侧操作区 */}
-      <div className="absolute right-0 pr-16px top-4px pointer-events-auto z-1000 flex gap-16px">
+      <div className="absolute right-0 pr-16px top-10px pointer-events-auto z-1000 flex gap-16px">
         <Dropdown menu={{ items: manageItems, onClick: onManageClick }}>
           <Space className="cursor-pointer">
             <SettingOutlined className="text-#FFFFFF text-lg" />

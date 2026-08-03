@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
-import { Scene, RasterLayer, PointLayer, LayerPopup, Popup, ILayer } from '@antv/l7'
+import { Scene, RasterLayer, PointLayer, type ILayer } from '@antv/l7'
 import { Map as L7Map } from '@antv/l7-maps'
 import { useAppStore } from '@/stores/useAppStore'
 import { leidaList, alarmPointAll, dockList, wuranList } from '@/servers/mapBox'
 import { cities, districts } from '@/utils/city'
-import { wuLeixingObj, customDiv, customLeiDiv } from '@/utils/assemble'
+import { toRegionQuery } from '@/utils/region'
+import { wuImgList, wuLeixingObj } from '@/utils/assemble'
 import FlyListModel from './FlyListModel'
 
 // Mock数据（API不可用时回退）
@@ -78,7 +79,7 @@ export default function MapBox({
 }: MapBoxProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const sceneRef = useRef<Scene | null>(null)
-  const { setMapInstance, setLeftLoading, accessibleDistrict } = useAppStore()
+  const { setMapInstance, setLeftLoading, regionContext } = useAppStore()
   const [flyVisible, setFlyVisible] = useState(false)
   const [lngLat, setLngLat] = useState<{ lng: number; lat: number }>({ lng: 0, lat: 0 })
 
@@ -104,9 +105,19 @@ export default function MapBox({
       logoVisible: false,
     })
 
-    scene.on('loaded', () => {
+    scene.on('loaded', async () => {
       sceneRef.current = scene
       setMapInstance(scene)
+
+      // L7 必须先注册图片资源，否则符号图层只会创建但不显示。
+      await Promise.all([
+        scene.addImage('radar-on', '/marker/radar-on.png'),
+        scene.addImage('radar-off', '/marker/radar-off.png'),
+        scene.addImage('drone-on', '/marker/drone-on.png'),
+        scene.addImage('drone-off', '/marker/drone-off.png'),
+        scene.addImage('drone-fly', '/marker/drone-fly.png'),
+        ...wuImgList.map(name => scene.addImage(name, `/marker/${name}.png`)),
+      ])
 
       // 卫星瓦片
       const offMapUrl = `${window.location.origin}/offMap/api/tilesets/zjw/{z}/{x}/{y}.jpg`
@@ -118,22 +129,17 @@ export default function MapBox({
       // 地图点击 → 派遣无人机
       scene.on('click', (ev: any) => {
         if (showFlyDispatch && ev.lngLat) {
-          const popup = new Popup({
-            html: '<button id="A_R_PAIQIAN" class="marker_popup_btn" style="margin-left:60px">派遣无人机</button>',
-            lngLat: ev.lngLat,
-          })
-          scene.addPopup(popup)
           setLngLat(ev.lngLat)
-          setTimeout(() => {
-            document.getElementById('A_R_PAIQIAN')?.addEventListener('click', () => setFlyVisible(true))
-          }, 300)
+          setFlyVisible(true)
         }
       })
 
       // 加载各图层数据
       const cityName = cities.find(_ => `${_.adcode}` === curCity)?.name || ''
       const districtName = districts.find(_ => `${_.adcode}` === curDistrict)?.name || ''
-      const params = { city: cityName, district: districtName }
+      const params = regionContext
+        ? toRegionQuery(regionContext.querySelection)
+        : { city: cityName, district: districtName }
 
       if (showRadar) loadRadar(scene, params)
       if (showPollution) loadPollution(scene, params)
@@ -167,7 +173,7 @@ export default function MapBox({
     if (radarLayerRef.current) { radarLayerRef.current.destroy(); radarLayerRef.current = null }
     if (radarIconLayerRef.current) { radarIconLayerRef.current.destroy(); radarIconLayerRef.current = null }
 
-    const leiList = list.map(item => ({ ...item, imgName: 'bsc' }))
+    const leiList = list.map(item => ({ ...item, imgName: 'radar-on' }))
 
     // 雷达扫描动画
     const radarAnimLayer = new PointLayer({ zIndex: 9, name: 's-radar-layer', enablePropagation: false, pickingBuffer: 2 })
@@ -183,17 +189,10 @@ export default function MapBox({
     // 雷达图标
     const radarIconLayer = new PointLayer({ zIndex: 10, name: 's-radar-layer2', enablePropagation: false, pickingBuffer: 2 })
       .source(leiList, { parser: { type: 'json', x: 'bsiLng', y: 'bsiLat' } })
-      .shape('imgName', ['bsc'])
+      .shape('imgName', ['radar-on'])
       .size(30)
     scene.addLayer(radarIconLayer)
     radarIconLayerRef.current = radarIconLayer
-
-    // 雷达Popup
-    const radarPopup = new LayerPopup({
-      items: [{ layer: radarIconLayer, customContent: (feature: any) => customLeiDiv(feature) }],
-      trigger: 'click',
-    })
-    scene.addPopup(radarPopup)
   }
 
   // 加载告警点位
@@ -234,12 +233,6 @@ export default function MapBox({
       .size(10)
     scene.addLayer(imageLayer)
     alarmLayerRef.current = imageLayer
-
-    const alarmPopup = new LayerPopup({
-      items: [{ layer: imageLayer, customContent: (feature: any) => customDiv(feature, accessibleDistrict !== 'all') }],
-      trigger: 'click',
-    })
-    scene.addPopup(alarmPopup)
   }
 
   // 加载污染源
@@ -266,12 +259,6 @@ export default function MapBox({
       .size(10)
     scene.addLayer(imageLayer)
     pollutionLayerRef.current = imageLayer
-
-    const wuPopup = new LayerPopup({
-      items: [{ layer: imageLayer, customContent: (feature: any) => customDiv(feature, accessibleDistrict !== 'all') }],
-      trigger: 'click',
-    })
-    scene.addPopup(wuPopup)
   }
 
   // 加载无人机机场
@@ -279,13 +266,13 @@ export default function MapBox({
     try {
       const res = await dockList(params)
       if (res?.resultCode === 0 && Array.isArray(res.data)) {
-        const list = res.data.map((item: any) => ({ ...item, imgName: 'wrjC' }))
+        const list = res.data.map((item: any) => ({ ...item, imgName: 'drone-on' }))
         renderDrone(scene, list)
         return
       }
     } catch (e) { console.warn('无人机API不可用，使用mock', e) }
     // Mock回退
-    const list = mockDockList.map(item => ({ ...item, imgName: 'wrjC' }))
+    const list = mockDockList.map(item => ({ ...item, imgName: 'drone-on' }))
     renderDrone(scene, list)
   }
 
@@ -294,16 +281,10 @@ export default function MapBox({
     if (droneLayerRef.current) { droneLayerRef.current.destroy(); droneLayerRef.current = null }
     const imageLayer = new PointLayer({ zIndex: 10, enablePropagation: false, pickingBuffer: 2 })
       .source(list, { parser: { type: 'json', x: 'dockLng', y: 'dockLat' } })
-      .shape('imgName', ['wrjC'])
+      .shape('imgName', ['drone-on'])
       .size(18)
     scene.addLayer(imageLayer)
     droneLayerRef.current = imageLayer
-
-    const dronePopup = new LayerPopup({
-      items: [{ layer: imageLayer, customContent: (feature: any) => customDiv(feature) }],
-      trigger: 'click',
-    })
-    scene.addPopup(dronePopup)
   }
 
   // 初始化
@@ -319,16 +300,18 @@ export default function MapBox({
   // 区域变化时重新加载
   useEffect(() => {
     const scene = sceneRef.current
-    if (!scene || !curCity) return
+    if (!scene || (!curCity && !regionContext)) return
     const cityName = cities.find(_ => `${_.adcode}` === curCity)?.name || ''
     const districtName = districts.find(_ => `${_.adcode}` === curDistrict)?.name || ''
-    const params = { city: cityName, district: districtName }
+    const params = regionContext
+      ? toRegionQuery(regionContext.querySelection)
+      : { city: cityName, district: districtName }
     if (showRadar) loadRadar(scene, params)
     if (showPollution) loadPollution(scene, params)
     if (showDrone) loadDrone(scene, params)
     // 加载函数依赖当前场景引用，不作为重建场景的依赖。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [curCity, curDistrict])
+  }, [curCity, curDistrict, regionContext?.querySelection])
 
   return (
     <div className={`relative w-full h-full ${className}`}>

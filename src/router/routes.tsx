@@ -9,7 +9,6 @@ import PageLoading from '@/components/PageLoading'
 // 懒加载页面
 const Login = lazy(() => import('@/pages/login'))
 const Monitor = lazy(() => import('@/pages/monitor'))
-const Overview = lazy(() => import('@/pages/overview'))
 const Radar = lazy(() => import('@/pages/radar'))
 const Drone = lazy(() => import('@/pages/drone'))
 const Patrol = lazy(() => import('@/pages/patrol'))
@@ -59,11 +58,6 @@ export const routes: RouteObject[] = [
         path: 'monitor',
         element: <LazyComponent><Monitor /></LazyComponent>,
         handle: { title: '监控大屏', tab: true } as RouteMeta,
-      },
-      {
-        path: 'overview',
-        element: <LazyComponent><Overview /></LazyComponent>,
-        handle: { title: '全局概况', tab: true } as RouteMeta,
       },
       {
         path: 'radar',
@@ -121,7 +115,6 @@ export const routes: RouteObject[] = [
 // Tab 配置
 export const tabRoutes = [
   { key: '/monitor', title: '监控大屏' },
-  { key: '/overview', title: '全局概况' },
   { key: '/radar', title: '光量子雷达' },
   { key: '/drone', title: '无人机机场' },
   { key: '/patrol', title: '走航巡查' },

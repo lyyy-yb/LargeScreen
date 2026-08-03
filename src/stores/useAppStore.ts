@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { devtools } from 'zustand/middleware'
 import type { Scene } from '@antv/l7'
 import { getLocalInfo, setLocalInfo } from '@/utils/storage'
+import type { RegionContext, RegionSelection } from '@/types/region'
 
 const ACCESSIBLE_CITY_KEY = 'ACCESSIBLE_CITY'
 const ACCESSIBLE_DISTRICT_KEY = 'ACCESSIBLE_DISTRICT'
@@ -52,6 +53,11 @@ interface AppState {
   accessibleFeature: string
   setAccessibleFeature: (v: string) => void
 
+  regionContext: RegionContext | null
+  setRegionContext: (context: RegionContext) => void
+  setRegionSelection: (selection: RegionSelection) => void
+  resetRegionContext: () => void
+
   // 左侧加载状态
   leftLoading: boolean
   setLeftLoading: (v: boolean) => void
@@ -96,6 +102,59 @@ export const useAppStore = create<AppState>()(
         setLocalInfo(ACCESSIBLE_FEATURE_KEY, accessibleFeature)
         set({ accessibleFeature })
       },
+
+      regionContext: null,
+      setRegionContext: (regionContext) => {
+        const { roleLevel, selection } = regionContext
+        const accessibleCity = roleLevel === 'admin' ? 'all' : selection.cityName || 'all'
+        const accessibleDistrict =
+          roleLevel === 'admin' || roleLevel === 'city' ? 'all' : selection.countyName || 'all'
+        setLocalInfo(ACCESSIBLE_CITY_KEY, accessibleCity)
+        setLocalInfo(ACCESSIBLE_DISTRICT_KEY, accessibleDistrict)
+        set({
+          regionContext,
+          currentProvince: selection.provinceCode,
+          currentCity: selection.cityCode || '',
+          currentDistrict: selection.countyCode || '',
+          accessibleCity,
+          accessibleDistrict,
+        })
+      },
+      setRegionSelection: (selection) => set(state => {
+        if (!state.regionContext) return state
+        const withoutTown = (value: RegionSelection): RegionSelection => ({
+          ...value,
+          townDeptId: undefined,
+          townName: undefined,
+        })
+        const mapSelection = state.regionContext.roleLevel === 'admin'
+          ? {
+              provinceCode: state.regionContext.defaultSelection.provinceCode,
+              provinceName: state.regionContext.defaultSelection.provinceName,
+            }
+          : state.regionContext.roleLevel === 'city'
+            ? withoutTown(state.regionContext.defaultSelection)
+            : withoutTown(state.regionContext.defaultSelection)
+        return {
+          regionContext: {
+            ...state.regionContext,
+            selection,
+            mapSelection,
+            querySelection: selection,
+          },
+          currentProvince: selection.provinceCode,
+          currentCity: selection.cityCode || '',
+          currentDistrict: selection.countyCode || '',
+        }
+      }),
+      resetRegionContext: () => set({
+        regionContext: null,
+        currentProvince: '330000',
+        currentCity: '',
+        currentDistrict: '',
+        accessibleCity: 'all',
+        accessibleDistrict: 'all',
+      }),
 
       leftLoading: false,
       setLeftLoading: (leftLoading) => set({ leftLoading }),

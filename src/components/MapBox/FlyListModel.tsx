@@ -3,6 +3,8 @@ import { Button, Modal } from 'antd'
 import { ExclamationCircleOutlined } from '@ant-design/icons'
 import { dockList, wrjPatrol } from '@/servers/mapBox'
 import { cities, districts } from '@/utils/city'
+import { useAppStore } from '@/stores'
+import { toRegionQuery } from '@/utils/region'
 
 interface DockItem {
   dockName: string
@@ -27,17 +29,18 @@ const mockDocks: DockItem[] = [
 ]
 
 export default function FlyListModel({ visible, setVisible, curCity, curDistrict, lngLat }: FlyListModelProps) {
+  const querySelection = useAppStore(state => state.regionContext?.querySelection)
   const [docks, setDocks] = useState<DockItem[]>([])
   const [modal, contextHolder] = Modal.useModal()
 
   useEffect(() => {
-    if (!curCity || !curDistrict) return
-
     const loadDocks = async () => {
       const cityName = cities.find(_ => `${_.adcode}` === curCity)?.name || ''
       const districtName = districts.find(_ => `${_.adcode}` === curDistrict)?.name || ''
       try {
-        const res = await dockList({ city: cityName, district: districtName })
+        const res = await dockList(querySelection
+          ? toRegionQuery(querySelection)
+          : { city: cityName, district: districtName })
         if (res?.resultCode === 0 && Array.isArray(res.data)) {
           setDocks(res.data)
           return
@@ -47,7 +50,7 @@ export default function FlyListModel({ visible, setVisible, curCity, curDistrict
     }
 
     void loadDocks()
-  }, [curCity, curDistrict])
+  }, [curCity, curDistrict, querySelection])
 
   const showConfirm = (dockName: string, dockCode: string) => {
     const inData = { dockCode, ...lngLat }

@@ -1,18 +1,29 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Button, Table, Modal, Form, Input, Select, Switch, InputNumber, Tabs, Tag, message } from 'antd'
-import { PlusOutlined, EditOutlined, EyeOutlined, AlertFilled, ArrowLeftOutlined, SearchOutlined, SendOutlined } from '@ant-design/icons'
+import { Button, Table, Modal, Form, Input, Select, Radio, InputNumber, Switch, Tag, Space, DatePicker, App } from 'antd'
+import { PlusOutlined, EditOutlined, EyeOutlined, AlertFilled, ArrowLeftOutlined, DeleteOutlined, SendOutlined, SearchOutlined, CheckCircleOutlined } from '@ant-design/icons'
+import RegionSelector from '@/components/RegionSelector'
+import './index.less'
+import { useAppStore, useAuthStore } from '@/stores'
+import { addOption, buildDeptRegionOptions, flattenDepartments, nameEquals } from '@/utils/deptRegion'
+import dayjs from 'dayjs'
+import { alertEventApi, disposalTaskApi, warningRuleApi } from '@/servers/business'
+import type { AlertEventDTO, DisposalTaskDTO, WarningRuleDTO } from '@/types/business'
+import type { DeptInfo } from '@/types/auth'
+import { deptList, userList } from '@/servers/api'
 
 const { Option } = Select
 
 interface AlertRule {
   id: string; ruleName: string; dataType: string; fieldName: string;
   ruleType: string; alertLevel: string; priority: number; enabled: boolean;
-  description: string; config: Record<string, any>; autoDispatch: boolean; targetCity: string;
+  description: string; config: Record<string, any>; autoDispatch: boolean;
+  targetCityId?: number | string; targetDistrictId?: number | string; targetTownId?: number | string;
 }
 interface AlertEvent {
   id: string; ruleName: string; alertLevel: string; dataType: string;
   deviceName: string; location: string; city: string; district: string;
+  town?: string;
   triggerReason: string; status: string; createdAt: string; assignedCity?: string;
 }
 interface DisposalTask {
@@ -20,6 +31,62 @@ interface DisposalTask {
   assigneeName: string; requesterName: string; requireTime: string; createdAt: string;
   disposalContent?: string; photos?: string[]; completedAt?: string;
   city: string; district: string; town?: string;
+}
+
+function parseConfig(config: WarningRuleDTO['config']): Record<string, unknown> {
+  if (!config) return {}
+  if (typeof config === 'object') return config
+  let value: unknown = config
+  for (let i = 0; i < 3 && typeof value === 'string'; i++) {
+    try {
+      value = JSON.parse(value)
+    } catch {
+      break
+    }
+  }
+  return value && typeof value === 'object' ? (value as Record<string, unknown>) : {}
+}
+
+function toAlertRule(item: WarningRuleDTO): AlertRule {
+  return {
+    ...item,
+    id: String(item.id),
+    description: item.description ?? '',
+    config: parseConfig(item.config),
+    enabled: item.enabled === 1,
+    autoDispatch: item.autoDispatch === 1,
+    targetCityId: item.targetCityId != null ? String(item.targetCityId) : undefined,
+    targetDistrictId: item.targetDistrictId != null ? String(item.targetDistrictId) : undefined,
+    targetTownId: item.targetTownId != null ? String(item.targetTownId) : undefined,
+  }
+}
+
+function toAlertEvent(item: AlertEventDTO): AlertEvent {
+  return {
+    ...item,
+    id: String(item.id),
+    createdAt: item.createTime ?? '',
+  }
+}
+
+function toDisposalTask(item: DisposalTaskDTO): DisposalTask {
+  const photos = Array.isArray(item.photos)
+    ? item.photos
+    : typeof item.photos === 'string'
+      ? item.photos.split(',').filter(Boolean)
+      : []
+  return {
+    ...item,
+    id: String(item.id),
+    alertId: String(item.alertId),
+    assigneeName: item.assigneeName ?? '',
+    requesterName: item.requesterName ?? '',
+    requireTime: item.requireTime ?? '',
+    createdAt: item.createTime ?? '',
+    city: item.city ?? '',
+    district: item.district ?? '',
+    photos,
+  }
 }
 
 const dataTypeOptions = [
@@ -48,11 +115,6 @@ const taskTypeOptions = [
   { value: 'flight_dispatch', label: '飞行调度' },
   { value: 'enterprise_inspection', label: '企业巡查' },
 ]
-const cityOptions = [
-  { value: 'hangzhou', label: '杭州市' },
-  { value: 'nanjing', label: '南京市' },
-  { value: 'shanghai', label: '上海市' },
-]
 const townOptions = [
   { value: 'fengshan', label: '凤山街道' },
   { value: 'yangming', label: '阳明街道' },
@@ -65,7 +127,9 @@ const townOptions = [
 const fieldOptions: Record<string, { value: string; label: string }[]> = {
   air_quality_station: [
     { value: 'pm25', label: 'PM2.5' }, { value: 'pm10', label: 'PM10' },
-    { value: 'tsp', label: 'TSP' }, { value: 'o3', label: 'O\u2083' },
+    { value: 'tsp', label: 'TSP' }, { value: 'o3', label: 'O₃' },
+    { value: 'so2', label: 'SO₂' }, { value: 'no2', label: 'NO₂' },
+    { value: 'co', label: 'CO' }, { value: 'vocs', label: 'VOCs' },
   ],
   mobile_monitor_car: [{ value: 'pm25', label: 'PM2.5' }, { value: 'tsp', label: 'TSP' }],
   drone_sensor: [{ value: 'pm25', label: 'PM2.5' }, { value: 'pm10', label: 'PM10' }],
@@ -73,34 +137,18 @@ const fieldOptions: Record<string, { value: string; label: string }[]> = {
   radar_station: [{ value: 'alarmLevel', label: '报警级别' }, { value: 'alarmCount', label: '报警次数' }],
 }
 
-const mockRules: AlertRule[] = [
-  { id: '1', ruleName: 'PM2.5浓度超标预警', dataType: 'air_quality_station', fieldName: 'pm25', ruleType: 'threshold', alertLevel: 'level2', priority: 1, enabled: true, description: 'PM2.5超过75触发', config: { threshold: 75, operator: '>' }, autoDispatch: false, targetCity: 'hangzhou' },
-  { id: '2', ruleName: 'PM2.5严重超标预警', dataType: 'air_quality_station', fieldName: 'pm25', ruleType: 'threshold', alertLevel: 'level1', priority: 1, enabled: true, description: 'PM2.5超过150触发', config: { threshold: 150, operator: '>' }, autoDispatch: true, targetCity: 'hangzhou' },
-  { id: '3', ruleName: '走航车TSP超标预警', dataType: 'mobile_monitor_car', fieldName: 'tsp', ruleType: 'threshold', alertLevel: 'level2', priority: 2, enabled: true, description: 'TSP超过300触发', config: { threshold: 300, operator: '>' }, autoDispatch: false, targetCity: 'hangzhou' },
-  { id: '4', ruleName: '功率因数异常预警', dataType: 'power_monitor', fieldName: 'powerFactor', ruleType: 'threshold', alertLevel: 'level3', priority: 3, enabled: true, description: '功率因数低于0.9', config: { threshold: 0.9, operator: '<' }, autoDispatch: true, targetCity: 'hangzhou' },
-  { id: '5', ruleName: 'PM2.5变化率预警', dataType: 'air_quality_station', fieldName: 'pm25', ruleType: 'change_rate', alertLevel: 'level2', priority: 2, enabled: true, description: '5分钟变化率超50%', config: { timeWindow: 5, rate: 50 }, autoDispatch: false, targetCity: 'hangzhou' },
-]
-
-const mockAlerts: AlertEvent[] = [
-  { id: 'ALT001', ruleName: 'PM2.5浓度超标预警', alertLevel: 'level2', dataType: 'air_quality_station', deviceName: '杭州监测站-1', location: '西湖区', city: 'hangzhou', district: 'xihu', triggerReason: 'PM2.5达到85\u03bcg/m\u00b3，超过阈值75', status: 'pending', createdAt: '2025-11-24 14:30' },
-  { id: 'ALT002', ruleName: 'PM2.5严重超标预警', alertLevel: 'level1', dataType: 'air_quality_station', deviceName: '杭州监测站-2', location: '萧山区工业园', city: 'hangzhou', district: 'xiaoshan', triggerReason: 'PM2.5达到168\u03bcg/m\u00b3，超过阈值150', status: 'processing', createdAt: '2025-11-24 13:45', assignedCity: 'hangzhou' },
-  { id: 'ALT003', ruleName: '走航车TSP超标预警', alertLevel: 'level2', dataType: 'mobile_monitor_car', deviceName: 'HYD1009', location: '余杭区', city: 'hangzhou', district: 'yuhang', triggerReason: 'TSP达到356\u03bcg/m\u00b3，超过阈值300', status: 'pending', createdAt: '2025-11-24 12:20' },
-  { id: 'ALT004', ruleName: '功率因数异常预警', alertLevel: 'level3', dataType: 'power_monitor', deviceName: '萧山工厂-1号', location: '萧山区', city: 'hangzhou', district: 'xiaoshan', triggerReason: '功率因数0.85，低于阈值0.9', status: 'completed', createdAt: '2025-11-24 10:15', assignedCity: 'hangzhou' },
-  { id: 'ALT005', ruleName: 'PM2.5变化率预警', alertLevel: 'level2', dataType: 'air_quality_station', deviceName: '杭州监测站-3', location: '滨江区', city: 'hangzhou', district: 'binjiang', triggerReason: '5分钟变化率65%，超过阈值50%', status: 'pending', createdAt: '2025-11-24 08:45' },
-]
-
-const mockTasks: DisposalTask[] = [
-  { id: 'TSK001', alertId: 'ALT002', dataType: 'air_quality_station', taskType: 'on_site_check', status: 'received', assigneeName: '张伟', requesterName: '李明', requireTime: '2025-11-24 15:30', createdAt: '2025-11-24 13:46', city: 'hangzhou', district: 'xiaoshan' },
-  { id: 'TSK002', alertId: 'ALT003', dataType: 'mobile_monitor_car', taskType: 'vehicle_dispatch', status: 'processing', assigneeName: '王强', requesterName: '李明', requireTime: '2025-11-24 14:20', createdAt: '2025-11-24 12:21', city: 'hangzhou', district: 'yuhang' },
-  { id: 'TSK003', alertId: 'ALT004', dataType: 'power_monitor', taskType: 'enterprise_inspection', status: 'completed', assigneeName: '陈刚', requesterName: '李明', requireTime: '2025-11-24 12:15', createdAt: '2025-11-24 10:16', disposalContent: '经现场核查，该企业设备老化导致功率因数偏低，已建议升级改造。', photos: ['p1.jpg', 'p2.jpg'], completedAt: '2025-11-24 11:45', city: 'hangzhou', district: 'xiaoshan' },
-  { id: 'TSK004', alertId: 'ALT001', dataType: 'air_quality_station', taskType: 'data_verification', status: 'pending', assigneeName: '', requesterName: '李明', requireTime: '2025-11-24 16:00', createdAt: '2025-11-24 14:31', city: 'hangzhou', district: 'xihu' },
-]
-
 export default function AlertPage() {
   const navigate = useNavigate()
-  const [rules, setRules] = useState<AlertRule[]>(mockRules)
-  const [alerts, setAlerts] = useState<AlertEvent[]>(mockAlerts)
-  const [tasks, setTasks] = useState<DisposalTask[]>(mockTasks)
+  const { message, modal } = App.useApp()
+  const regionContext = useAppStore(state => state.regionContext)
+  const user = useAuthStore(state => state.user)
+  const selection = regionContext?.selection
+
+  const [activeTab, setActiveTab] = useState<'rules' | 'alerts' | 'tasks' | 'trends'>('alerts')
+  const [rules, setRules] = useState<AlertRule[]>([])
+  const [alerts, setAlerts] = useState<AlertEvent[]>([])
+  const [tasks, setTasks] = useState<DisposalTask[]>([])
+  const [loading, setLoading] = useState(false)
   const [isRuleModalVisible, setIsRuleModalVisible] = useState(false)
   const [isAlertModalVisible, setIsAlertModalVisible] = useState(false)
   const [isTaskModalVisible, setIsTaskModalVisible] = useState(false)
@@ -109,185 +157,1459 @@ export default function AlertPage() {
   const [selectedTask, setSelectedTask] = useState<DisposalTask | null>(null)
   const [editingRule, setEditingRule] = useState<AlertRule | null>(null)
   const [form] = Form.useForm()
+  const [dispatchForm] = Form.useForm()
+  const [isDispatchModalVisible, setIsDispatchModalVisible] = useState(false)
+  const [dispatchAlert, setDispatchAlert] = useState<AlertEvent | null>(null)
+  const [dispatchSubmitting, setDispatchSubmitting] = useState(false)
+  const [townUserOptions, setTownUserOptions] = useState<{ value: number; label: string }[]>([])
+  const loadedUserTownIds = useRef(new Set<number>())
   const [selectedDataType, setSelectedDataType] = useState('')
+  // 三个列表的服务端分页与筛选状态（默认每页 15 条）
+  const [rulesPage, setRulesPage] = useState(1)
+  const [rulesSize, setRulesSize] = useState(15)
+  const [rulesTotal, setRulesTotal] = useState(0)
+  const [ruleSearchName, setRuleSearchName] = useState('')
+  const [ruleAppliedName, setRuleAppliedName] = useState('')
+  const [ruleFilterDataType, setRuleFilterDataType] = useState<string | undefined>(undefined)
+  const [ruleFilterType, setRuleFilterType] = useState<string | undefined>(undefined)
+  const [ruleFilterLevel, setRuleFilterLevel] = useState<string | undefined>(undefined)
+  const [ruleFilterEnabled, setRuleFilterEnabled] = useState<0 | 1 | undefined>(undefined)
+  const [alertsPage, setAlertsPage] = useState(1)
+  const [alertsSize, setAlertsSize] = useState(15)
+  const [alertsTotal, setAlertsTotal] = useState(0)
+  const [alertSearchDevice, setAlertSearchDevice] = useState('')
+  const [alertAppliedDevice, setAlertAppliedDevice] = useState('')
+  const [alertFilterDataType, setAlertFilterDataType] = useState<string | undefined>(undefined)
+  const [alertFilterLevel, setAlertFilterLevel] = useState<string | undefined>(undefined)
+  const [alertFilterStatus, setAlertFilterStatus] = useState<string | undefined>(undefined)
+  const [tasksPage, setTasksPage] = useState(1)
+  const [tasksSize, setTasksSize] = useState(15)
+  const [tasksTotal, setTasksTotal] = useState(0)
+  const [taskFilterDataType, setTaskFilterDataType] = useState<string | undefined>(undefined)
+  const [taskFilterType, setTaskFilterType] = useState<string | undefined>(undefined)
+  const [taskFilterStatus, setTaskFilterStatus] = useState<string | undefined>(undefined)
+  const [extraDepts, setExtraDepts] = useState<DeptInfo[]>([])
+  const loadingDeptParentIds = useRef(new Set<number>())
+  const allDepts = useMemo(() => {
+    const departments = flattenDepartments([
+      ...(regionContext?.departments ?? []),
+      ...extraDepts,
+    ])
+    const currentDept = user?.dept
+    if (currentDept && !departments.some(dept => Number(dept.deptId) === Number(currentDept.deptId))) {
+      flattenDepartments([currentDept]).forEach(dept => {
+        if (!departments.some(item => Number(item.deptId) === Number(dept.deptId))) departments.push(dept)
+      })
+    }
+    return departments
+  }, [extraDepts, regionContext?.departments, user?.dept])
+  const deptRegionOptions = useMemo(() => buildDeptRegionOptions(allDepts), [allDepts])
+  const lockedRegion = useMemo(() => {
+    if (!regionContext || regionContext.roleLevel === 'admin') return {}
+    const currentDept = allDepts.find(dept => Number(dept.deptId) === Number(user?.deptId ?? user?.dept?.deptId))
+    const cityDept = allDepts.find(dept => nameEquals(dept.deptName, selection?.cityName ?? ''))
+    const districtDept = allDepts.find(dept => nameEquals(dept.deptName, selection?.countyName ?? ''))
 
-  const showAddRuleModal = () => { setEditingRule(null); setSelectedDataType(''); form.resetFields(); setIsRuleModalVisible(true) }
-  const showEditRuleModal = (r: AlertRule) => { setEditingRule(r); setSelectedDataType(r.dataType); form.setFieldsValue(r); setIsRuleModalVisible(true) }
+    if (regionContext.roleLevel === 'city') {
+      const rawCityId = Number(cityDept?.deptId ?? currentDept?.deptId)
+      return {
+        cityId: rawCityId ? String(rawCityId) : undefined,
+        cityName: selection?.cityName,
+      }
+    }
 
-  const handleRuleOk = () => {
-    form.validateFields().then(values => {
-      const config: Record<string, any> = {}
-      if (values.ruleType === 'threshold') { config.threshold = values.threshold; config.operator = values.operator }
-      else if (values.ruleType === 'change_rate') { config.timeWindow = values.timeWindow; config.rate = values.rate }
-      else if (values.ruleType === 'continuous') { config.count = values.count; config.interval = values.interval }
-      else if (values.ruleType === 'offline') { config.offlineTime = values.offlineTime }
-      const newRule: AlertRule = { ...values, id: editingRule?.id || String(Date.now()), config }
-      if (editingRule) setRules(rules.map(i => i.id === editingRule.id ? newRule : i))
-      else setRules([...rules, newRule])
-      setIsRuleModalVisible(false); form.resetFields(); message.success(editingRule ? '更新成功' : '创建成功')
+    const lockedDistrict = districtDept ?? currentDept
+    const rawCityId = Number(cityDept?.deptId ?? lockedDistrict?.parentId)
+    const rawDistrictId = Number(lockedDistrict?.deptId)
+    return {
+      cityId: rawCityId ? String(rawCityId) : undefined,
+      cityName: selection?.cityName,
+      districtId: rawDistrictId ? String(rawDistrictId) : undefined,
+      districtName: selection?.countyName,
+    }
+  }, [allDepts, regionContext, selection?.cityName, selection?.countyName, user?.dept?.deptId, user?.deptId])
+  const cityOptions = useMemo(
+    () => addOption(deptRegionOptions.cityOptions, lockedRegion.cityId, lockedRegion.cityName),
+    [deptRegionOptions.cityOptions, lockedRegion.cityId, lockedRegion.cityName],
+  )
+  const targetCityId = Form.useWatch('targetCityId', form)
+  const targetDistrictId = Form.useWatch('targetDistrictId', form)
+  const dispatchCityId = Form.useWatch('cityId', dispatchForm)
+  const dispatchDistrictId = Form.useWatch('districtId', dispatchForm)
+  const dispatchTownId = Form.useWatch('townId', dispatchForm)
+  const dispatchDistrictOptions = useMemo(
+    () => deptRegionOptions.getDistrictOptions(dispatchCityId),
+    [deptRegionOptions, dispatchCityId],
+  )
+  const dispatchTownOptions = useMemo(
+    () => deptRegionOptions.getTownOptions(dispatchDistrictId),
+    [deptRegionOptions, dispatchDistrictId],
+  )
+  const watchedRuleType = Form.useWatch('ruleType', form)
+  const districtOptions = useMemo(
+    () => {
+      const opts = addOption(
+        deptRegionOptions.getDistrictOptions(targetCityId),
+        lockedRegion.districtId,
+        lockedRegion.districtName,
+      )
+      // 添加"全部"选项
+      return [{ value: 'all', label: '全部' }, ...opts]
+    },
+    [deptRegionOptions, lockedRegion.districtId, lockedRegion.districtName, targetCityId],
+  )
+  const targetTownOptions = useMemo(
+    () => {
+      const opts = deptRegionOptions.getTownOptions(targetDistrictId)
+      // 添加"全部"选项
+      return [{ value: 'all', label: '全部' }, ...opts]
+    },
+    [deptRegionOptions, targetDistrictId],
+  )
+  const loadDepartmentChildren = useCallback(async (parentId?: number) => {
+    const normalizedParentId = Number(parentId)
+    if (
+      !Number.isFinite(normalizedParentId)
+      || loadingDeptParentIds.current.has(normalizedParentId)
+    ) return
+    loadingDeptParentIds.current.add(normalizedParentId)
+    try {
+      const response = await deptList({ parentId: normalizedParentId })
+      if (response.code !== 200 || !Array.isArray(response.data)) return
+      const loaded = flattenDepartments(response.data)
+      setExtraDepts(previous => {
+        const knownIds = new Set(flattenDepartments(previous).map(dept => Number(dept.deptId)))
+        const additions = loaded.filter(dept => !knownIds.has(Number(dept.deptId)))
+        return additions.length ? [...previous, ...additions] : previous
+      })
+    } catch {
+      // 权限范围内无下级部门时保持空选项，不影响已锁定区域。
+    }
+  }, [])
+  const canSelectRegion = regionContext?.roleLevel === 'admin'
+  const roleLevel = regionContext?.roleLevel ?? 'town'
+  const isTown = roleLevel === 'town'
+  const canEditRule = !isTown
+
+  useEffect(() => {
+    if (!isRuleModalVisible) return
+    queueMicrotask(() => {
+      if (targetCityId && !districtOptions.length && roleLevel !== 'county' && roleLevel !== 'town') {
+        void loadDepartmentChildren(Number(targetCityId))
+      }
+      if (targetDistrictId && !targetTownOptions.length && roleLevel !== 'town') {
+        void loadDepartmentChildren(Number(targetDistrictId))
+      }
+    })
+  }, [
+    districtOptions.length,
+    isRuleModalVisible,
+    loadDepartmentChildren,
+    roleLevel,
+    targetCityId,
+    targetDistrictId,
+    targetTownOptions.length,
+  ])
+
+  useEffect(() => {
+    if (!isRuleModalVisible) return
+    if (editingRule) return
+    if (roleLevel !== 'city' && roleLevel !== 'county') return
+    queueMicrotask(() => {
+      form.setFieldsValue({
+        ...(lockedRegion.cityId ? { targetCityId: lockedRegion.cityId } : {}),
+        ...(roleLevel === 'county' && lockedRegion.districtId
+          ? { targetDistrictId: lockedRegion.districtId }
+          : {}),
+      })
+    })
+  }, [
+    form,
+    editingRule,
+    isRuleModalVisible,
+    lockedRegion.cityId,
+    lockedRegion.districtId,
+    roleLevel,
+  ])
+
+  const loadBusinessData = useCallback(async () => {
+    setLoading(true)
+    const regionParams = {
+      ...(selection?.cityName ? { city: selection.cityName } : {}),
+      ...(selection?.countyName ? { district: selection.countyName } : {}),
+      ...(selection?.townName ? { town: selection.townName } : {}),
+    }
+    const results = await Promise.allSettled([
+      warningRuleApi.list({
+        pageNum: rulesPage,
+        pageSize: rulesSize,
+        ruleName: ruleAppliedName || undefined,
+        dataType: ruleFilterDataType,
+        ruleType: ruleFilterType,
+        alertLevel: ruleFilterLevel,
+        enabled: ruleFilterEnabled,
+      }),
+      alertEventApi.list({
+        pageNum: alertsPage,
+        pageSize: alertsSize,
+        ...regionParams,
+        deviceName: alertAppliedDevice || undefined,
+        dataType: alertFilterDataType,
+        alertLevel: alertFilterLevel,
+        status: alertFilterStatus,
+      }),
+      disposalTaskApi.list({
+        pageNum: tasksPage,
+        pageSize: tasksSize,
+        ...regionParams,
+        dataType: taskFilterDataType,
+        taskType: taskFilterType,
+        status: taskFilterStatus,
+      }),
+    ])
+    const [ruleResult, alertResult, taskResult] = results
+    if (ruleResult.status === 'fulfilled') {
+      setRules((ruleResult.value.data?.records ?? []).map(toAlertRule))
+      setRulesTotal(ruleResult.value.data?.total ?? 0)
+    }
+    else message.error('预警规则加载失败')
+    if (alertResult.status === 'fulfilled') {
+      setAlerts((alertResult.value.data?.records ?? []).map(toAlertEvent))
+      setAlertsTotal(alertResult.value.data?.total ?? 0)
+    }
+    else message.error('实时预警加载失败')
+    if (taskResult.status === 'fulfilled') {
+      setTasks((taskResult.value.data?.records ?? []).map(toDisposalTask))
+      setTasksTotal(taskResult.value.data?.total ?? 0)
+    }
+    else { setTasks([]); message.error('处置任务加载失败') }
+    setLoading(false)
+  }, [
+    selection,
+    rulesPage, rulesSize, ruleAppliedName, ruleFilterDataType, ruleFilterType, ruleFilterLevel, ruleFilterEnabled,
+    alertsPage, alertsSize, alertAppliedDevice, alertFilterDataType, alertFilterLevel, alertFilterStatus,
+    tasksPage, tasksSize, taskFilterDataType, taskFilterType, taskFilterStatus,
+  ])
+
+  useEffect(() => {
+    queueMicrotask(() => void loadBusinessData())
+  }, [loadBusinessData])
+
+  const applyRuleSearch = (value?: string) => {
+    setRuleAppliedName((value ?? ruleSearchName).trim())
+    setRulesPage(1)
+  }
+
+  const applyAlertSearch = (value?: string) => {
+    setAlertAppliedDevice((value ?? alertSearchDevice).trim())
+    setAlertsPage(1)
+  }
+
+  // 派发弹窗：选中乡镇后加载该乡镇下的用户
+  const loadTownUsers = useCallback(async (townId?: number | string) => {
+    const normalizedTownId = Number(townId)
+    if (!Number.isFinite(normalizedTownId) || loadedUserTownIds.current.has(normalizedTownId)) return
+    loadedUserTownIds.current.add(normalizedTownId)
+    try {
+      const response = await userList({ deptId: normalizedTownId, pageNum: 1, pageSize: 200 })
+      if (response.code !== 200) {
+        message.warning(response.msg || '获取乡镇用户列表失败')
+        return
+      }
+      const options = (response.rows ?? [])
+        .filter(user => user.status === '0')
+        .map(user => ({ value: user.userId, label: user.nickName || user.userName }))
+      setTownUserOptions(options)
+      if (!options.length) message.info('该乡镇下暂无可选处置人员')
+    } catch {
+      message.warning('获取乡镇用户列表失败')
+    }
+  }, [])
+
+  useEffect(() => {
+    if (!isDispatchModalVisible) return
+    const cityValue = dispatchForm.getFieldValue('cityId')
+    const districtValue = dispatchForm.getFieldValue('districtId')
+    const townValue = dispatchForm.getFieldValue('townId')
+    queueMicrotask(() => {
+      if (cityValue && !deptRegionOptions.getDistrictOptions(cityValue).length) {
+        void loadDepartmentChildren(Number(cityValue))
+      }
+      if (districtValue && !deptRegionOptions.getTownOptions(districtValue).length) {
+        void loadDepartmentChildren(Number(districtValue))
+      }
+      if (townValue) void loadTownUsers(townValue)
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isDispatchModalVisible])
+
+  const showDispatchModal = (alert: AlertEvent) => {
+    setDispatchAlert(alert)
+    setTownUserOptions([])
+    dispatchForm.resetFields()
+    const defaults: Record<string, unknown> = {
+      taskType: 'on_site_check',
+      requireTime: dayjs().add(1, 'hour'),
+    }
+    // 默认选中预警事件所属区域；乡镇级角色锁定到所属乡镇
+    if (alert.city) {
+      const cityDept = allDepts.find(dept => nameEquals(dept.deptName, alert.city))
+      if (cityDept) defaults.cityId = String(cityDept.deptId)
+    }
+    if (alert.district) {
+      const districtDept = allDepts.find(dept => nameEquals(dept.deptName, alert.district))
+      if (districtDept) defaults.districtId = String(districtDept.deptId)
+    }
+    if (alert.town) {
+      const townDept = allDepts.find(dept => nameEquals(dept.deptName, alert.town))
+      if (townDept) defaults.townId = String(townDept.deptId)
+    }
+    if (roleLevel !== 'admin') {
+      if (lockedRegion.cityId) defaults.cityId = lockedRegion.cityId
+      if (roleLevel === 'county' && lockedRegion.districtId) defaults.districtId = lockedRegion.districtId
+    }
+    dispatchForm.setFieldsValue(defaults)
+    setIsDispatchModalVisible(true)
+  }
+
+  const handleDispatchOk = () => {
+    dispatchForm.validateFields().then(async values => {
+      if (!dispatchAlert) return
+      setDispatchSubmitting(true)
+      try {
+        await alertEventApi.dispatch({
+          alertId: Number(dispatchAlert.id),
+          taskType: values.taskType,
+          assigneeId: Number(values.assigneeId),
+          townId: values.townId ? Number(values.townId) : undefined,
+          requireTime: dayjs(values.requireTime).format('YYYY-MM-DD HH:mm:ss'),
+          disposalContent: values.disposalContent,
+        })
+        message.success('派发成功')
+        setIsDispatchModalVisible(false)
+        await loadBusinessData()
+      } catch {
+        message.error('任务派发失败')
+      } finally {
+        setDispatchSubmitting(false)
+      }
     })
   }
-  const handleDeleteRule = (id: string) => { Modal.confirm({ title: '确认删除', content: '确定删除该规则？', onOk: () => { setRules(rules.filter(i => i.id !== id)); message.success('删除成功') } }) }
-  const toggleRule = (id: string, en: boolean) => setRules(rules.map(i => i.id === id ? { ...i, enabled: !en } : i))
-  const confirmAlert = (id: string) => { setAlerts(alerts.map(i => i.id === id ? { ...i, status: 'processing' } : i)); message.success('已确认') }
-  const closeAlert = (id: string) => { Modal.confirm({ title: '确认清除', content: '确定清除该预警？', onOk: () => setAlerts(alerts.map(i => i.id === id ? { ...i, status: 'closed' } : i)) }) }
-  const dispatchTask = (alertId: string) => {
-    const a = alerts.find(x => x.id === alertId)
-    if (a) { const t: DisposalTask = { id: 'TSK' + Date.now().toString().slice(-3), alertId: a.id, dataType: a.dataType, taskType: 'on_site_check', status: 'pending', assigneeName: '', requesterName: '李明', requireTime: new Date(Date.now() + 3600000).toISOString().slice(0, 16).replace('T', ' '), createdAt: new Date().toISOString().slice(0, 19).replace('T', ' '), city: a.city, district: a.district }; setTasks([t, ...tasks]); setAlerts(alerts.map(i => i.id === alertId ? { ...i, status: 'processing' } : i)); Modal.success({ title: '派发成功' }) }
+
+  const showAddRuleModal = () => {
+    if (!canEditRule) return
+    setEditingRule(null)
+    setSelectedDataType('')
+    form.resetFields()
+    const defaults: Record<string, unknown> = { autoDispatch: false }
+    if (roleLevel !== 'admin') {
+      defaults.targetCityId = lockedRegion.cityId
+      if (roleLevel === 'county') defaults.targetDistrictId = lockedRegion.districtId
+    }
+    form.setFieldsValue(defaults)
+    setIsRuleModalVisible(true)
   }
-  const updateTaskStatus = (id: string, s: string) => { setTasks(tasks.map(i => i.id === id ? { ...i, status: s } : i)); message.success('状态已更新') }
+  const showEditRuleModal = async (r: AlertRule) => {
+    const buildFormValues = (rule: AlertRule) => {
+      // 将 targetTownId 转为数组以适配多选（统一转成 string 以匹配 options）
+      let townArr: (string | number)[] | undefined
+      if (rule.targetTownId) {
+        const townStr = String(rule.targetTownId)
+        townArr = townStr === 'all' ? ['all'] : townStr.split(',').filter(Boolean).map(v => String(v))
+      }
+      // 从 config 中提取 ruleTimeWindow（间隔时间）
+      const ruleTimeWindow = rule.config?.timeWindow
+      return {
+        ...rule,
+        ...rule.config,
+        targetTownId: townArr,
+        ruleTimeWindow: ruleTimeWindow || undefined,
+      }
+    }
+
+    form.resetFields()
+    setEditingRule(r)
+    setSelectedDataType(r.dataType)
+    // 先设置不含区域字段的基本值
+    const baseValues = buildFormValues(r)
+    form.setFieldsValue({ ...baseValues, targetDistrictId: undefined, targetTownId: undefined })
+    setIsRuleModalVisible(true)
+
+    const hide = message.loading('加载规则详情...', 0)
+    let finalRule = r
+    try {
+      const res = await warningRuleApi.detail(Number(r.id))
+      const detail = res.data
+      if (detail) {
+        const detailRule = toAlertRule(detail)
+        finalRule = {
+          ...r,
+          ...detailRule,
+          targetCityId: detailRule.targetCityId ?? r.targetCityId,
+          targetDistrictId: detailRule.targetDistrictId ?? r.targetDistrictId,
+          targetTownId: detailRule.targetTownId ?? r.targetTownId,
+        }
+        setEditingRule(finalRule)
+      }
+    } catch {
+      // 列表数据已包含编辑所需字段，详情接口异常时保留列表数据回显。
+    } finally {
+      hide()
+    }
+
+    // 确保区域选项加载完成后再设置区域字段
+    const cityId = finalRule.targetCityId
+    if (cityId && roleLevel !== 'county' && roleLevel !== 'town') {
+      await loadDepartmentChildren(Number(cityId))
+    }
+    const districtId = finalRule.targetDistrictId
+    if (districtId && districtId !== 'all' && roleLevel !== 'town') {
+      await loadDepartmentChildren(Number(districtId))
+    }
+    // 延迟一帧让 React 更新 options 后再设置区域值
+    requestAnimationFrame(() => {
+      const regionValues = buildFormValues(finalRule)
+      form.setFieldsValue({
+        targetCityId: regionValues.targetCityId,
+        targetDistrictId: regionValues.targetDistrictId,
+        targetTownId: regionValues.targetTownId,
+      })
+    })
+  }
+
+  const handleRuleOk = () => {
+    form.validateFields().then(async values => {
+      const config: Record<string, unknown> = {}
+      if (values.ruleType === 'threshold' || values.ruleType === 'change_rate') {
+        config.threshold = values.threshold
+        config.operator = values.operator
+        if (values.ruleTimeWindow) config.timeWindow = values.ruleTimeWindow
+      }
+      else if (values.ruleType === 'continuous') { config.count = values.count; config.interval = values.interval }
+      else if (values.ruleType === 'offline') { config.offlineTime = values.offlineTime }
+
+      // 处理目标区县
+      const districtValue = values.targetDistrictId === 'all' ? 'all' : values.targetDistrictId
+      // 处理目标乡镇
+      let townValue: string | undefined
+      if (values.targetDistrictId === 'all') {
+        townValue = undefined
+      } else if (Array.isArray(values.targetTownId)) {
+        townValue = values.targetTownId.includes('all') ? 'all' : values.targetTownId.join(',')
+      } else {
+        townValue = values.targetTownId
+      }
+
+      const payload = {
+        ruleName: values.ruleName,
+        dataType: values.dataType,
+        fieldName: values.fieldName,
+        ruleType: values.ruleType,
+        alertLevel: values.alertLevel,
+        priority: values.priority,
+        enabled: values.enabled === false ? 0 as const : 1 as const,
+        description: values.description,
+        config: JSON.stringify(config),
+        autoDispatch: values.autoDispatch ? 1 as const : 0 as const,
+        targetCityId: values.targetCityId,
+        targetDistrictId: districtValue,
+        targetTownId: townValue,
+      }
+      try {
+        if (editingRule) await warningRuleApi.edit({ ...payload, id: Number(editingRule.id) })
+        else await warningRuleApi.add(payload)
+        setIsRuleModalVisible(false)
+        form.resetFields()
+        message.success(editingRule ? '更新成功' : '创建成功')
+        await loadBusinessData()
+      } catch {
+        message.error('规则保存失败')
+      }
+    })
+  }
+  const handleDeleteRule = (id: string) => {
+    modal.confirm({
+      className: 'dark-confirm-modal',
+      title: '确认删除',
+      content: '确定删除该规则？',
+      onOk: async () => {
+        await warningRuleApi.remove(Number(id))
+        message.success('删除成功')
+        await loadBusinessData()
+      },
+    })
+  }
+  const toggleRule = async (id: string, enabled: boolean) => {
+    try {
+      await warningRuleApi.changeStatus(Number(id), enabled ? 0 : 1)
+      await loadBusinessData()
+    } catch {
+      message.error('规则状态更新失败')
+    }
+  }
+  const confirmAlert = async (id: string) => {
+    try {
+      await alertEventApi.changeStatus(Number(id), 'processing')
+      message.success('已确认')
+      await loadBusinessData()
+    } catch {
+      message.error('预警确认失败')
+    }
+  }
+  const closeAlert = (id: string) => {
+    modal.confirm({
+      className: 'dark-confirm-modal',
+      title: '确认清除',
+      content: '确定清除该预警？',
+      onOk: async () => {
+        await alertEventApi.changeStatus(Number(id), 'closed')
+        await loadBusinessData()
+      },
+    })
+  }
+  const deleteAlert = (id: string) => {
+    modal.confirm({
+      className: 'dark-confirm-modal',
+      title: '确认删除',
+      content: '确定要永久删除该预警记录吗？此操作不可恢复。',
+      onOk: async () => {
+        try {
+          await alertEventApi.remove(Number(id))
+          message.success('删除成功')
+          await loadBusinessData()
+        } catch {
+          message.error('删除失败')
+        }
+      },
+    })
+  }
+  const updateTaskStatus = async (id: string, status: string) => {
+    try {
+      await disposalTaskApi.changeStatus(Number(id), status as DisposalTaskDTO['status'])
+      message.success('状态已更新')
+      await loadBusinessData()
+    } catch {
+      message.error('任务状态更新失败')
+    }
+  }
+  const deleteTask = (id: string) => {
+    modal.confirm({
+      className: 'dark-confirm-modal',
+      title: '确认删除',
+      content: '确定要删除该处置任务吗？',
+      onOk: async () => {
+        try {
+          await disposalTaskApi.remove(Number(id))
+          message.success('删除成功')
+          await loadBusinessData()
+        } catch {
+          message.error('删除失败')
+        }
+      },
+    })
+  }
   const dispatchToTown = (task: DisposalTask) => {
-    Modal.confirm({
+    const availableTownOptions = selection?.townName
+      ? [{ value: selection.townName, label: selection.townName }]
+      : townOptions
+    let selectedTownValue = ''
+    modal.confirm({
+      className: 'dark-confirm-modal',
       title: '任务下派',
       content: (
         <div className="space-y-2">
           <p>将任务 <b>{task.id}</b> 下派至乡镇处置：</p>
-          <Select placeholder="选择乡镇" className="w-full" onChange={(v: string) => { (window as any).__townVal = v }}>
-            {townOptions.map(o => <Option key={o.value} value={o.value}>{o.label}</Option>)}
+          <Select placeholder="选择乡镇" className="w-full" onChange={(value: string) => { selectedTownValue = value }}>
+            {availableTownOptions.map((o: { value: string; label: string }) => <Option key={o.value} value={o.value}>{o.label}</Option>)}
           </Select>
         </div>
       ),
-      onOk: () => {
-        const town = townOptions.find(o => o.value === (window as any).__townVal)
-        setTasks(tasks.map(i => i.id === task.id ? { ...i, town: town?.label || '乡镇', status: 'processing' } : i))
-        message.success(`已下派至${town?.label || '乡镇'}`)
+      onOk: async () => {
+        const town = availableTownOptions.find((o: { value: string; label: string }) => o.value === selectedTownValue)
+        if (!town) {
+          message.warning('请选择乡镇')
+          throw new Error('town is required')
+        }
+        await disposalTaskApi.edit({
+          id: Number(task.id),
+          alertId: Number(task.alertId),
+          dataType: task.dataType,
+          taskType: task.taskType,
+          status: 'processing',
+          assigneeName: task.assigneeName,
+          requesterName: task.requesterName,
+          requireTime: task.requireTime,
+          disposalContent: task.disposalContent,
+          photos: task.photos,
+          completedAt: task.completedAt,
+          city: task.city,
+          district: task.district,
+          town: town.label,
+        })
+        message.success(`已下派至${town.label}`)
+        await loadBusinessData()
       },
     })
   }
 
+  // 1. 预警规则管理列 - 完全与原型图一一致
   const ruleCols = [
-    { title: '规则名称', dataIndex: 'ruleName', width: 160 },
-    { title: '数据类型', dataIndex: 'dataType', width: 120, render: (t: string) => dataTypeOptions.find(o => o.value === t)?.label || t },
-    { title: '字段', dataIndex: 'fieldName', width: 80, render: (t: string, r: AlertRule) => fieldOptions[r.dataType]?.find(o => o.value === t)?.label || t },
-    { title: '规则类型', dataIndex: 'ruleType', width: 110, render: (t: string) => ruleTypeOptions.find(o => o.value === t)?.label || t },
-    { title: '级别', dataIndex: 'alertLevel', width: 90, render: (t: string) => { const l = alertLevelOptions.find(o => o.value === t); return <Tag color={l?.color}>{l?.label}</Tag> } },
+    { title: '规则名称', dataIndex: 'ruleName', width: 170 },
+    { title: '数据类型', dataIndex: 'dataType', width: 130, render: (t: string) => dataTypeOptions.find(o => o.value === t)?.label || t },
+    { title: '监测字段', dataIndex: 'fieldName', width: 90, render: (t: string, r: AlertRule) => fieldOptions[r.dataType]?.find(o => o.value === t)?.label || t },
+    { title: '规则类型', dataIndex: 'ruleType', width: 120, render: (t: string) => ruleTypeOptions.find(o => o.value === t)?.label || t },
+    {
+      title: '预警级别',
+      dataIndex: 'alertLevel',
+      width: 90,
+      render: (t: string) => {
+        const item = alertLevelOptions.find(o => o.value === t) || { label: '二级预警', color: '#FA8C16' }
+        return (
+          <span className="flex items-center gap-1 font-semibold" style={{ color: item.color }}>
+            <AlertFilled style={{ color: item.color, fontSize: 13 }} />
+            {item.label}
+          </span>
+        )
+      },
+    },
     { title: '优先级', dataIndex: 'priority', width: 60, align: 'center' as const },
-    { title: '下发', dataIndex: 'autoDispatch', width: 60, render: (t: boolean) => <Tag color={t ? 'green' : 'gray'}>{t ? '是' : '否'}</Tag> },
-    { title: '状态', dataIndex: 'enabled', width: 80, render: (t: boolean, r: AlertRule) => <Switch checked={t} size="small" onChange={() => toggleRule(r.id, t)} checkedChildren="启" unCheckedChildren="禁" /> },
-    { title: '操作', width: 130, render: (_: unknown, r: AlertRule) => <div className="flex gap-1"><Button size="small" icon={<EditOutlined />} onClick={() => showEditRuleModal(r)}>编辑</Button><Button size="small" danger onClick={() => handleDeleteRule(r.id)}>删除</Button></div> },
+    {
+      title: '直接下发',
+      dataIndex: 'autoDispatch',
+      width: 80,
+      align: 'center' as const,
+      render: (t: boolean) => (
+        <span style={{ color: t ? '#03FBFD' : '#FAAD14', fontWeight: 600 }}>
+          {t ? '是' : '否'}
+        </span>
+      ),
+    },
+    {
+      title: '目标地市',
+      dataIndex: 'targetCityId',
+      width: 100,
+      render: (t?: number) => {
+        const matched = cityOptions.find(c => Number(c.value) === Number(t))
+        return matched ? matched.label : (selection?.cityName || '杭州市')
+      },
+    },
+    {
+      title: '状态',
+      dataIndex: 'enabled',
+      width: 80,
+      render: (t: boolean, r: AlertRule) => (
+        <div className="flex items-center gap-1">
+          <Switch
+            checked={t}
+            size="small"
+            className="tech-switch"
+            disabled={isTown}
+            onChange={() => toggleRule(r.id, t)}
+          />
+          <span style={{ color: t ? '#03FBFD' : 'rgba(255,255,255,0.45)', fontSize: 12 }}>
+            {t ? '启用' : '禁用'}
+          </span>
+        </div>
+      ),
+    },
+    {
+      title: '操作',
+      width: isTown ? 70 : 120,
+      render: (_: unknown, r: AlertRule) => (
+        isTown ? (
+          <Button
+            type="link"
+            size="small"
+            icon={<EyeOutlined />}
+            onClick={() => showEditRuleModal(r)}
+            className="!text-[#03FBFD] hover:!text-white !p-0"
+          >
+            查看
+          </Button>
+        ) : (
+        <div className="flex items-center gap-2">
+          <Button
+            type="link"
+            size="small"
+            icon={<EditOutlined />}
+            onClick={() => showEditRuleModal(r)}
+            className="!text-[#03FBFD] hover:!text-white !p-0"
+          >
+            编辑
+          </Button>
+          <Button
+            type="link"
+            size="small"
+            danger
+            icon={<DeleteOutlined />}
+            onClick={() => handleDeleteRule(r.id)}
+            className="!text-[#FF4D4F] hover:!text-red-300 !p-0"
+          >
+            删除
+          </Button>
+        </div>
+        )
+      ),
+    },
   ]
+
+  // 2. 实时预警监控列
   const alertCols = [
-    { title: 'ID', dataIndex: 'id', width: 80 },
-    { title: '规则名称', dataIndex: 'ruleName', width: 150 },
-    { title: '级别', dataIndex: 'alertLevel', width: 90, render: (t: string) => { const l = alertLevelOptions.find(o => o.value === t); return <Tag color={l?.color}>{l?.label}</Tag> } },
-    { title: '设备', dataIndex: 'deviceName', width: 120 },
-    { title: '位置', dataIndex: 'location', width: 100 },
-    { title: '状态', dataIndex: 'status', width: 80, render: (t: string) => { const m: Record<string, { l: string; c: string }> = { pending: { l: '待处置', c: 'orange' }, processing: { l: '处置中', c: 'blue' }, completed: { l: '已处置', c: 'green' }, closed: { l: '已关闭', c: 'default' } }; return <Tag color={m[t]?.c}>{m[t]?.l}</Tag> } },
-    { title: '时间', dataIndex: 'createdAt', width: 130 },
-    { title: '操作', width: 180, render: (_: unknown, r: AlertEvent) => <div className="flex gap-1"><Button size="small" icon={<EyeOutlined />} onClick={() => { setSelectedAlert(r); setIsAlertModalVisible(true) }}>详情</Button>{r.status === 'pending' && <><Button size="small" onClick={() => confirmAlert(r.id)}>确认</Button><Button size="small" type="primary" onClick={() => dispatchTask(r.id)}>派发</Button></>}{r.status !== 'closed' && r.status !== 'completed' && <Button size="small" danger onClick={() => closeAlert(r.id)}>清除</Button>}</div> },
+    { title: '预警ID', dataIndex: 'id', width: 70 },
+    { title: '规则名称', dataIndex: 'ruleName', width: 160 },
+    {
+      title: '预警级别',
+      dataIndex: 'alertLevel',
+      width: 90,
+      render: (t: string) => {
+        const item = alertLevelOptions.find(o => o.value === t) || { label: '二级预警', color: '#FA8C16' }
+        return (
+          <span className="flex items-center gap-1 font-semibold" style={{ color: item.color }}>
+            <AlertFilled style={{ color: item.color, fontSize: 13 }} />
+            {item.label}
+          </span>
+        )
+      },
+    },
+    { title: '设备名称', dataIndex: 'deviceName', width: 120 },
+    { title: '监测位置', dataIndex: 'location', width: 110 },
+    {
+      title: '处置状态',
+      dataIndex: 'status',
+      width: 80,
+      render: (t: string) => {
+        const m: Record<string, { l: string; c: string }> = {
+          undispatched: { l: '待派发', c: 'gold' },
+          pending: { l: '待处置', c: 'orange' },
+          processing: { l: '处置中', c: 'blue' },
+          completed: { l: '已处置', c: 'green' },
+          closed: { l: '已关闭', c: 'default' },
+        }
+        return <Tag color={m[t]?.c}>{m[t]?.l}</Tag>
+      },
+    },
+    { title: '预警时间', dataIndex: 'createdAt', width: 150 },
+    {
+      title: '操作',
+      width: 200,
+      render: (_: unknown, r: AlertEvent) => (
+        <div className="flex items-center gap-1">
+          <Button type="link" size="small" icon={<EyeOutlined />} className="!text-[#03FBFD] hover:!text-white !p-0" onClick={() => { setSelectedAlert(r); setIsAlertModalVisible(true); alertEventApi.detail(Number(r.id)).then(res => { if (res.data) setSelectedAlert(toAlertEvent(res.data)) }).catch(() => {}) }}>详情</Button>
+          {!isTown && r.status === 'pending' && (
+            <Button type="link" size="small" icon={<CheckCircleOutlined />} className="!text-[#52C41A] hover:!text-green-300 !p-0" onClick={() => confirmAlert(r.id)}>确认</Button>
+          )}
+          {!isTown && r.status === 'undispatched' && (
+            <Button type="link" size="small" icon={<SendOutlined />} className="!text-[#1890FF] hover:!text-blue-300 !p-0" onClick={() => showDispatchModal(r)}>派发</Button>
+          )}
+          {!isTown && r.status !== 'closed' && r.status !== 'completed' && (
+            <Button type="link" size="small" danger icon={<DeleteOutlined />} className="!p-0" onClick={() => closeAlert(r.id)}>清除</Button>
+          )}
+          {!isTown && (r.status === 'closed' || r.status === 'completed') && (
+            <Button type="link" size="small" danger icon={<DeleteOutlined />} className="!p-0" onClick={() => deleteAlert(r.id)}>删除</Button>
+          )}
+        </div>
+      ),
+    },
   ]
+
+  // 3. 处置任务管理列
   const taskCols = [
-    { title: 'ID', dataIndex: 'id', width: 80 },
-    { title: '预警', dataIndex: 'alertId', width: 80 },
-    { title: '类型', dataIndex: 'taskType', width: 90, render: (t: string) => taskTypeOptions.find(o => o.value === t)?.label || t },
-    { title: '状态', dataIndex: 'status', width: 80, render: (t: string) => { const m: Record<string, { l: string; c: string }> = { pending: { l: '待接收', c: 'orange' }, received: { l: '已接收', c: 'blue' }, processing: { l: '处置中', c: 'blue' }, completed: { l: '已完成', c: 'green' } }; return <Tag color={m[t]?.c}>{m[t]?.l}</Tag> } },
-    { title: '处置人', dataIndex: 'assigneeName', width: 70, render: (t: string) => t || '未分配' },
-    { title: '要求时间', dataIndex: 'requireTime', width: 130 },
-    { title: '操作', width: 180, render: (_: unknown, r: DisposalTask) => <div className="flex gap-1"><Button size="small" onClick={() => { setSelectedTask(r); setIsTaskModalVisible(true) }}>详情</Button>{r.status === 'pending' && <Button size="small" onClick={() => updateTaskStatus(r.id, 'received')}>接收</Button>}{r.status === 'received' && <><Button size="small" onClick={() => updateTaskStatus(r.id, 'processing')}>处置</Button><Button size="small" icon={<SendOutlined />} onClick={() => dispatchToTown(r)}>下派</Button></>}{r.status === 'completed' && r.disposalContent && <Button size="small" type="primary" onClick={() => { setSelectedTask(r); setIsDisposalModalVisible(true) }}>查看</Button>}</div> },
+    { title: '任务ID', dataIndex: 'id', width: 70 },
+    { title: '关联预警', dataIndex: 'alertId', width: 80 },
+    { title: '任务类型', dataIndex: 'taskType', width: 90, render: (t: string) => taskTypeOptions.find(o => o.value === t)?.label || t },
+    {
+      title: '状态',
+      dataIndex: 'status',
+      width: 80,
+      render: (t: string) => {
+        const m: Record<string, { l: string; c: string }> = {
+          pending: { l: '待接收', c: 'orange' },
+          received: { l: '已接收', c: 'blue' },
+          processing: { l: '处置中', c: 'blue' },
+          completed: { l: '已完成', c: 'green' },
+        }
+        return <Tag color={m[t]?.c}>{m[t]?.l}</Tag>
+      },
+    },
+    { title: '处置人', dataIndex: 'assigneeName', width: 80, render: (t: string) => t || '未分配' },
+    { title: '要求时间', dataIndex: 'requireTime', width: 150 },
+    {
+      title: '操作',
+      width: 200,
+      render: (_: unknown, r: DisposalTask) => (
+        <div className="flex items-center gap-1">
+          <Button type="link" size="small" icon={<EyeOutlined />} className="!text-[#03FBFD] hover:!text-white !p-0" onClick={() => { setSelectedTask(r); setIsTaskModalVisible(true); disposalTaskApi.detail(Number(r.id)).then(res => { if (res.data) setSelectedTask(toDisposalTask(res.data)) }).catch(() => {}) }}>详情</Button>
+          {!isTown && r.status === 'pending' && <Button type="link" size="small" icon={<CheckCircleOutlined />} className="!text-[#52C41A] hover:!text-green-300 !p-0" onClick={() => updateTaskStatus(r.id, 'received')}>接收</Button>}
+          {!isTown && r.status === 'received' && (
+            <>
+              <Button type="link" size="small" icon={<EditOutlined />} className="!text-[#1890FF] hover:!text-blue-300 !p-0" onClick={() => updateTaskStatus(r.id, 'processing')}>处置</Button>
+              <Button type="link" size="small" icon={<SendOutlined />} className="!text-[#FA8C16] hover:!text-orange-300 !p-0" onClick={() => dispatchToTown(r)}>下派</Button>
+            </>
+          )}
+          {r.status === 'completed' && r.disposalContent && (
+            <Button type="link" size="small" icon={<EyeOutlined />} className="!text-[#03FBFD] hover:!text-white !p-0" onClick={() => { setSelectedTask(r); setIsDisposalModalVisible(true) }}>查看</Button>
+          )}
+          {!isTown && r.status === 'completed' && (
+            <Button type="link" size="small" danger icon={<DeleteOutlined />} className="!p-0" onClick={() => deleteTask(r.id)}>删除</Button>
+          )}
+        </div>
+      ),
+    },
   ]
 
-  // 区域预警实时动向数据
-  const alertTrends = [
-    { time: '14:30', area: '西湖区', level: 'level2', content: 'PM2.5浓度85μg/m³超标', status: '待处置' },
-    { time: '13:45', area: '萧山区', level: 'level1', content: 'PM2.5浓度168μg/m³严重超标', status: '处置中' },
-    { time: '12:20', area: '余杭区', level: 'level2', content: 'TSP浓度356μg/m³超标', status: '待处置' },
-    { time: '10:15', area: '萧山区', level: 'level3', content: '功率因数0.85异常', status: '已处置' },
-    { time: '08:45', area: '滨江区', level: 'level2', content: 'PM2.5变化率65%超标', status: '待处置' },
-    { time: '07:30', area: '临平区', level: 'level3', content: 'PM10浓度180μg/m³超标', status: '已处置' },
-    { time: '06:15', area: '富阳区', level: 'level2', content: 'O₃浓度210μg/m³超标', status: '已关闭' },
-  ]
+  const statusLabels: Record<string, string> = {
+    undispatched: '待派发',
+    pending: '待处置',
+    processing: '处置中',
+    completed: '已处置',
+    closed: '已关闭',
+  }
+  const alertTrends = alerts.slice(0, 20).map(item => ({
+    time: item.createdAt ? dayjs(item.createdAt).format('HH:mm') : '--:--',
+    area: item.location || item.district || item.city || '杭州市',
+    level: item.alertLevel,
+    content: item.triggerReason,
+    status: statusLabels[item.status] ?? item.status,
+  }))
   const levelColorMap: Record<string, string> = { level1: '#FF4D4F', level2: '#FA8C16', level3: '#FAAD14', level4: '#1890FF' }
-  const statusColorMap: Record<string, string> = { '待处置': '#FA8C16', '处置中': '#1890FF', '已处置': '#52C41A', '已关闭': '#8C8C8C' }
-
-  const tabItems = [
-    { key: 'rules', label: '预警规则管理', children: <Table dataSource={rules} columns={ruleCols} rowKey="id" pagination={{ pageSize: 10 }} size="small" scroll={{ x: 900 }} /> },
-    { key: 'alerts', label: '实时预警监控', children: <Table dataSource={alerts} columns={alertCols} rowKey="id" pagination={{ pageSize: 10 }} size="small" scroll={{ x: 900 }} /> },
-    { key: 'tasks', label: '处置任务管理', children: <Table dataSource={tasks} columns={taskCols} rowKey="id" pagination={{ pageSize: 10 }} size="small" scroll={{ x: 800 }} /> },
-    { key: 'trends', label: '区域预警实时动向', children: (
-      <div className="space-y-2 p-2">
-        {alertTrends.map((item, idx) => (
-          <div key={idx} className="flex items-center gap-3 p-3 rounded-lg" style={{ backgroundColor: 'rgba(3,251,253,0.04)', border: '1px solid rgba(3,251,253,0.1)' }}>
-            <div className="w-12 h-12 rounded-full flex items-center justify-center shrink-0" style={{ backgroundColor: levelColorMap[item.level] + '22', border: `2px solid ${levelColorMap[item.level]}` }}>
-              <AlertFilled style={{ color: levelColorMap[item.level], fontSize: 18 }} />
-            </div>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2">
-                <span className="text-white/90 text-14px font-medium">{item.area}</span>
-                <Tag color={levelColorMap[item.level]}>{alertLevelOptions.find(o => o.value === item.level)?.label}</Tag>
-              </div>
-              <div className="text-white/50 text-12px mt-1 truncate">{item.content}</div>
-            </div>
-            <div className="text-right shrink-0">
-              <div className="text-12px" style={{ color: statusColorMap[item.status] }}>{item.status}</div>
-              <div className="text-white/40 text-11px mt-1">{item.time}</div>
-            </div>
-          </div>
-        ))}
-      </div>
-    ) },
-  ]
+  const statusColorMap: Record<string, string> = { '待派发': '#FAAD14', '待处置': '#FA8C16', '处置中': '#1890FF', '已处置': '#52C41A', '已关闭': '#8C8C8C' }
 
   return (
-    <div className="w-full h-full p-4 overflow-auto" style={{ background: 'rgba(10,60,130,0.8)' }}>
-      <div className="flex justify-between items-center mb-4">
-        <div className="flex items-center gap-4">
-          <Button type="text" icon={<ArrowLeftOutlined />} onClick={() => navigate('/monitor')} className="!text-[#03FBFD] hover:!text-white">返回监控大屏</Button>
-          <h2 className="text-xl font-bold text-[#03FBFD]">预警中心</h2>
+    <div className="alert-page-container">
+      {/* 返回行 - 紧凑上移 */}
+      <div className="alert-header-bar">
+        <div className="header-left">
+          <Button
+            type="text"
+            icon={<ArrowLeftOutlined />}
+            onClick={() => navigate('/monitor')}
+            className="!text-[#03FBFD] hover:!text-white !px-2 !h-28px"
+          >
+            返回监控大屏
+          </Button>
+          <RegionSelector />
         </div>
-        <Button type="primary" icon={<PlusOutlined />} onClick={showAddRuleModal}>新增预警规则</Button>
       </div>
-      <Tabs items={tabItems} />
-      <Modal title={<span className="text-[#03FBFD] font-bold">{editingRule ? '编辑规则' : '新增规则'}</span>} open={isRuleModalVisible} onOk={handleRuleOk} onCancel={() => { setIsRuleModalVisible(false); form.resetFields() }} width={600} styles={{ header: { backgroundColor: '#1a5ab0', borderBottom: '1px solid rgba(3,251,253,0.15)' }, body: { backgroundColor: '#1a5ab0', padding: '20px 24px' } }} style={{ top: 60 }}>
-        <Form form={form} layout="vertical">
-          <Form.Item label={<span className="text-[#03FBFD]">规则名称</span>} name="ruleName" rules={[{ required: true, message: '请输入' }]}><Input /></Form.Item>
-          <Form.Item label={<span className="text-[#03FBFD]">数据类型</span>} name="dataType" rules={[{ required: true, message: '请选择' }]}>
-            <Select onChange={(v: string) => { setSelectedDataType(v); form.setFieldsValue({ fieldName: '' }) }}>{dataTypeOptions.map(o => <Option key={o.value} value={o.value}>{o.label}</Option>)}</Select>
+
+      {/* 标题 + Tabs + 按钮 同一行 */}
+      <div className="alert-title-tabs-row" style={{ position: 'relative' }}>
+        <div className="alert-center-title">
+          <span className="title-diamond">◆</span>
+          <span>预警中心</span>
+          <span className="title-diamond">◆</span>
+        </div>
+
+        <div className="tech-tabs-bar">
+          <div
+            className={`tech-tab-item ${activeTab === 'rules' ? 'active' : ''}`}
+            onClick={() => setActiveTab('rules')}
+          >
+            预警规则管理
+          </div>
+          <div
+            className={`tech-tab-item ${activeTab === 'alerts' ? 'active' : ''}`}
+            onClick={() => setActiveTab('alerts')}
+          >
+            实时预警监控
+          </div>
+          <div
+            className={`tech-tab-item ${activeTab === 'tasks' ? 'active' : ''}`}
+            onClick={() => setActiveTab('tasks')}
+          >
+            处置任务管理
+          </div>
+          <div
+            className={`tech-tab-item ${activeTab === 'trends' ? 'active' : ''}`}
+            onClick={() => setActiveTab('trends')}
+          >
+            区域预警实时动向
+          </div>
+        </div>
+
+        <div className="header-right-btn">
+          {activeTab === 'rules' && !isTown && (
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              onClick={showAddRuleModal}
+              style={{
+                background: 'linear-gradient(90deg, #1890ff 0%, #03fbfd 100%)',
+                borderColor: '#03fbfd',
+                fontWeight: 600,
+                boxShadow: '0 0 10px rgba(3, 251, 253, 0.3)',
+              }}
+            >
+              新增预警规则
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {/* 表格 / 内容区域 */}
+      <div className="tech-table-wrapper">
+        {activeTab === 'rules' && (
+          <div className="flex items-center gap-3 flex-shrink-0 px-2 pt-2">
+            <Input
+              className="model_from_input !w-200px"
+              placeholder="搜索规则名称"
+              value={ruleSearchName}
+              onChange={e => setRuleSearchName(e.target.value)}
+              onPressEnter={() => applyRuleSearch()}
+              allowClear
+              onClear={() => applyRuleSearch('')}
+              suffix={<SearchOutlined className="text-[#03FBFD] cursor-pointer" onClick={() => applyRuleSearch()} />}
+            />
+            <Select
+              className="!w-160px model_from_sel" classNames={{ popup: { root: 'alert-rule-dropdown' } }}
+              placeholder="筛选接入类型"
+              value={ruleFilterDataType}
+              onChange={v => { setRuleFilterDataType(v); setRulesPage(1) }}
+              options={dataTypeOptions}
+              allowClear
+            />
+            <Select
+              className="!w-160px model_from_sel" classNames={{ popup: { root: 'alert-rule-dropdown' } }}
+              placeholder="筛选规则类型"
+              value={ruleFilterType}
+              onChange={v => { setRuleFilterType(v); setRulesPage(1) }}
+              options={ruleTypeOptions}
+              allowClear
+            />
+            <Select
+              className="!w-150px model_from_sel" classNames={{ popup: { root: 'alert-rule-dropdown' } }}
+              placeholder="筛选预警级别"
+              value={ruleFilterLevel}
+              onChange={v => { setRuleFilterLevel(v); setRulesPage(1) }}
+              options={alertLevelOptions}
+              allowClear
+            />
+            <Select
+              className="!w-130px model_from_sel" classNames={{ popup: { root: 'alert-rule-dropdown' } }}
+              placeholder="筛选状态"
+              value={ruleFilterEnabled}
+              onChange={v => { setRuleFilterEnabled(v); setRulesPage(1) }}
+              options={[
+                { value: 1, label: '启用' },
+                { value: 0, label: '禁用' },
+              ]}
+              allowClear
+            />
+          </div>
+        )}
+        {activeTab === 'alerts' && (
+          <div className="flex items-center gap-3 flex-shrink-0 px-2 pt-2">
+            <Input
+              className="model_from_input !w-200px"
+              placeholder="搜索设备/数据源名称"
+              value={alertSearchDevice}
+              onChange={e => setAlertSearchDevice(e.target.value)}
+              onPressEnter={() => applyAlertSearch()}
+              allowClear
+              onClear={() => applyAlertSearch('')}
+              suffix={<SearchOutlined className="text-[#03FBFD] cursor-pointer" onClick={() => applyAlertSearch()} />}
+            />
+            <Select
+              className="!w-160px model_from_sel" classNames={{ popup: { root: 'alert-rule-dropdown' } }}
+              placeholder="筛选接入类型"
+              value={alertFilterDataType}
+              onChange={v => { setAlertFilterDataType(v); setAlertsPage(1) }}
+              options={dataTypeOptions}
+              allowClear
+            />
+            <Select
+              className="!w-150px model_from_sel" classNames={{ popup: { root: 'alert-rule-dropdown' } }}
+              placeholder="筛选预警级别"
+              value={alertFilterLevel}
+              onChange={v => { setAlertFilterLevel(v); setAlertsPage(1) }}
+              options={alertLevelOptions}
+              allowClear
+            />
+            <Select
+              className="!w-150px model_from_sel" classNames={{ popup: { root: 'alert-rule-dropdown' } }}
+              placeholder="筛选处置状态"
+              value={alertFilterStatus}
+              onChange={v => { setAlertFilterStatus(v); setAlertsPage(1) }}
+              options={[
+                { value: 'undispatched', label: '待派发' },
+                { value: 'pending', label: '待处置' },
+                { value: 'processing', label: '处置中' },
+                { value: 'completed', label: '已处置' },
+                { value: 'closed', label: '已关闭' },
+              ]}
+              allowClear
+            />
+          </div>
+        )}
+        {activeTab === 'tasks' && (
+          <div className="flex items-center gap-3 flex-shrink-0 px-2 pt-2">
+            <Select
+              className="!w-160px model_from_sel" classNames={{ popup: { root: 'alert-rule-dropdown' } }}
+              placeholder="筛选接入类型"
+              value={taskFilterDataType}
+              onChange={v => { setTaskFilterDataType(v); setTasksPage(1) }}
+              options={dataTypeOptions}
+              allowClear
+            />
+            <Select
+              className="!w-160px model_from_sel" classNames={{ popup: { root: 'alert-rule-dropdown' } }}
+              placeholder="筛选任务类型"
+              value={taskFilterType}
+              onChange={v => { setTaskFilterType(v); setTasksPage(1) }}
+              options={taskTypeOptions}
+              allowClear
+            />
+            <Select
+              className="!w-150px model_from_sel" classNames={{ popup: { root: 'alert-rule-dropdown' } }}
+              placeholder="筛选处置状态"
+              value={taskFilterStatus}
+              onChange={v => { setTaskFilterStatus(v); setTasksPage(1) }}
+              options={[
+                { value: 'pending', label: '待接收' },
+                { value: 'received', label: '已接收' },
+                { value: 'processing', label: '处置中' },
+                { value: 'completed', label: '已完成' },
+              ]}
+              allowClear
+            />
+          </div>
+        )}
+        {activeTab === 'rules' && (
+          <Table
+            dataSource={rules}
+            columns={ruleCols}
+            rowKey="id"
+            loading={loading}
+            pagination={{
+              current: rulesPage,
+              pageSize: rulesSize,
+              total: rulesTotal,
+              showSizeChanger: true,
+              onChange: (page, size) => { setRulesPage(page); setRulesSize(size) },
+            }}
+            size="small"
+            scroll={{ x: 1000 }}
+          />
+        )}
+        {activeTab === 'alerts' && (
+          <Table
+            dataSource={alerts}
+            columns={alertCols}
+            rowKey="id"
+            loading={loading}
+            pagination={{
+              current: alertsPage,
+              pageSize: alertsSize,
+              total: alertsTotal,
+              showSizeChanger: true,
+              onChange: (page, size) => { setAlertsPage(page); setAlertsSize(size) },
+            }}
+            size="small"
+            scroll={{ x: 950 }}
+          />
+        )}
+        {activeTab === 'tasks' && (
+          <Table
+            dataSource={tasks}
+            columns={taskCols}
+            rowKey="id"
+            loading={loading}
+            pagination={{
+              current: tasksPage,
+              pageSize: tasksSize,
+              total: tasksTotal,
+              showSizeChanger: true,
+              onChange: (page, size) => { setTasksPage(page); setTasksSize(size) },
+            }}
+            size="small"
+            scroll={{ x: 900 }}
+          />
+        )}
+        {activeTab === 'trends' && (
+          <div className="space-y-3 p-4">
+            {alertTrends.map((item, idx) => (
+              <div
+                key={idx}
+                className="flex items-center gap-3 p-3.5 rounded-lg"
+                style={{
+                  backgroundColor: 'rgba(3,251,253,0.04)',
+                  border: '1px solid rgba(3,251,253,0.15)',
+                }}
+              >
+                <div
+                  className="w-11 h-11 rounded-full flex items-center justify-center shrink-0"
+                  style={{
+                    backgroundColor: (levelColorMap[item.level] || '#FA8C16') + '22',
+                    border: `2px solid ${levelColorMap[item.level] || '#FA8C16'}`,
+                  }}
+                >
+                  <AlertFilled style={{ color: levelColorMap[item.level] || '#FA8C16', fontSize: 18 }} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="text-white/90 text-14px font-medium">{item.area}</span>
+                    <span
+                      className="text-12px px-2 py-0.5 rounded font-semibold"
+                      style={{ color: levelColorMap[item.level] || '#FA8C16', border: `1px solid ${levelColorMap[item.level] || '#FA8C16'}` }}
+                    >
+                      {alertLevelOptions.find(o => o.value === item.level)?.label || '预警'}
+                    </span>
+                  </div>
+                  <div className="text-white/60 text-12px mt-1 truncate">{item.content}</div>
+                </div>
+                <div className="text-right shrink-0">
+                  <div className="text-12px font-medium" style={{ color: statusColorMap[item.status] || '#1890FF' }}>{item.status}</div>
+                  <div className="text-white/40 text-11px mt-1">{item.time}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* 新增/编辑规则弹窗 */}
+      <Modal
+        title={<span className="alert-rule-modal-title">{isTown ? '查看预警规则' : editingRule ? '编辑预警规则' : '新增预警规则'}</span>}
+        open={isRuleModalVisible}
+        onCancel={() => { setIsRuleModalVisible(false); form.resetFields() }}
+        width={840}
+        className="alert-rule-modal"
+        footer={isTown
+          ? <Button onClick={() => { setIsRuleModalVisible(false); form.resetFields() }}>关闭</Button>
+          : [
+              <Button key="cancel" onClick={() => { setIsRuleModalVisible(false); form.resetFields() }}>取消</Button>,
+              <Button key="ok" type="primary" onClick={handleRuleOk}>确定</Button>,
+            ]}
+      >
+        <Form
+          form={form}
+          disabled={isTown}
+          layout="horizontal"
+          labelCol={{ style: { width: 110, textAlign: 'right', color: '#03FBFD', paddingRight: 12 } }}
+          className="alert-rule-form pt-2"
+        >
+          <Form.Item label="规则名称" name="ruleName" rules={[{ required: true, message: '请输入' }]}>
+            <Input className="model_from_input" placeholder="请输入规则名称" />
           </Form.Item>
-          <Form.Item label={<span className="text-[#03FBFD]">监测字段</span>} name="fieldName" rules={[{ required: true, message: '请选择' }]}>
-            <Select>{selectedDataType && fieldOptions[selectedDataType]?.map(o => <Option key={o.value} value={o.value}>{o.label}</Option>)}</Select>
-          </Form.Item>
-          <Form.Item label={<span className="text-[#03FBFD]">规则类型</span>} name="ruleType" rules={[{ required: true, message: '请选择' }]}>
-            <Select>{ruleTypeOptions.map(o => <Option key={o.value} value={o.value}>{o.label}</Option>)}</Select>
-          </Form.Item>
+
+          <div className="grid grid-cols-2 gap-x-2">
+            <Form.Item label="数据类型" name="dataType" rules={[{ required: true, message: '请选择' }]}>
+              <Select className="model_from_sel" classNames={{ popup: { root: 'alert-rule-dropdown' } }} placeholder="请选择" onChange={(v: string) => { setSelectedDataType(v); form.setFieldsValue({ fieldName: '' }) }}>
+                {dataTypeOptions.map(o => <Option key={o.value} value={o.value}>{o.label}</Option>)}
+              </Select>
+            </Form.Item>
+            <Form.Item label="监测字段" name="fieldName" rules={[{ required: true, message: '请选择' }]}>
+              <Select className="model_from_sel" classNames={{ popup: { root: 'alert-rule-dropdown' } }} placeholder="请选择">
+                {selectedDataType && fieldOptions[selectedDataType]?.map(o => <Option key={o.value} value={o.value}>{o.label}</Option>)}
+              </Select>
+            </Form.Item>
+          </div>
+
+          <div className="grid grid-cols-2 gap-x-2">
+            <Form.Item label="规则类型" name="ruleType" rules={[{ required: true, message: '请选择' }]}>
+              <Select className="model_from_sel" classNames={{ popup: { root: 'alert-rule-dropdown' } }} placeholder="请选择">
+                {ruleTypeOptions.map(o => <Option key={o.value} value={o.value}>{o.label}</Option>)}
+              </Select>
+            </Form.Item>
+
+            {(watchedRuleType === 'threshold' || watchedRuleType === 'change_rate') && (
+              <Form.Item label="间隔时间" required>
+                <Space.Compact style={{ width: '100%' }}>
+                  <Form.Item name="ruleTimeWindow" noStyle rules={[{ required: true, message: '请输入' }]}>
+                    <InputNumber min={1} step={1} precision={0} style={{ width: '100%' }} className="model_from_input" placeholder="分钟" />
+                  </Form.Item>
+                  <span className="flex items-center px-2 h-32px text-white/60 bg-white/5 border border-l-0 border-white/10 rounded-r shrink-0">分</span>
+                </Space.Compact>
+              </Form.Item>
+            )}
+          </div>
+
           <Form.Item noStyle shouldUpdate={(p, c) => p.ruleType !== c.ruleType}>
-            {({ getFieldValue }) => {
-              const rt = getFieldValue('ruleType')
-              if (rt === 'threshold') return <div className="grid grid-cols-2 gap-4"><Form.Item label={<span className="text-[#03FBFD]">阈值</span>} name="threshold" rules={[{ required: true }]}><InputNumber className="w-full" /></Form.Item><Form.Item label={<span className="text-[#03FBFD]">比较符</span>} name="operator" rules={[{ required: true }]}><Select><Option value=">">大于</Option><Option value="<">小于</Option><Option value=">=">大于等于</Option><Option value="<=">小于等于</Option></Select></Form.Item></div>
-              if (rt === 'change_rate') return <div className="grid grid-cols-2 gap-4"><Form.Item label={<span className="text-[#03FBFD]">窗口(分)</span>} name="timeWindow" rules={[{ required: true }]}><InputNumber className="w-full" /></Form.Item><Form.Item label={<span className="text-[#03FBFD]">变化率%</span>} name="rate" rules={[{ required: true }]}><InputNumber className="w-full" /></Form.Item></div>
-              if (rt === 'continuous') return <div className="grid grid-cols-2 gap-4"><Form.Item label={<span className="text-[#03FBFD]">次数</span>} name="count" rules={[{ required: true }]}><InputNumber className="w-full" /></Form.Item><Form.Item label={<span className="text-[#03FBFD]">间隔(分)</span>} name="interval" rules={[{ required: true }]}><InputNumber className="w-full" /></Form.Item></div>
-              if (rt === 'offline') return <Form.Item label={<span className="text-[#03FBFD]">离线(分)</span>} name="offlineTime" rules={[{ required: true }]}><InputNumber className="w-full" /></Form.Item>
+            {() => {
+              const rt = form.getFieldValue('ruleType')
+              if (rt === 'threshold' || rt === 'change_rate') {
+                return (
+                  <div className="grid grid-cols-2 gap-x-2">
+                    <Form.Item label={rt === 'threshold' ? '阈值' : '变化率'} required>
+                      <div className="grid grid-cols-[1.2fr_1fr] gap-2">
+                        <Form.Item name="operator" noStyle rules={[{ required: true, message: '请选择' }]}>
+                          <Select className="model_from_sel" classNames={{ popup: { root: 'alert-rule-dropdown' } }} placeholder="比较符">
+                            <Option value=">">大于&gt;</Option>
+                            <Option value="<">小于&lt;</Option>
+                            <Option value=">=">大于等于&ge;</Option>
+                            <Option value="<=">小于等于&le;</Option>
+                          </Select>
+                        </Form.Item>
+                        <Form.Item name="threshold" noStyle rules={[{ required: true, message: '请输入' }]}>
+                          <InputNumber step={1} className="w-full model_from_input" placeholder="数值" />
+                        </Form.Item>
+                      </div>
+                    </Form.Item>
+                    <div />
+                  </div>
+                )
+              }
+              if (rt === 'continuous') {
+                return (
+                  <div className="grid grid-cols-2 gap-x-2">
+                    <Form.Item label="连续配置" required>
+                      <div className="grid grid-cols-2 gap-2">
+                        <Form.Item name="count" noStyle rules={[{ required: true, message: '请输入' }]}>
+                          <InputNumber step={1} className="w-full model_from_input" placeholder="次数" />
+                        </Form.Item>
+                        <Form.Item name="interval" noStyle rules={[{ required: true, message: '请输入' }]}>
+                          <InputNumber step={1} className="w-full model_from_input" placeholder="间隔(分)" />
+                        </Form.Item>
+                      </div>
+                    </Form.Item>
+                    <div />
+                  </div>
+                )
+              }
+              if (rt === 'offline') {
+                return (
+                  <div className="grid grid-cols-2 gap-x-2">
+                    <Form.Item label="离线时长" name="offlineTime" rules={[{ required: true, message: '请输入' }]}>
+                      <InputNumber step={1} className="w-full model_from_input" placeholder="离线(分)" />
+                    </Form.Item>
+                    <div />
+                  </div>
+                )
+              }
               return null
             }}
           </Form.Item>
-          <Form.Item label={<span className="text-[#03FBFD]">预警级别</span>} name="alertLevel" rules={[{ required: true }]}>
-            <Select>{alertLevelOptions.map(o => <Option key={o.value} value={o.value}>{o.label}</Option>)}</Select>
+
+          <div className="grid grid-cols-2 gap-x-2">
+            <Form.Item label="优先级" name="priority" rules={[{ required: true, message: '请输入' }]}>
+              <InputNumber min={1} max={10} step={1} className="w-full model_from_input" placeholder="数值" />
+            </Form.Item>
+            <Form.Item label="预警级别" name="alertLevel" rules={[{ required: true, message: '请选择' }]}>
+              <Select className="model_from_sel" classNames={{ popup: { root: 'alert-rule-dropdown' } }} placeholder="请选择">
+                {alertLevelOptions.map(o => <Option key={o.value} value={o.value}>{o.label}</Option>)}
+              </Select>
+            </Form.Item>
+          </div>
+
+          <div className="grid grid-cols-2 gap-x-2">
+            <Form.Item label="目标地市" name="targetCityId" rules={[{ required: true, message: '请选择' }]}>
+              <Select
+                className="model_from_sel" classNames={{ popup: { root: 'alert-rule-dropdown' } }}
+                placeholder="请选择目标地市"
+                disabled={!canSelectRegion}
+                showSearch
+                optionFilterProp="label"
+                onChange={() => { form.setFieldsValue({ targetDistrictId: undefined, targetTownId: undefined }) }}
+                options={cityOptions}
+              />
+            </Form.Item>
+            <Form.Item label="目标区县" name="targetDistrictId" rules={[{ required: true, message: '请选择' }]}>
+              <Select
+                className="model_from_sel" classNames={{ popup: { root: 'alert-rule-dropdown' } }}
+                placeholder={targetCityId ? '请选择目标区县' : '请先选择地市'}
+                disabled={roleLevel === 'county' || roleLevel === 'town' || !targetCityId}
+                showSearch
+                optionFilterProp="label"
+                onChange={() => {
+                  form.setFieldsValue({ targetTownId: undefined })
+                }}
+                options={districtOptions}
+              />
+            </Form.Item>
+          </div>
+
+          <div className="grid grid-cols-2 gap-x-2">
+            <Form.Item label="是否直接下发" name="autoDispatch" rules={[{ required: true, message: '请选择' }]}>
+              <Radio.Group className="flex items-center gap-4 h-8">
+                <Radio value={true} className="!text-white">是</Radio>
+                <Radio value={false} className="!text-white">否</Radio>
+              </Radio.Group>
+            </Form.Item>
+            <Form.Item noStyle shouldUpdate={(p, c) => p.targetDistrictId !== c.targetDistrictId}>
+              {() => {
+                const districtVal = form.getFieldValue('targetDistrictId')
+                const isAllDistrict = districtVal === 'all'
+                return (
+                  <Form.Item label="目标乡镇" name="targetTownId">
+                    <Select
+                      className="model_from_sel" classNames={{ popup: { root: 'alert-rule-dropdown' } }}
+                      mode="multiple"
+                      placeholder={isAllDistrict ? '区县已选全部' : (districtVal ? '请选择目标乡镇' : '请先选择区县')}
+                      disabled={roleLevel === 'town' || !districtVal || isAllDistrict}
+                      showSearch
+                      optionFilterProp="label"
+                      maxTagCount="responsive"
+                      onChange={(vals: string[]) => {
+                        if (vals.includes('all') && vals.length > 1) {
+                          const prev = form.getFieldValue('targetTownId') || []
+                          if (!prev.includes('all')) {
+                            form.setFieldsValue({ targetTownId: ['all'] })
+                          } else {
+                            form.setFieldsValue({ targetTownId: vals.filter(v => v !== 'all') })
+                          }
+                        }
+                      }}
+                      options={targetTownOptions}
+                    />
+                  </Form.Item>
+                )
+              }}
+            </Form.Item>
+          </div>
+
+          <Form.Item label="描述" name="description">
+            <Input.TextArea className="model_from_input" rows={3} placeholder="请输入描述" />
           </Form.Item>
-          <Form.Item label={<span className="text-[#03FBFD]">优先级</span>} name="priority" rules={[{ required: true }]}><InputNumber className="w-full" min={1} max={10} /></Form.Item>
-          <Form.Item label={<span className="text-[#03FBFD]">直接下发</span>} name="autoDispatch" valuePropName="checked"><Switch checkedChildren="是" unCheckedChildren="否" /></Form.Item>
-          <Form.Item label={<span className="text-[#03FBFD]">目标地市</span>} name="targetCity" rules={[{ required: true }]}>
-            <Select>{cityOptions.map(o => <Option key={o.value} value={o.value}>{o.label}</Option>)}</Select>
-          </Form.Item>
-          <Form.Item label={<span className="text-[#03FBFD]">描述</span>} name="description"><Input.TextArea rows={2} /></Form.Item>
         </Form>
       </Modal>
-      <Modal title={<span className="text-[#03FBFD] font-bold">预警详情</span>} open={isAlertModalVisible} onCancel={() => setIsAlertModalVisible(false)} width={550} footer={null} styles={{ header: { backgroundColor: '#1a5ab0', borderBottom: '1px solid rgba(3,251,253,0.15)' }, body: { backgroundColor: '#1a5ab0', padding: '20px 24px' } }}>
-        {selectedAlert && <div className="space-y-2 p-3 rounded" style={{ backgroundColor: 'rgba(3,251,253,0.05)', border: '1px solid rgba(3,251,253,0.15)' }}>
-          {[['预警ID', selectedAlert.id], ['规则', selectedAlert.ruleName], ['设备', selectedAlert.deviceName], ['位置', selectedAlert.location], ['时间', selectedAlert.createdAt], ['原因', selectedAlert.triggerReason]].map(([k, v]) => <div key={k} className="flex justify-between"><span className="text-[#03FBFD]">{k}</span><span className="text-white/75 text-right max-w-[60%]">{v}</span></div>)}
-          <div className="flex justify-between"><span className="text-[#03FBFD]">级别</span><Tag color={alertLevelOptions.find(o => o.value === selectedAlert.alertLevel)?.color}>{alertLevelOptions.find(o => o.value === selectedAlert.alertLevel)?.label}</Tag></div>
-        </div>}
+
+      {/* 预警详情 Modal */}
+      <Modal title={<span className="text-[#03FBFD] font-bold">预警详情</span>} open={isAlertModalVisible} onCancel={() => setIsAlertModalVisible(false)} width={550} footer={null} styles={{ body: { padding: '20px 24px' } }}>
+        {selectedAlert && (
+          <div className="space-y-2 p-3 rounded" style={{ backgroundColor: 'rgba(3,251,253,0.05)', border: '1px solid rgba(3,251,253,0.15)' }}>
+            {[['预警ID', selectedAlert.id], ['规则', selectedAlert.ruleName], ['设备', selectedAlert.deviceName], ['位置', selectedAlert.location], ['时间', selectedAlert.createdAt], ['原因', selectedAlert.triggerReason]].map(([k, v]) => (
+              <div key={k} className="flex justify-between"><span className="text-[#03FBFD]">{k}</span><span className="text-white/75 text-right max-w-[60%]">{v}</span></div>
+            ))}
+            <div className="flex justify-between"><span className="text-[#03FBFD]">级别</span><Tag color={alertLevelOptions.find(o => o.value === selectedAlert.alertLevel)?.color}>{alertLevelOptions.find(o => o.value === selectedAlert.alertLevel)?.label}</Tag></div>
+          </div>
+        )}
       </Modal>
-      <Modal title={<span className="text-[#03FBFD] font-bold">任务详情</span>} open={isTaskModalVisible} onCancel={() => setIsTaskModalVisible(false)} width={550} footer={null} styles={{ header: { backgroundColor: '#1a5ab0', borderBottom: '1px solid rgba(3,251,253,0.15)' }, body: { backgroundColor: '#1a5ab0', padding: '20px 24px' } }}>
-        {selectedTask && <div className="space-y-2 p-3 rounded" style={{ backgroundColor: 'rgba(3,251,253,0.05)', border: '1px solid rgba(3,251,253,0.15)' }}>
-          {[['任务ID', selectedTask.id], ['关联预警', selectedTask.alertId], ['类型', taskTypeOptions.find(o => o.value === selectedTask.taskType)?.label || ''], ['处置人', selectedTask.assigneeName || '未分配'], ['派发人', selectedTask.requesterName], ['要求时间', selectedTask.requireTime]].map(([k, v]) => <div key={k} className="flex justify-between"><span className="text-[#03FBFD]">{k}</span><span className="text-white/75">{v}</span></div>)}
-          {selectedTask.disposalContent && <div className="mt-2 pt-2" style={{ borderTop: '1px solid rgba(3,251,253,0.15)' }}><span className="text-[#03FBFD] block mb-1">处置内容</span><p className="text-white/75">{selectedTask.disposalContent}</p></div>}
-        </div>}
+
+      {/* 派发任务 Modal */}
+      <Modal
+        title={<span className="alert-rule-modal-title">派发处置任务</span>}
+        open={isDispatchModalVisible}
+        onCancel={() => setIsDispatchModalVisible(false)}
+        width={720}
+        className="alert-rule-modal"
+        footer={[
+          <Button key="cancel" onClick={() => setIsDispatchModalVisible(false)}>取消</Button>,
+          <Button key="ok" type="primary" loading={dispatchSubmitting} onClick={handleDispatchOk}>确定</Button>,
+        ]}
+      >
+        {dispatchAlert && (
+          <div className="flex items-center gap-4 mb-2 p-2 rounded text-sm" style={{ backgroundColor: 'rgba(3,251,253,0.05)', border: '1px solid rgba(3,251,253,0.15)' }}>
+            <span className="text-[#03FBFD]">预警 #{dispatchAlert.id}</span>
+            <span className="text-white/80">{dispatchAlert.ruleName}</span>
+            <span className="text-white/60">{dispatchAlert.deviceName}</span>
+          </div>
+        )}
+        <Form
+          form={dispatchForm}
+          layout="horizontal"
+          labelCol={{ style: { width: 90, textAlign: 'right', color: '#03FBFD', paddingRight: 10 } }}
+          className="alert-rule-form pt-2"
+        >
+          <div className="grid grid-cols-2 gap-x-2">
+            <Form.Item label="任务类型" name="taskType" rules={[{ required: true, message: '请选择任务类型' }]}>
+              <Select className="model_from_sel" classNames={{ popup: { root: 'alert-rule-dropdown' } }} placeholder="请选择任务类型" options={taskTypeOptions} />
+            </Form.Item>
+            <Form.Item label="地市" name="cityId" rules={[{ required: true, message: '请选择地市' }]}>
+              <Select
+                className="model_from_sel" classNames={{ popup: { root: 'alert-rule-dropdown' } }}
+                placeholder="请选择地市"
+                disabled={!canSelectRegion}
+                showSearch
+                optionFilterProp="label"
+                options={cityOptions}
+                onChange={() => dispatchForm.setFieldsValue({ districtId: undefined, townId: undefined, assigneeId: undefined })}
+              />
+            </Form.Item>
+          </div>
+          <div className="grid grid-cols-2 gap-x-2">
+            <Form.Item label="区县" name="districtId" rules={[{ required: true, message: '请选择区县' }]}>
+              <Select
+                className="model_from_sel" classNames={{ popup: { root: 'alert-rule-dropdown' } }}
+                placeholder={dispatchCityId ? '请选择区县' : '请先选择地市'}
+                disabled={roleLevel === 'county' || roleLevel === 'town' || !dispatchCityId}
+                showSearch
+                optionFilterProp="label"
+                options={dispatchDistrictOptions}
+                onChange={() => dispatchForm.setFieldsValue({ townId: undefined, assigneeId: undefined })}
+              />
+            </Form.Item>
+            <Form.Item label="乡镇" name="townId" rules={[{ required: true, message: '请选择乡镇' }]}>
+              <Select
+                className="model_from_sel" classNames={{ popup: { root: 'alert-rule-dropdown' } }}
+                placeholder={dispatchDistrictId ? '请选择乡镇' : '请先选择区县'}
+                disabled={roleLevel === 'town' || !dispatchDistrictId}
+                showSearch
+                optionFilterProp="label"
+                options={dispatchTownOptions}
+                onChange={value => { dispatchForm.setFieldsValue({ assigneeId: undefined }); void loadTownUsers(value) }}
+              />
+            </Form.Item>
+          </div>
+          <div className="grid grid-cols-2 gap-x-2">
+            <Form.Item label="处置人" name="assigneeId" rules={[{ required: true, message: '请选择处置人' }]}>
+              <Select
+                className="model_from_sel" classNames={{ popup: { root: 'alert-rule-dropdown' } }}
+                placeholder={dispatchTownId ? '请选择处置人员' : '请先选择乡镇'}
+                disabled={!dispatchTownId}
+                showSearch
+                optionFilterProp="label"
+                options={townUserOptions}
+              />
+            </Form.Item>
+            <Form.Item label="要求完成时间" name="requireTime" rules={[{ required: true, message: '请选择要求完成时间' }]}>
+              <DatePicker
+                className="model_from_input w-full"
+                showTime
+                format="YYYY-MM-DD HH:mm:ss"
+                placeholder="请选择时间"
+              />
+            </Form.Item>
+          </div>
+          <Form.Item label="处置内容" name="disposalContent">
+            <Input.TextArea className="model_from_input" rows={2} placeholder="请输入处置要求说明（可选）" />
+          </Form.Item>
+        </Form>
       </Modal>
-      <Modal title={<span className="text-[#03FBFD] font-bold">查看处置</span>} open={isDisposalModalVisible} onCancel={() => setIsDisposalModalVisible(false)} width={600} footer={null} styles={{ header: { backgroundColor: '#1a5ab0', borderBottom: '1px solid rgba(3,251,253,0.15)' }, body: { backgroundColor: '#1a5ab0', padding: '20px 24px' } }}>
-        {selectedTask && <div className="space-y-4">
-          <div><span className="text-[#03FBFD] block mb-2">处置内容</span><div className="p-3 rounded text-white/75" style={{ backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(3,251,253,0.15)' }}>{selectedTask.disposalContent}</div></div>
-          {selectedTask.photos && <div><span className="text-[#03FBFD] block mb-2">现场照片</span><div className="flex gap-3">{selectedTask.photos.map((_, i) => <div key={i} className="w-20 h-20 rounded flex items-center justify-center border text-white/50" style={{ backgroundColor: 'rgba(0,0,0,0.15)', borderColor: 'rgba(3,251,253,0.2)' }}><SearchOutlined className="text-xl" /></div>)}</div></div>}
-          {selectedTask.completedAt && <div className="flex justify-between"><span className="text-[#03FBFD]">完成时间</span><span className="text-white/75">{selectedTask.completedAt}</span></div>}
-        </div>}
+
+      {/* 任务详情 Modal */}
+      <Modal title={<span className="text-[#03FBFD] font-bold">任务详情</span>} open={isTaskModalVisible} onCancel={() => setIsTaskModalVisible(false)} width={550} footer={null} styles={{ body: { padding: '20px 24px' } }}>
+        {selectedTask && (
+          <div className="space-y-2 p-3 rounded" style={{ backgroundColor: 'rgba(3,251,253,0.05)', border: '1px solid rgba(3,251,253,0.15)' }}>
+            {[['任务ID', selectedTask.id], ['关联预警', selectedTask.alertId], ['类型', taskTypeOptions.find(o => o.value === selectedTask.taskType)?.label || ''], ['处置人', selectedTask.assigneeName || '未分配'], ['派发人', selectedTask.requesterName], ['要求时间', selectedTask.requireTime]].map(([k, v]) => (
+              <div key={k} className="flex justify-between"><span className="text-[#03FBFD]">{k}</span><span className="text-white/75">{v}</span></div>
+            ))}
+            {selectedTask.disposalContent && (
+              <div className="mt-2 pt-2" style={{ borderTop: '1px solid rgba(3,251,253,0.15)' }}>
+                <span className="text-[#03FBFD] block mb-1">处置内容</span>
+                <p className="text-white/75">{selectedTask.disposalContent}</p>
+              </div>
+            )}
+          </div>
+        )}
+      </Modal>
+
+      {/* 查看处置 Modal */}
+      <Modal title={<span className="text-[#03FBFD] font-bold">查看处置</span>} open={isDisposalModalVisible} onCancel={() => setIsDisposalModalVisible(false)} width={600} footer={null} styles={{ body: { padding: '20px 24px' } }}>
+        {selectedTask && (
+          <div className="space-y-4">
+            <div>
+              <span className="text-[#03FBFD] block mb-2">处置内容</span>
+              <div className="p-3 rounded text-white/75" style={{ backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(3,251,253,0.15)' }}>{selectedTask.disposalContent}</div>
+            </div>
+            {selectedTask.photos && (
+              <div>
+                <span className="text-[#03FBFD] block mb-2">现场照片</span>
+                <div className="flex gap-3">
+                  {selectedTask.photos.map((_, i) => (
+                    <div key={i} className="w-20 h-20 rounded flex items-center justify-center border text-white/50" style={{ backgroundColor: 'rgba(0,0,0,0.15)', borderColor: 'rgba(3,251,253,0.2)' }}>
+                      <SearchOutlined className="text-xl" />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {selectedTask.completedAt && (
+              <div className="flex justify-between">
+                <span className="text-[#03FBFD]">完成时间</span>
+                <span className="text-white/75">{selectedTask.completedAt}</span>
+              </div>
+            )}
+          </div>
+        )}
       </Modal>
     </div>
   )
