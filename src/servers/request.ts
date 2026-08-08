@@ -5,6 +5,7 @@ import type {
   InternalAxiosRequestConfig,
   AxiosRequestConfig
 } from 'axios'
+import { message } from 'antd'
 import { clearLocalInfo, getLocalInfo } from '@/utils/storage'
 import { TOKEN } from '@/utils/enum'
 
@@ -156,4 +157,21 @@ export const cancelRequest = (url: string | string[]) => {
 
 export const cancelAllRequest = () => {
   return request.cancelAllRequest()
+}
+
+/** 判断错误是否为登录过期（HTTP 401 或业务码 401） */
+export function isLoginExpiredError(error: unknown): boolean {
+  if (axios.isAxiosError(error)) {
+    if (error.response?.status === 401) return true
+    const data = error.response?.data as ServerResult | undefined
+    if (data && (data.resultCode === 401 || data.code === 401)) return true
+  }
+  return false
+}
+
+/** 登录过期统一处理：提示并清除本地信息后跳转登录页 */
+export function redirectToLoginOnExpired() {
+  message.warning('信息过期正在跳转登录页')
+  clearLocalInfo()
+  window.location.href = '/login'
 }

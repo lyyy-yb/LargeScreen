@@ -28,6 +28,12 @@ const protocolOptions = [
   { value: 'file', label: '文件导入' },
 ]
 
+// 站点类型：仅空气质量监测站需要区分固定站/移动站
+const stationTypeOptions = [
+  { value: 'fixed', label: '固定站' },
+  { value: 'mobile', label: '移动站' },
+]
+
 // 经纬度校验：数字格式（最多 6 位小数）且在合法范围内
 const coordinateRule = (label: string, min: number, max: number) => ({
   validator: (_: unknown, value: unknown) => {
@@ -58,6 +64,7 @@ export default function DataSource() {
   const [searchName, setSearchName] = useState('')
   const [appliedName, setAppliedName] = useState('')
   const [filterDataType, setFilterDataType] = useState<string | undefined>(undefined)
+  const [filterStationType, setFilterStationType] = useState<string | undefined>(undefined)
   const [filterConnStatus, setFilterConnStatus] = useState<string | undefined>(undefined)
   const [filterEnabled, setFilterEnabled] = useState<0 | 1 | undefined>(undefined)
   const [extraDepts, setExtraDepts] = useState<DeptInfo[]>([])
@@ -178,6 +185,7 @@ export default function DataSource() {
         needAqi: 0,
         deviceName: appliedName || undefined,
         dataType: filterDataType,
+        stationType: filterStationType,
         enabled: filterEnabled,
       })
       if (res.data) {
@@ -189,7 +197,7 @@ export default function DataSource() {
     } finally {
       setLoading(false)
     }
-  }, [pageNum, pageSize, appliedName, filterDataType, filterEnabled, message])
+  }, [pageNum, pageSize, appliedName, filterDataType, filterStationType, filterEnabled, message])
 
   // 标准的列表数据拉取模式，忽略 set-state-in-effect 规则
   // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -211,6 +219,13 @@ export default function DataSource() {
 
   const handleDataTypeFilter = (value?: string) => {
     setFilterDataType(value)
+    // 站点类型仅对空气质量监测站有效，切换其他类型时清空
+    if (value !== 'air_quality_station') setFilterStationType(undefined)
+    setPageNum(1)
+  }
+
+  const handleStationTypeFilter = (value?: string) => {
+    setFilterStationType(value)
     setPageNum(1)
   }
 
@@ -223,6 +238,9 @@ export default function DataSource() {
     setSelectedType(value)
     if (value === 'manual_import') {
       form.setFieldValue('protocol', '')
+    }
+    if (value !== 'air_quality_station') {
+      form.setFieldValue('stationType', undefined)
     }
   }
 
@@ -251,6 +269,7 @@ export default function DataSource() {
       deviceName: record.deviceName,
       dataType: record.dataType,
       protocol: record.protocol,
+      stationType: record.stationType,
       deviceId: record.deviceId,
       location: record.location,
       description: record.description,
@@ -275,6 +294,7 @@ export default function DataSource() {
       deviceName: detail.deviceName,
       dataType: detail.dataType,
       protocol: detail.protocol,
+      stationType: detail.stationType,
       deviceId: detail.deviceId,
       location: detail.location,
       description: detail.description,
@@ -464,6 +484,16 @@ export default function DataSource() {
           options={typeOptions}
           allowClear
         />
+        {(!filterDataType || filterDataType === 'air_quality_station') && (
+          <Select
+            className="!w-140px model_from_sel" classNames={{ popup: { root: 'alert-rule-dropdown' } }}
+            placeholder="筛选站点类型"
+            value={filterStationType}
+            onChange={handleStationTypeFilter}
+            options={stationTypeOptions}
+            allowClear
+          />
+        )}
         <Select
           className="!w-150px model_from_sel" classNames={{ popup: { root: 'alert-rule-dropdown' } }}
           placeholder="筛选连接状态"
@@ -543,6 +573,13 @@ export default function DataSource() {
                 </Select>
               </Form.Item>
             )}
+            {selectedType === 'air_quality_station' && (
+              <Form.Item label="站点类型" name="stationType" rules={[{ required: true, message: '请选择站点类型' }]}>
+                <Select className="model_from_sel" classNames={{ popup: { root: 'alert-rule-dropdown' } }} placeholder="请选择站点类型">
+                  {stationTypeOptions.map(opt => <Option key={opt.value} value={opt.value}>{opt.label}</Option>)}
+                </Select>
+              </Form.Item>
+            )}
           </div>
           <Form.Item label="安装位置" name="location">
             <Input className="model_from_input" placeholder="如：杭州超山森林公园监测站" />
@@ -614,6 +651,9 @@ export default function DataSource() {
             <div className="flex justify-between"><span className="text-[#03FBFD]">名称</span><span>{editingItem.deviceName}</span></div>
             <div className="flex justify-between"><span className="text-[#03FBFD]">设备编号</span><span>{editingItem.deviceId || '-'}</span></div>
             <div className="flex justify-between"><span className="text-[#03FBFD]">类型</span><span>{typeOptions.find(o => o.value === editingItem.dataType)?.label}</span></div>
+            {editingItem.dataType === 'air_quality_station' && (
+              <div className="flex justify-between"><span className="text-[#03FBFD]">站点类型</span><span>{stationTypeOptions.find(o => o.value === editingItem.stationType)?.label || '-'}</span></div>
+            )}
             <div className="flex justify-between"><span className="text-[#03FBFD]">协议</span><span>{protocolOptions.find(o => o.value === editingItem.protocol)?.label || '-'}</span></div>
             <div className="flex justify-between"><span className="text-[#03FBFD]">连接状态</span><span className={editingItem.connectionStatus === 'online' ? 'text-green-400' : 'text-red-400'}>{getStatusText(editingItem.connectionStatus)}</span></div>
             <div className="flex justify-between"><span className="text-[#03FBFD]">安装位置</span><span>{editingItem.location || '-'}</span></div>

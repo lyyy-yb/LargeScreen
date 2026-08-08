@@ -1,15 +1,17 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Button, Select, Modal, Popover, QRCode, message } from 'antd'
-import { ArrowLeftOutlined, EnvironmentOutlined, ExclamationCircleOutlined, SendOutlined, WarningFilled } from '@ant-design/icons'
+import { ArrowLeftOutlined, EnvironmentOutlined, ExclamationCircleOutlined, InboxOutlined, SendOutlined, WarningFilled } from '@ant-design/icons'
 import L7MapView from '@/components/L7MapView'
 import FlyListModel from '@/components/MapBox/FlyListModel'
-import { leidaList, alarmPointAll, wuranList, dockList } from '@/servers/mapBox'
+import { leidaList, alarmPointAll, dockList, options4leixing, wuranListByLngLat } from '@/servers/mapBox'
 import { cities, districts } from '@/utils/city'
 import RegionSelector from '@/components/RegionSelector'
 import { useAppStore } from '@/stores'
 import { toRegionQuery } from '@/utils/region'
-import { PointLayer, type Scene } from '@antv/l7'
+import { getPerspectiveIcon } from '@/utils/iconPerspective'
+import { createRadarScanOverlay, type RadarScanOverlay } from '@/utils/radarScanOverlay'
+import { PointLayer, type ILayer, type Scene } from '@antv/l7'
 
 interface AlarmItem { dapLat: number; dapLng: number; times: number; address: string; type: number }
 interface PollutionItem { name: string; weizhi: string; leixing: string; hangye: string; xianzhuang: string; lng: number; lat: number }
@@ -28,20 +30,9 @@ const mockCgList: AlarmItem[] = [
   { dapLat: 30.259, dapLng: 120.130, times: 2, address: '西湖区西溪湿地', type: 0 },
   { dapLat: 30.208, dapLng: 120.211, times: 12, address: '滨江区滨江天街', type: 0 },
 ]
-const mockPollutionList: PollutionItem[] = [
-  { name: '浙江XX化工有限公司', weizhi: '萧山区工业园区A区12号', leixing: '工业源', hangye: '化工', xianzhuang: '正常生产', lng: 120.264, lat: 30.264 },
-  { name: '杭州XX建材厂', weizhi: '余杭区工业区B路88号', leixing: '工业源', hangye: '建材', xianzhuang: '正常生产', lng: 119.978, lat: 30.273 },
-  { name: 'XX物流中心仓库', weizhi: '萧山区物流大道168号', leixing: '交通源', hangye: '物流', xianzhuang: '正常运营', lng: 120.264, lat: 30.184 },
-  { name: '富阳XX印染厂', weizhi: '富阳区化工园区C区3号', leixing: '工业源', hangye: '印染', xianzhuang: '停产整改', lng: 119.960, lat: 30.048 },
-  { name: '杭州XX建筑工地', weizhi: '西湖区文三路与学院路', leixing: '建筑施工', hangye: '建筑', xianzhuang: '施工中', lng: 120.130, lat: 30.259 },
-]
 const mockDocks = [
   { dockName: '临平交通-塘栖机场', dockCode: 'DOCK001' },
   { dockName: '良渚街道综合信息指挥室', dockCode: 'DOCK002' },
-]
-const leixingFilters = [
-  { value: '', label: '全部' }, { value: '工业源', label: '工业源' },
-  { value: '交通源', label: '交通源' }, { value: '建筑施工', label: '建筑施工' }, { value: '餐饮', label: '餐饮' },
 ]
 
 interface AlarmPointPanelProps {
@@ -125,21 +116,25 @@ export default function Radar() {
   const [modal, contextHolder] = Modal.useModal()
   const [tfList, setTfList] = useState<AlarmItem[]>(mockTfList)
   const [cgList, setCgList] = useState<AlarmItem[]>(mockCgList)
-  const [pollutionList, setPollutionList] = useState<PollutionItem[]>(mockPollutionList)
+  const [pollutionList, setPollutionList] = useState<PollutionItem[]>([])
+  // 污染源类型筛选（与原项目一致：options4leixing 接口动态获取）
+  const [leixingFilters, setLeixingFilters] = useState<{ value: string; label: string }[]>([{ value: '', label: '全部' }])
   const [docks, setDocks] = useState(mockDocks)
   // 雷达列表与当前选中雷达（借鉴原项目：进页查雷达列表并自动飞到雷达位置）
   const [radarList, setRadarList] = useState<RadarStation[]>([])
   const [selectedBsiId, setSelectedBsiId] = useState('')
   const [sceneReady, setSceneReady] = useState(false)
   const sceneRef = useRef<Scene | null>(null)
-  const radarLayersRef = useRef<{ scan: any; icon: any }>({ scan: null, icon: null })
+  const radarLayersRef = useRef<{ scan: RadarScanOverlay | null; icon: ILayer | null }>({ scan: null, icon: null })
+  // 定位高亮图层（借鉴原项目：点击列表点位后在该点绘制扩散动画圆）
+  const highlightLayerRef = useRef<ILayer | null>(null)
 
   // 派遣无人机巡逻（右键菜单）
   const [flyVisible, setFlyVisible] = useState(false)
   const [flyLngLat, setFlyLngLat] = useState<{ lng: number; lat: number }>({ lng: 0, lat: 0 })
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; lng: number; lat: number } | null>(null)
 
-  // 加载污染源/无人机场数据与 mock 点位
+  // 加载无人机场数据与 mock 点位（污染源改为按选中雷达坐标查询，见下方 loadPollution）
   useEffect(() => {
     const loadData = async () => {
       if (!querySelection) return
@@ -148,14 +143,7 @@ export default function Radar() {
       const matchesCounty = (value: string) => !querySelection.countyName || value.includes(querySelection.countyName)
       setCgList(isHangzhouScope ? mockCgList.filter(item => matchesCounty(item.address)) : [])
       setTfList(isHangzhouScope ? mockTfList.filter(item => matchesCounty(item.address)) : [])
-      setPollutionList(isHangzhouScope ? mockPollutionList.filter(item => matchesCounty(item.weizhi)) : [])
       setDocks(isHangzhouScope && !querySelection.countyName ? mockDocks : [])
-      try {
-        const wuRes = await wuranList(params)
-        if (wuRes?.resultCode === 0 && Array.isArray(wuRes.data) && wuRes.data.length) {
-          setPollutionList(wuRes.data)
-        }
-      } catch (e) { console.warn('污染源API不可用，使用mock', e) }
       try {
         const dockRes = await dockList(params)
         if (dockRes?.resultCode === 0 && Array.isArray(dockRes.data) && dockRes.data.length) {
@@ -165,6 +153,37 @@ export default function Radar() {
     }
     loadData()
   }, [querySelection])
+
+  // 污染源类型选项（原项目 rightBar：options4leixing({type:'0'}) 前置“全部”）
+  useEffect(() => {
+    options4leixing({ type: '0' })
+      .then(res => {
+        if (res?.resultCode === 0 && Array.isArray(res.data)) {
+          setLeixingFilters([{ value: '', label: '全部' }, ...res.data.map((v: string) => ({ value: v, label: v }))])
+        }
+      })
+      .catch(() => { /* 类型接口不可用时保留默认“全部” */ })
+  }, [])
+
+  // 污染源列表（与原项目一致：按选中雷达经纬度查附近污染源 wuranListByLngLat，切换雷达/类型时重查）
+  const loadPollution = useCallback(async (leixing: string) => {
+    const radar = radarList.find(item => String(item.bsiId) === String(selectedBsiId))
+    if (!radar || !Number.isFinite(radar.bsiLng) || !Number.isFinite(radar.bsiLat)) {
+      setPollutionList([])
+      return
+    }
+    try {
+      const res = await wuranListByLngLat({ lat: radar.bsiLat, lng: radar.bsiLng, leixing, type: '0' })
+      setPollutionList(res?.resultCode === 0 && Array.isArray(res.data) ? res.data : [])
+    } catch (e) {
+      console.warn('附近污染源查询失败', e)
+      setPollutionList([])
+    }
+  }, [radarList, selectedBsiId])
+
+  useEffect(() => {
+    void loadPollution(filterLeixing)
+  }, [loadPollution, filterLeixing])
 
   // 进入页面查询雷达列表（借鉴原项目 antd-demo）：默认选中第一台雷达，后续自动飞到其位置
   useEffect(() => {
@@ -200,27 +219,32 @@ export default function Radar() {
         setTfList(tf.length ? tf : mockTfList)
       })
       .catch(() => { /* 告警点位查询失败保留当前列表 */ })
+    // 切换雷达后清除旧的定位高亮
+    highlightLayerRef.current?.setData({ type: 'FeatureCollection', features: [] })
     return () => { cancelled = true }
   }, [selectedBsiId])
 
   // 绘制雷达扫描动画 + 图标层（与原项目 showRadar 一致）
   const renderRadarLayers = useCallback(async (scene: Scene, list: RadarStation[]) => {
-    if (radarLayersRef.current.scan) { scene.removeLayer(radarLayersRef.current.scan); radarLayersRef.current.scan = null }
+    if (radarLayersRef.current.scan) { radarLayersRef.current.scan.destroy(); radarLayersRef.current.scan = null }
     if (radarLayersRef.current.icon) { scene.removeLayer(radarLayersRef.current.icon); radarLayersRef.current.icon = null }
     if (!list.length) return
-    if (!scene.hasImage('radar-station-icon')) await scene.addImage('radar-station-icon', '/marker/radar-on.png')
-    const scanLayer = new PointLayer({ zIndex: 9, name: 'radar-page-scan-layer', enablePropagation: false, pickingBuffer: 2 })
-      .source(list, { parser: { type: 'json', x: 'bsiLng', y: 'bsiLat' } })
-      .shape('radar')
-      .size(6000)
-      .color('rgba(2, 248, 250, 0.50)')
-      .style({ speed: 1, unit: 'meter' })
-      .animate(true)
-    scene.addLayer(scanLayer)
+    if (!scene.hasImage('radar-station-icon')) {
+      try {
+        const warped = await getPerspectiveIcon('/marker/radar-on.png')
+        scene.addImage('radar-station-icon', warped)
+      } catch {
+        await scene.addImage('radar-station-icon', '/marker/radar-on.png')
+      }
+    }
+    const scanLayer = createRadarScanOverlay(
+      scene,
+      list.map(item => ({ id: item.bsiId, lng: item.bsiLng, lat: item.bsiLat })),
+    )
     const iconLayer = new PointLayer({ zIndex: 10, name: 'radar-page-icon-layer', enablePropagation: false, pickingBuffer: 2 })
       .source(list, { parser: { type: 'json', x: 'bsiLng', y: 'bsiLat' } })
       .shape('radar-station-icon')
-      .size(18)
+      .size(24)
     scene.addLayer(iconLayer)
     radarLayersRef.current = { scan: scanLayer, icon: iconLayer }
   }, [])
@@ -231,6 +255,14 @@ export default function Radar() {
     void renderRadarLayers(sceneRef.current, radarList)
   }, [sceneReady, radarList, renderRadarLayers])
 
+  useEffect(() => () => {
+    radarLayersRef.current.scan?.destroy()
+    radarLayersRef.current.scan = null
+    radarLayersRef.current.icon = null
+    highlightLayerRef.current = null
+    sceneRef.current = null
+  }, [])
+
   // 选中雷达变化 → 自动飞到雷达位置（原项目 setZoomAndCenter(12, 雷达经纬度)）
   useEffect(() => {
     if (!sceneReady || !sceneRef.current || !selectedBsiId) return
@@ -239,7 +271,33 @@ export default function Radar() {
   }, [sceneReady, radarList, selectedBsiId])
 
   const showWX = (obj: AlarmItem) => { setWxInfo(obj); setWxVisible(true) }
-  const flyTo = (obj: AlarmItem) => { message.info(`定位到: ${obj.address}`) }
+
+  // 高亮图层懒创建：首次定位时才 addLayer（与原项目 hightLayer 一致：animate(true) 扩散圆，size 40）
+  const ensureHighlightLayer = (scene: Scene) => {
+    if (highlightLayerRef.current) return highlightLayerRef.current
+    const layer = new PointLayer({ zIndex: 20, name: 'radar-page-highlight-layer', enablePropagation: false, pickingBuffer: 2 })
+      .source({ type: 'FeatureCollection', features: [] })
+      .shape('circle')
+      .animate(true)
+      .color('rColor')
+      .size(40)
+    scene.addLayer(layer)
+    highlightLayerRef.current = layer
+    return layer
+  }
+
+  // 点击列表点位 → 飞到该点并高亮（借鉴原项目 antd-demo：panTo + hightLayer.setData）
+  const flyTo = (obj: AlarmItem) => {
+    const scene = sceneRef.current
+    if (!scene || !Number.isFinite(obj.dapLng) || !Number.isFinite(obj.dapLat)) {
+      message.warning('该点位缺少坐标信息，无法定位')
+      return
+    }
+    scene.setZoomAndCenter(14, [obj.dapLng, obj.dapLat])
+    const rColor = tfList.some(i => i.address === obj.address && i.dapLng === obj.dapLng) ? '#FFB024' : '#FF3936'
+    ensureHighlightLayer(scene).setData([{ ...obj, rColor }], { parser: { type: 'json', x: 'dapLng', y: 'dapLat' } })
+    message.info(`定位到: ${obj.address}`)
+  }
 
   const showConfirm = (dockName: string, dockCode: string, obj: AlarmItem) => {
     modal.confirm({
@@ -251,12 +309,17 @@ export default function Radar() {
   const showTitle = (title: string) => <span className="text-[#A8D6FF]">{title}</span>
   const showContent = (obj: AlarmItem) => (
     <div className="flex-col w-260px text-[#A8D6FF]">
-      {docks.map(item => (
+      {docks.length ? docks.map(item => (
         <div key={item.dockCode} className="flex items-center justify-between py-1">
           <span className="text-sm">{item.dockName}</span>
           <Button size="small" className="!text-[#01C2FF] !border-[#6788AF] !bg-[rgba(255,255,255,0.1)] !rounded-full" onClick={() => showConfirm(item.dockName, item.dockCode, obj)}>选择</Button>
         </div>
-      ))}
+      )) : (
+        <div className="py-3 flex flex-col items-center gap-1">
+          <InboxOutlined className="text-24px text-[#A8D6FF]/45" />
+          <span className="text-12px text-[#A8D6FF]/60">当前区域暂无可用无人机机场</span>
+        </div>
+      )}
     </div>
   )
 
@@ -298,7 +361,15 @@ export default function Radar() {
     return () => { window.removeEventListener('click', close); window.removeEventListener('contextmenu', close) }
   }, [])
 
-  const filteredPollution = filterLeixing ? pollutionList.filter(i => i.leixing === filterLeixing) : pollutionList
+  // 点击污染源卡片 → 地图定位到该污染源（原项目 rightBar：panTo）
+  const locatePollution = (item: PollutionItem) => {
+    const scene = sceneRef.current
+    if (!scene || !Number.isFinite(item.lng) || !Number.isFinite(item.lat)) {
+      message.warning('该污染源缺少坐标信息，无法定位')
+      return
+    }
+    scene.setZoomAndCenter(14, [item.lng, item.lat])
+  }
 
   const markers = [
     ...tfList.map(i => ({ lng: i.dapLng, lat: i.dapLat, name: i.address, color: '#FFB024', size: 14 })),
@@ -362,13 +433,19 @@ export default function Radar() {
           <div className="flex items-center justify-between pb-2 mb-1 border-b border-[rgba(137,219,255,0.2)]">
             <div>
               <div className="text-[#edfaff] text-15px font-700">污染源管理</div>
-              <div className="text-9px text-[#c5e5ff]/52 mt-0.5">当前区域共 {filteredPollution.length} 个污染源</div>
+              <div className="text-9px text-[#c5e5ff]/52 mt-0.5">当前雷达附近共 {pollutionList.length} 个污染源</div>
             </div>
             <Select value={filterLeixing} onChange={setFilterLeixing} className="w-100px pointer-events-auto screen-select" classNames={{ popup: { root: 'screen-select-popup' } }} size="small" options={leixingFilters} />
           </div>
           <div className="flex-1 min-h-0 overflow-y-auto pointer-events-auto py-1 space-y-2 pr-0.5">
-            {filteredPollution.map((item, idx) => (
-              <article key={`${item.name}-${idx}`} className="rounded-11px border border-[rgba(133,213,255,0.17)] px-3 py-2.5 cursor-pointer bg-[rgba(17,91,167,0.5)] hover:bg-[rgba(27,112,191,0.68)] hover:border-[rgba(116,226,255,0.42)] transition-all" onClick={() => message.info(`定位: ${item.name}`)}>
+            {pollutionList.length === 0 && (
+              <div className="h-full flex flex-col items-center justify-center gap-2 text-[#c5e5ff]/50">
+                <InboxOutlined className="text-28px" />
+                <span className="text-12px">当前雷达附近暂无污染源数据</span>
+              </div>
+            )}
+            {pollutionList.map((item, idx) => (
+              <article key={`${item.name}-${idx}`} className="rounded-11px border border-[rgba(133,213,255,0.17)] px-3 py-2.5 cursor-pointer bg-[rgba(17,91,167,0.5)] hover:bg-[rgba(27,112,191,0.68)] hover:border-[rgba(116,226,255,0.42)] transition-all" onClick={() => locatePollution(item)}>
                 <div className="flex items-start justify-between gap-2">
                   <div className="min-w-0 text-13px text-[#edf8ff] font-600 truncate">{item.name}</div>
                   <span className={`shrink-0 rounded-full px-2 py-0.5 text-9px ${item.xianzhuang.includes('停产') ? 'text-[#ffb36b] bg-[rgba(255,154,74,0.14)]' : 'text-[#66f0b3] bg-[rgba(45,221,152,0.13)]'}`}>{item.xianzhuang}</span>

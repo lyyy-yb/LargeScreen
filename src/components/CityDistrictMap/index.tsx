@@ -6,7 +6,10 @@ import type { MapDevicePoint } from '@/types/mapDevice'
 import type { AirQualityPoint } from '@/types/airData'
 import { createDeviceMapLayers, type DeviceMapLayers } from '@/utils/mapDeviceLayers'
 import { createAirQualityLayers, type AirMapLayers } from '@/utils/mapAirLayers'
-import { addWaterRippleSurface, WATER_TEXTURE_URL } from '@/utils/mapWaterRipple'
+import { createAlertLayers, type AlertMapLayers, type AlertMapPoint } from '@/utils/mapAlertLayers'
+import { createRadarAlarmLayers, type RadarAlarmLayers, type RadarAlarmPoint } from '@/utils/mapRadarAlarmLayers'
+import { addSatelliteTiles } from '@/utils/mapSatelliteTiles'
+import { addRegionMask, setRegionBounds } from '@/utils/mapRegionMask'
 
 interface CityDistrictMapProps {
   city: CityItem
@@ -16,33 +19,41 @@ interface CityDistrictMapProps {
   onDistrictHover?: (districtName: string | null) => void
   devicePoints?: MapDevicePoint[]
   airPoints?: AirQualityPoint[]
+  /** 预警点位（alertEvent/list 经纬度），与 airPoints 由页面按钮组切换显示 */
+  alertPoints?: AlertMapPoint[]
+  /** 雷达突发告警点（hbdp/leida/alarmPoint，常显） */
+  radarAlarmPoints?: RadarAlarmPoint[]
   onAirPointClick?: (point: AirQualityPoint) => void
 }
 
-// 立体高度分层：底图区县 -> 悬浮 -> 选中，逐级抬高做出立体感（与省级地图风格一致）
-const BASE_TOP = 40000
-const HOVER_TOP = 54000
-const SELECT_TOP = 70000
-const TEXT_TOP = 76000
+// 漂浮地图风格（L7 floatmap 示例）：区块抬离地面 + 光幕接地 + 块底/块顶双细线
+const BASE_TOP = 3000 // 区块厚度（降低厚度避免纹理面盖住边界/打点）
+const FLOAT_BASE = 3000 // 区块抬离地面高度（缩小与底图间距）
+const BLOCK_TOP = FLOAT_BASE + BASE_TOP // 区块顶面高度
+const TEXT_TOP = BLOCK_TOP + 6000
 
 export default function CityDistrictMap({
   city,
-  districtItems,
   selectedDistrict,
   onDistrictClick,
   onDistrictHover,
   devicePoints = [],
   airPoints = [],
+  alertPoints = [],
+  radarAlarmPoints = [],
   onAirPointClick,
 }: CityDistrictMapProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const sceneRef = useRef<Scene | null>(null)
   const districtFeaturesRef = useRef<any[]>([])
-  const stationLayerRef = useRef<any>(null)
   const deviceLayersRef = useRef<DeviceMapLayers | null>(null)
   const devicePointsRef = useRef(devicePoints)
   const airLayersRef = useRef<AirMapLayers | null>(null)
   const airPointsRef = useRef(airPoints)
+  const alertLayersRef = useRef<AlertMapLayers | null>(null)
+  const alertPointsRef = useRef(alertPoints)
+  const radarAlarmLayersRef = useRef<RadarAlarmLayers | null>(null)
+  const radarAlarmPointsRef = useRef(radarAlarmPoints)
   const selectedDistrictRef = useRef(selectedDistrict)
   const hoverNameRef = useRef<string | null>(null)
   const onClickRef = useRef(onDistrictClick)
@@ -50,12 +61,11 @@ export default function CityDistrictMap({
   const [ready, setReady] = useState(false)
 
   // 高亮图层引用
-  const selectedFillRef = useRef<any>(null)
-  const selectedTextureRef = useRef<any>(null)
   const selectedOutlineRef = useRef<any>(null)
+  const selectedFillRef = useRef<any>(null)
   const selectedGlowRef = useRef<any>(null)
-  const hoverFillRef = useRef<any>(null)
-  const hoverOutlineRef = useRef<any>(null)
+  const selectedDashRef = useRef<any>(null)
+    const hoverOutlineRef = useRef<any>(null)
 
   useEffect(() => {
     onClickRef.current = onDistrictClick
@@ -80,6 +90,16 @@ export default function CityDistrictMap({
     airLayersRef.current?.setData(airPoints)
   }, [airPoints])
 
+  useEffect(() => {
+    alertPointsRef.current = alertPoints
+    alertLayersRef.current?.setData(alertPoints)
+  }, [alertPoints])
+
+  useEffect(() => {
+    radarAlarmPointsRef.current = radarAlarmPoints
+    radarAlarmLayersRef.current?.setData(radarAlarmPoints)
+  }, [radarAlarmPoints])
+
   // 仅更新某一个高亮图层的数据（传入 null 则清空）
   const setHighlight = (layer: any, name: string | null) => {
     const feature = name ? districtFeaturesRef.current.find(f => f.properties?.name === name) : null
@@ -93,25 +113,16 @@ export default function CityDistrictMap({
   useEffect(() => {
     selectedDistrictRef.current = selectedDistrict
     const sel = selectedDistrict ?? null
-    setHighlight(selectedFillRef.current, sel)
-    setHighlight(selectedTextureRef.current, sel)
     setHighlight(selectedOutlineRef.current, sel)
+    setHighlight(selectedFillRef.current, sel)
     setHighlight(selectedGlowRef.current, sel)
+    setHighlight(selectedDashRef.current, sel)
     if (hoverNameRef.current && hoverNameRef.current !== sel) {
-      setHighlight(hoverFillRef.current, hoverNameRef.current)
       setHighlight(hoverOutlineRef.current, hoverNameRef.current)
     } else {
-      setHighlight(hoverFillRef.current, null)
       setHighlight(hoverOutlineRef.current, null)
     }
   }, [selectedDistrict])
-
-  // 区县列表变化：刷新站点标记
-  useEffect(() => {
-    stationLayerRef.current?.setData(districtItems, {
-      parser: { type: 'json', x: 'lng', y: 'lat' },
-    })
-  }, [districtItems])
 
   useEffect(() => {
     if (!containerRef.current) return
@@ -126,11 +137,11 @@ export default function CityDistrictMap({
         zoom: 8.3,
         pitch: 45,
         rotation: 0,
-        minZoom: 6,
-        maxZoom: 12,
+        minZoom: 7.6,
+        maxZoom: 14,
       }),
     })
-    scene.setBgColor('rgba(5, 44, 96, 0.24)')
+    scene.setBgColor('rgba(9, 54, 114, 0.5)')
     sceneRef.current = scene
 
     scene.on('loaded', async () => {
@@ -141,6 +152,9 @@ export default function CityDistrictMap({
         doubleClickZoom: false,
       })
 
+      // 卫星影像底图（与 radar 页同源）
+      addSatelliteTiles(scene)
+
       try {
         // 区县边界（_full）与市界轮廓（用于发光围墙）
         // 边界数据已本地化到 public/map，避免正式环境（HTTP 部署）访问外部 HTTPS 资源失败
@@ -150,180 +164,249 @@ export default function CityDistrictMap({
         ])
         districtFeaturesRef.current = districtsRes.features
 
-        // 1. 市界发光围墙
-        const wallLayer = new LineLayer({ zIndex: 1 })
+        // 市外蒙层 + 限制拖拽范围（与省级同方案）：市界外雾化，市域不能拖出可视范围
+        addRegionMask(scene, cityBoundRes)
+        setRegionBounds(scene, cityBoundRes)
+
+        // 1. 市界边墙（淡蓝色实心光墙，与省级地图同方案）
+        const wallLayer = new LineLayer({ zIndex: 1, enablePicking: false })
           .source(cityBoundRes)
           .shape('wall')
-          .size(60000)
-          .style({ heightfixed: true, opacity: 0.65, sourceColor: '#43ADF1', targetColor: 'rgba(1,21,59,0)' })
+          .size(9000)
+          .style({
+            heightfixed: true,
+            opacity: 0.45,
+            sourceColor: '#3fc6ff',
+            targetColor: '#3fc6ff',
+          })
         scene.addLayer(wallLayer)
 
-        // 2. 3D 拉伸多边形 —— 底图区县
+        // 1.5 市界亮轮廓（外侧边界：天蓝实线，高度高于边墙避免角度遮挡）
+        const cityBoundLine = new LineLayer({ zIndex: 6, enablePicking: false })
+          .source(cityBoundRes)
+          .shape('line')
+          .color('#3fc6ff')
+          .size(2.2)
+          .style({ raisingHeight: 11000, heightfixed: true, opacity: 1, depth: false })
+        scene.addLayer(cityBoundLine)
+
+        // 2. 3D 拉伸地块 —— 与省级对齐：顶面近全透明直接显示卫星底图，仅侧面留淡蓝薄边
         const polygonLayer = new PolygonLayer({ zIndex: 2, autoFit: false })
           .source(districtsRes)
           .shape('extrude')
           .size(BASE_TOP)
           .color('name', [
-            '#1d6caf', '#195f9f', '#2276b7', '#1b65a5',
-            '#267cbc', '#1a62a1', '#2372b2', '#206cab',
-            '#287fbe', '#1c67a7', '#2577b7',
+            '#2b86d8', '#2f8cdd', '#318fe0', '#2c88da',
+            '#3492e2', '#2d89db', '#3695e5', '#2e8bdc',
+            '#338fe1', '#3090df', '#369aea',
           ])
-          .active({ color: '#43d9ff', mix: 0.45 })
-          .select({ color: '#54e7ff', mix: 0.62 })
           .style({
             heightfixed: true,
             pickLight: true,
-            raisingHeight: 0,
-            opacity: 0.92,
-            sourceColor: '#43ADF1',
-            targetColor: '#01153B',
+            raisingHeight: FLOAT_BASE,
+            opacity: 0.06,
+            sourceColor: '#4fb8f0',
+            targetColor: '#0a4a8a',
           })
         scene.addLayer(polygonLayer)
 
-        // 2.5 水波纹表面层：在区域顶面铺一层青色同心涟漪纹理（光量子雷达圆形图的水纹效果）
-        addWaterRippleSurface(scene, districtsRes, BASE_TOP, 3)
+        // 交互事件立即绑定：不依赖后续任何异步图层加载，保证点选/悬浮始终可用。
+        // 注意：所有装饰层必须 enablePicking: false，否则会盖住本地块层截获鼠标事件。
+        polygonLayer.on('mousemove', (e: any) => {
+          const name = e.feature?.properties?.name
+          if (!name) return
+          onHoverRef.current?.(name)
+          hoverNameRef.current = name
+          if (name !== selectedDistrictRef.current) {
+            setHighlight(hoverOutlineRef.current, name)
+          } else {
+            setHighlight(hoverOutlineRef.current, null)
+          }
+        })
 
-        // 3. 底部边界线
-        const lineDown = new LineLayer({ zIndex: 3 })
-          .source(districtsRes)
+        polygonLayer.on('unmousemove', () => {
+          onHoverRef.current?.(null)
+          hoverNameRef.current = null
+          setHighlight(hoverOutlineRef.current, null)
+        })
+
+        polygonLayer.on('click', (e: any) => {
+          const name = e.feature?.properties?.name
+          const adcode = e.feature?.properties?.adcode
+          if (name) onClickRef.current?.(name, Number(adcode))
+        })
+
+        // 3. 区县界描边（内侧边界：天蓝）。与省级同方案：每区县一个单要素线图层
+        // （已验证可渲染模式），高度统一高于边墙，depth:false 按 zIndex 合成
+        districtsRes.features.forEach((feature: any) => {
+          const districtLine = new LineLayer({ zIndex: 5, enablePicking: false })
+            .source({ type: 'FeatureCollection', features: [feature] })
+            .shape('line')
+            .color('#3fc6ff')
+            .size(2)
+            .style({ raisingHeight: 11000, heightfixed: true, opacity: 1, depth: false })
+          scene.addLayer(districtLine)
+        })
+
+        // 4.5 智造新城（仅衢州）：不叠加凸出填充面，仅描边 + 标签，并自动聚焦
+        if (city.adcode === '330800' || city.name.includes('衢州')) {
+          try {
+            const zhizaoRes = await fetch('/map/zhizao_newcity.json').then(r => r.json())
+            const ZZ_CENTER: [number, number] = [118.93118, 28.90954]
+            // 智造新城独立配色（琥珀金系，与全局天蓝体系区分）：半透明区域面 + 描边 + 蚂蚁线
+            const zzFill = new PolygonLayer({ zIndex: 7, enablePicking: false, autoFit: false })
+              .source(zhizaoRes)
+              .shape('extrude')
+              .size(300)
+              .color('#ff9f43')
+              .style({
+                heightfixed: true,
+                topsurface: true,
+                sidesurface: false,
+                raisingHeight: BLOCK_TOP + 300,
+                opacity: 0.25,
+              })
+            scene.addLayer(zzFill)
+
+            const zzLine = new LineLayer({ zIndex: 8, enablePicking: false })
+              .source(zhizaoRes)
+              .shape('line')
+              .color('#ffd166')
+              .size(2)
+              .style({ raisingHeight: 13000, heightfixed: true, opacity: 1, depth: false })
+            scene.addLayer(zzLine)
+
+            const zzDash = new LineLayer({ zIndex: 9, enablePicking: false })
+              .source(zhizaoRes)
+              .shape('line')
+              .color('#ffe9a8')
+              .size(1.2)
+              .style({ raisingHeight: 13000, heightfixed: true, opacity: 0.9, depth: false, dashArray: [4, 3] })
+            zzDash.animate(true)
+            scene.addLayer(zzDash)
+
+            // 中心呼吸光圈（扩散动画）
+            const zzRipple = new PointLayer({ zIndex: 11, enablePicking: false })
+              .source([{ lng: ZZ_CENTER[0], lat: ZZ_CENTER[1] }], { parser: { type: 'json', x: 'lng', y: 'lat' } })
+              .shape('circle')
+              .size(16)
+              .color('#ffc857')
+              .style({ raisingHeight: 13000, heightfixed: true, opacity: 0.8, depth: false })
+            zzRipple.animate(true)
+            scene.addLayer(zzRipple)
+
+            const zzCore = new PointLayer({ zIndex: 11, enablePicking: false })
+              .source([{ lng: ZZ_CENTER[0], lat: ZZ_CENTER[1] }], { parser: { type: 'json', x: 'lng', y: 'lat' } })
+              .shape('circle')
+              .size(4)
+              .color('#fff6dd')
+              .style({ raisingHeight: 13000, heightfixed: true, opacity: 1, depth: false })
+            scene.addLayer(zzCore)
+            // 名称标签（金色描边呼应独立配色）
+            const zzLabel = new PointLayer({ zIndex: 12, enablePicking: false })
+              .source([{ name: '智造新城', lng: ZZ_CENTER[0], lat: ZZ_CENTER[1] }], { parser: { type: 'json', x: 'lng', y: 'lat' } })
+              .shape('name', 'text')
+              .size(13)
+              .color('#ffe9a8')
+              .style({
+                textAnchor: 'center',
+                stroke: '#7a4a08',
+                strokeWidth: 3,
+                raisingHeight: BLOCK_TOP + 10000,
+                textAllowOverlap: true,
+                heightFixed: true,
+              })
+            scene.addLayer(zzLabel)
+            // 自动聚焦到智造新城（缩放适中，不怼太近）
+            scene.setZoomAndCenter(10.4, ZZ_CENTER)
+          } catch (err) {
+            console.warn('CityDistrictMap: 加载智造新城数据失败', err)
+          }
+        }
+
+        // 5. 悬浮描边：亮白加粗，与常态天蓝边形成对比（同省级方案）
+        const hoverOutline = new LineLayer({ zIndex: 8, enablePicking: false })
+          .source({ type: 'FeatureCollection', features: [] })
           .shape('line')
-          .color('#0DCCFF')
-          .size(1)
-          .style({ raisingHeight: 0, opacity: 0.8 })
-        scene.addLayer(lineDown)
+          .color('#ffffff')
+          .size(3.5)
+          .style({ raisingHeight: 13000, heightfixed: true, opacity: 1, depth: false })
+        scene.addLayer(hoverOutline)
+        hoverOutlineRef.current = hoverOutline
 
-        // 4. 顶部边界线（略高于水面纹理层，任何角度都可见）
-        const lineUp = new LineLayer({ zIndex: 4 })
-          .source(districtsRes)
-          .shape('line')
-          .color('#0DCCFF')
-          .size(1.5)
-          .style({ raisingHeight: BASE_TOP + 1200, opacity: 1 })
-        scene.addLayer(lineUp)
-
-        // 5. 悬浮高亮（抬高到 HOVER_TOP）
-        const hoverFill = new PolygonLayer({ zIndex: 5 })
+        // 8. 选中效果 = 面色提亮 + 高亮描边 + 流动蚂蚁线（三层各司其职，禁拾取）
+        const selectedFill = new PolygonLayer({ zIndex: 4, enablePicking: false })
           .source({ type: 'FeatureCollection', features: [] })
           .shape('extrude')
-          .size(HOVER_TOP)
-          .color('#3aa9ef')
+          .size(BASE_TOP + 800)
+          .color('#2fb9f5')
           .style({
             heightfixed: true,
-            pickLight: true,
-            raisingHeight: 0,
-            opacity: 0.5,
-            sourceColor: '#43ADF1',
-            targetColor: '#01153B',
-          })
-        scene.addLayer(hoverFill)
-        hoverFillRef.current = hoverFill
-
-        // 6. 选中高亮（抬高到 SELECT_TOP，仅侧面渐变，顶面由纹理层覆盖）
-        const selectedFill = new PolygonLayer({ zIndex: 6 })
-          .source({ type: 'FeatureCollection', features: [] })
-          .shape('extrude')
-          .size(SELECT_TOP)
-          .color('#2ea0ec')
-          .style({
-            heightfixed: true,
-            pickLight: true,
-            raisingHeight: 0,
-            opacity: 0.96,
-            topsurface: false,
-            sidesurface: true,
-            sourceColor: '#43ADF1',
-            targetColor: '#01153B',
+            raisingHeight: FLOAT_BASE,
+            opacity: 0.35,
           })
         scene.addLayer(selectedFill)
         selectedFillRef.current = selectedFill
 
-        // 6.5 选中顶面纹理（与底图同款水面纹理，跟随选中区域抬高）
-        const selectedTexture = new PolygonLayer({ zIndex: 7, enablePicking: false })
-          .source({ type: 'FeatureCollection', features: [] })
-          .shape('extrude')
-          .size(SELECT_TOP + 500)
-          .color('#5DDDFF')
-          .style({
-            mapTexture: WATER_TEXTURE_URL,
-            topsurface: true,
-            sidesurface: false,
-            heightfixed: true,
-            raisingHeight: 0,
-            opacity: 0.55,
-          })
-        scene.addLayer(selectedTexture)
-        selectedTextureRef.current = selectedTexture
-
-        // 7. 悬浮描边
-        const hoverOutline = new LineLayer({ zIndex: 8 })
+        const selectedOutline = new LineLayer({ zIndex: 9, enablePicking: false })
           .source({ type: 'FeatureCollection', features: [] })
           .shape('line')
-          .color('#bfe9ff')
-          .size(3)
-          .style({ raisingHeight: HOVER_TOP, opacity: 0.95 })
-        scene.addLayer(hoverOutline)
-        hoverOutlineRef.current = hoverOutline
-
-        // 8. 选中描边（亮白青色细线，精致贴边）
-        const selectedOutline = new LineLayer({ zIndex: 9 })
-          .source({ type: 'FeatureCollection', features: [] })
-          .shape('line')
-          .color('#d9f4ff')
+          .color('#bffbff')
           .size(2.5)
-          .style({ raisingHeight: SELECT_TOP + 1500, opacity: 0.95 })
+          .style({ raisingHeight: 13000, heightfixed: true, opacity: 1, depth: false })
         scene.addLayer(selectedOutline)
         selectedOutlineRef.current = selectedOutline
 
-        // 8.5 选中光晕（淡蓝色宽描边，高透明度柔和外发光）
-        const selectedGlow = new LineLayer({ zIndex: 8 })
+        // 选中微光晕（仅选中态保留一点柔光，常规边界无光晕）
+        const selectedGlow = new LineLayer({ zIndex: 8, enablePicking: false })
           .source({ type: 'FeatureCollection', features: [] })
           .shape('line')
-          .color('#4db8ff')
-          .size(9)
-          .style({ raisingHeight: SELECT_TOP + 1500, opacity: 0.08 })
+          .color('#3fe0ff')
+          .size(6)
+          .style({ raisingHeight: 13000, heightfixed: true, opacity: 0.25, depth: false })
         scene.addLayer(selectedGlow)
         selectedGlowRef.current = selectedGlow
+
+        const selectedDash = new LineLayer({ zIndex: 10, enablePicking: false })
+          .source({ type: 'FeatureCollection', features: [] })
+          .shape('line')
+          .color('#7ff6ff')
+          .size(1.2)
+          .style({ raisingHeight: 13000, heightfixed: true, opacity: 0.9, depth: false, dashArray: [4, 3] })
+        selectedDash.animate(true)
+        scene.addLayer(selectedDash)
+        selectedDashRef.current = selectedDash
 
         // 初始化选中高亮（初次进入时 prop 可能已有选中区县）
         const initialSelected = districtsRes.features.find((feature: any) => feature.properties?.name === selectedDistrictRef.current)
         if (initialSelected) {
-          selectedFillRef.current?.setData({ type: 'FeatureCollection', features: [initialSelected] })
-          selectedTextureRef.current?.setData({ type: 'FeatureCollection', features: [initialSelected] })
           selectedOutlineRef.current?.setData({ type: 'FeatureCollection', features: [initialSelected] })
+          selectedFillRef.current?.setData({ type: 'FeatureCollection', features: [initialSelected] })
           selectedGlowRef.current?.setData({ type: 'FeatureCollection', features: [initialSelected] })
+          selectedDashRef.current?.setData({ type: 'FeatureCollection', features: [initialSelected] })
         }
 
-        // 9. 区县名称文字 —— 使用 center 字段（centroid 可能偏移）
+        // 9. 区县名称文字（禁拾取，避免文字盖住地块截获点击）
         const texts = districtsRes.features.map((f: any) => {
           const c = f.properties.center || f.properties.centroid || [city.lng, city.lat]
           return { name: f.properties.name, lng: c[0], lat: c[1] }
         })
-        const textLayer = new PointLayer({ zIndex: 10 })
+        const textLayer = new PointLayer({ zIndex: 10, enablePicking: false })
           .source(texts, { parser: { type: 'json', x: 'lng', y: 'lat' } })
           .shape('name', 'text')
           .size(13)
-          .color('#fff')
+          .color('#eafcff')
           .style({
             textAnchor: 'center',
             spacing: 2,
             padding: [2, 2],
-            stroke: '#0DCCFF',
-            strokeWidth: 0.3,
+            stroke: '#021a3f',
+            strokeWidth: 3,
             raisingHeight: TEXT_TOP,
             textAllowOverlap: true,
             heightFixed: true,
           })
         scene.addLayer(textLayer)
-
-        // 10. 区县监测站点标记（使用区县中心经纬度）
-        const stationLayer = new PointLayer({ zIndex: 11 })
-          .source(districtItems, { parser: { type: 'json', x: 'lng', y: 'lat' } })
-          .shape('circle')
-          .size(8)
-          .color('#00ff88')
-          .style({ opacity: 0.9, strokeWidth: 1, stroke: '#fff' })
-        scene.addLayer(stationLayer)
-        stationLayerRef.current = stationLayer
 
         // 11. 雷达扫描与无人机场图标
         deviceLayersRef.current = await createDeviceMapLayers(scene, devicePointsRef.current, TEXT_TOP + 2000)
@@ -336,33 +419,11 @@ export default function CityDistrictMap({
           point => onAirPointClickRef.current?.(point),
         )
 
-        // 12. 悬浮/点击交互
-        polygonLayer.on('mousemove', (e: any) => {
-          const name = e.feature?.properties?.name
-          if (!name) return
-          onHoverRef.current?.(name)
-          hoverNameRef.current = name
-          if (name !== selectedDistrictRef.current) {
-            setHighlight(hoverFillRef.current, name)
-            setHighlight(hoverOutlineRef.current, name)
-          } else {
-            setHighlight(hoverFillRef.current, null)
-            setHighlight(hoverOutlineRef.current, null)
-          }
-        })
+        // 预警点位标记（alertEvent/list 经纬度，warn-l1~l3 图标，与空气质量打点切换显示）
+        alertLayersRef.current = await createAlertLayers(scene, alertPointsRef.current, TEXT_TOP + 4000)
 
-        polygonLayer.on('unmousemove', () => {
-          onHoverRef.current?.(null)
-          hoverNameRef.current = null
-          setHighlight(hoverFillRef.current, null)
-          setHighlight(hoverOutlineRef.current, null)
-        })
-
-        polygonLayer.on('click', (e: any) => {
-          const name = e.feature?.properties?.name
-          const adcode = e.feature?.properties?.adcode
-          if (name) onClickRef.current?.(name, Number(adcode))
-        })
+        // 雷达突发告警点（hbdp/leida/alarmPoint，橙/红圆点常显）
+        radarAlarmLayersRef.current = await createRadarAlarmLayers(scene, radarAlarmPointsRef.current, TEXT_TOP + 6000)
 
         setReady(true)
       } catch (err) {
@@ -372,16 +433,19 @@ export default function CityDistrictMap({
     })
 
     return () => {
+      deviceLayersRef.current?.destroy()
+      alertLayersRef.current?.destroy()
+      radarAlarmLayersRef.current?.destroy()
       scene.destroy()
       sceneRef.current = null
-      stationLayerRef.current = null
       deviceLayersRef.current = null
       airLayersRef.current = null
-      selectedFillRef.current = null
-      selectedTextureRef.current = null
+      alertLayersRef.current = null
+      radarAlarmLayersRef.current = null
       selectedOutlineRef.current = null
+      selectedFillRef.current = null
       selectedGlowRef.current = null
-      hoverFillRef.current = null
+      selectedDashRef.current = null
       hoverOutlineRef.current = null
       districtFeaturesRef.current = []
     }

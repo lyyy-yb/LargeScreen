@@ -1,9 +1,10 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Button, Tag, message } from 'antd'
+import { Button, Tag, Modal, Image, message } from 'antd'
 import { ArrowLeftOutlined, RocketOutlined, VideoCameraOutlined, EnvironmentOutlined, DashboardOutlined, SendOutlined } from '@ant-design/icons'
+import dayjs from 'dayjs'
 import L7MapView from '@/components/L7MapView'
-import { dockList, listFlyJob, listFlyPlan } from '@/servers/mapBox'
+import { dockList, listFlyJob, listFlyPlan, listFlyResult } from '@/servers/mapBox'
 import RegionSelector from '@/components/RegionSelector'
 import { useAppStore } from '@/stores'
 import { toRegionQuery } from '@/utils/region'
@@ -15,6 +16,7 @@ import type { Scene } from '@antv/l7'
 interface DockItem { dockCode: string; dockName: string; dockAddress: string; dockLat: number; dockLng: number; status: string }
 interface TaskItem { jobID: string; jobName: string; jobTime: string; jobStatus: string; dockCode: string }
 interface PlanItem { planId: string; planName: string; startDate: string; flyTime: string; dockCode: string; lineName: string }
+interface FlyResultItem { resultsID: string; resultsTime: string; resultsType: string; resultsUrl: string }
 
 interface SensorData { pm25: number; pm10: number; altitude: number; battery: number; speed: number; signal: number }
 interface VideoItem { id: string; name: string; duration: string; resolution: string; size: string; date: string; status: string }
@@ -50,6 +52,7 @@ const statusObj: Record<string, { message: string; color: string }> = {
   '3': { message: '成功', color: '#02f8fa' },
   '4': { message: '取消', color: '#ef6c6a' },
   '5': { message: '失败', color: '#f12a27' },
+  '6': { message: '任务中断', color: '#f37472' },
 }
 
 const createSensorData = (): SensorData => ({
@@ -61,14 +64,14 @@ const createSensorData = (): SensorData => ({
   signal: 75 + Math.round(Math.random() * 20),
 })
 
-const taskList: TaskItem[] = [
+const mockTasks: TaskItem[] = [
   { jobID: 'JOB001', jobName: '临平区道路巡查任务', jobTime: '2025-11-24 09:15', jobStatus: '3', dockCode: 'DOCK001' },
   { jobID: 'JOB002', jobName: '良渚街道绿化巡查', jobTime: '2025-11-24 14:30', jobStatus: '2', dockCode: 'DOCK002' },
   { jobID: 'JOB003', jobName: '西湖景区航拍任务', jobTime: '2025-11-23 10:00', jobStatus: '5', dockCode: 'DOCK002' },
   { jobID: 'JOB004', jobName: '余杭区工地监测', jobTime: '2025-11-22 15:45', jobStatus: '3', dockCode: 'DOCK001' },
 ]
 
-const flyPlanList: PlanItem[] = [
+const mockPlans: PlanItem[] = [
   { planId: 'PLAN005', planName: '绿化养护-望梅高架', startDate: '2025-11-25', flyTime: '09:00', dockCode: 'DOCK001', lineName: '绿化养护-望梅高架' },
   { planId: 'PLAN006', planName: '河道巡查-京杭大运河', startDate: '2025-11-26', flyTime: '14:00', dockCode: 'DOCK001', lineName: '河道巡查-京杭大运河' },
   { planId: 'PLAN007', planName: '工业园区监测-萧山', startDate: '2025-11-27', flyTime: '10:30', dockCode: 'DOCK002', lineName: '工业园区监测-萧山' },
@@ -109,6 +112,14 @@ export default function Drone() {
   const querySelection = regionContext?.querySelection
   const mapSelection = regionContext?.mapSelection
   const [refreshStatus, setRefreshStatus] = useState<string | null>(null)
+
+  // 飞行任务 / 待执飞任务（与原项目一致：按选中机场 dockCode + 年初~今天时间范围真实查询）
+  const [jobs, setJobs] = useState<TaskItem[]>([])
+  const [plans, setPlans] = useState<PlanItem[]>([])
+  // 任务结果弹窗（原项目 ResModal：listFlyResult 查图片/视频结果）
+  const [resVisible, setResVisible] = useState(false)
+  const [curJobID, setCurJobID] = useState('')
+  const [jobResults, setJobResults] = useState<FlyResultItem[]>([])
 
   // 地图中心控制（首次加载数据后飞到机场）
   const [mapCenter, setMapCenter] = useState<[number, number] | undefined>(undefined)
@@ -161,19 +172,46 @@ export default function Drone() {
         const regionCamera = getRegionCamera(querySelection)
         moveMapTo(regionCamera.center, regionCamera.zoom)
       }
-
-      try {
-        const jobRes = await listFlyJob(params)
-        if (jobRes?.resultCode === 0) console.log('飞行任务数据已加载')
-      } catch { /* mock */ }
-      try {
-        const planRes = await listFlyPlan(params)
-        if (planRes?.resultCode === 0) console.log('飞行计划数据已加载')
-      } catch { /* mock */ }
     }
     void loadDroneData()
     return () => { cancelled = true }
   }, [moveMapTo, querySelection])
+
+  // 选中机场变化 → 查询该机场飞行任务/待执飞计划（默认年初至今天，与原项目 rightBar 一致；接口不可用时降级 mock）
+  useEffect(() => {
+    if (!dockCode) return
+    let cancelled = false
+    const param = { dockCode, startDate: dayjs().startOf('year').format('YYYY-MM-DD'), endDate: dayjs().format('YYYY-MM-DD') }
+    listFlyJob(param)
+      .then(res => {
+        if (cancelled) return
+        setJobs(res?.resultCode === 0 && Array.isArray(res.data) ? res.data : mockTasks.filter(i => i.dockCode === dockCode))
+      })
+      .catch(() => { if (!cancelled) setJobs(mockTasks.filter(i => i.dockCode === dockCode)) })
+    listFlyPlan(param)
+      .then(res => {
+        if (cancelled) return
+        setPlans(res?.resultCode === 0 && Array.isArray(res.data) ? res.data : mockPlans.filter(i => i.dockCode === dockCode))
+      })
+      .catch(() => { if (!cancelled) setPlans(mockPlans.filter(i => i.dockCode === dockCode)) })
+    return () => { cancelled = true }
+  }, [dockCode])
+
+  // 点击飞行任务 → 查询任务结果（listFlyResult）并在弹窗呈现图片/视频
+  const showJobResult = (jobID: string) => {
+    setCurJobID(jobID)
+    setResVisible(true)
+  }
+  useEffect(() => {
+    if (!curJobID) return
+    let cancelled = false
+    listFlyResult({ jobID: curJobID })
+      .then(res => {
+        if (!cancelled) setJobResults(res?.resultCode === 0 && Array.isArray(res.data) ? res.data : [])
+      })
+      .catch(() => { if (!cancelled) setJobResults([]) })
+    return () => { cancelled = true }
+  }, [curJobID])
 
   // 模拟传感器实时数据
   useEffect(() => {
@@ -199,6 +237,10 @@ export default function Drone() {
     }, 1000)
   }
   const flyTo = (item: DockItem) => {
+    if (dockCode !== item.dockCode) {
+      setJobs([])
+      setPlans([])
+    }
     setDockCode(item.dockCode)
     setSensorData(createSensorData())
     if (isValidCoordinate(item.dockLng, item.dockLat)) {
@@ -212,14 +254,6 @@ export default function Drone() {
       .filter(item => isValidCoordinate(item.dockLng, item.dockLat))
       .map(d => ({ lng: d.dockLng, lat: d.dockLat, name: d.dockName, color: d.status === '在线' ? '#22C55E' : '#EF4444', size: 14 })),
     [docks],
-  )
-  const visibleTasks = taskList.filter(item =>
-    (!querySelection?.cityName || querySelection.cityName === '杭州市') &&
-    (!querySelection?.countyName || item.jobName.includes(querySelection.countyName))
-  )
-  const visiblePlans = flyPlanList.filter(item =>
-    (!querySelection?.cityName || querySelection.cityName === '杭州市') &&
-    (!querySelection?.countyName || item.planName.includes(querySelection.countyName))
   )
   const regionCamera = getRegionCamera(mapSelection ?? querySelection)
 
@@ -323,8 +357,10 @@ export default function Drone() {
         <div className="bg-[rgba(0,56,129,0.85)] flex-1 rounded-20px px-3 py-2 flex flex-col overflow-hidden pointer-events-auto">
           <div className="text-[#A0C7FF] text-16px font-bold py-2">飞行任务</div>
           <div className="flex-1 overflow-y-auto space-y-2 py-1">
-            {visibleTasks.map(item => (
-              <div key={item.jobID} className="rounded-xl p-3 cursor-pointer transition-all bg-[rgba(0,0,0,0.2)] border border-[rgba(255,255,255,0.15)] hover:bg-[rgba(255,255,255,0.06)]" onClick={() => message.info(`查看任务: ${item.jobName}`)}>
+            {!dockCode && <div className="text-[rgba(168,214,255,0.4)] text-11px py-2 text-center">请先在左侧选择无人机机场</div>}
+            {dockCode && jobs.length === 0 && <div className="text-[rgba(168,214,255,0.4)] text-11px py-2 text-center">暂无飞行任务</div>}
+            {dockCode && jobs.map(item => (
+              <div key={item.jobID} className="rounded-xl p-3 cursor-pointer transition-all bg-[rgba(0,0,0,0.2)] border border-[rgba(255,255,255,0.15)] hover:bg-[rgba(255,255,255,0.06)]" onClick={() => showJobResult(item.jobID)}>
                 <div className="flex items-center justify-between mb-1">
                   <div className="text-[#A8D6FF] text-13px">{item.jobName}</div>
                   <span className="px-2 py-0.5 rounded text-12px text-white" style={{ backgroundColor: statusObj[item.jobStatus]?.color }}>{statusObj[item.jobStatus]?.message}</span>
@@ -337,7 +373,9 @@ export default function Drone() {
         <div className="bg-[rgba(0,56,129,0.85)] flex-1 rounded-20px px-3 py-2 flex flex-col overflow-hidden pointer-events-auto">
           <div className="text-[#A0C7FF] text-16px font-bold py-2">待执飞任务</div>
           <div className="flex-1 overflow-y-auto space-y-2 py-1">
-            {visiblePlans.map(item => (
+            {!dockCode && <div className="text-[rgba(168,214,255,0.4)] text-11px py-2 text-center">请先在左侧选择无人机机场</div>}
+            {dockCode && plans.length === 0 && <div className="text-[rgba(168,214,255,0.4)] text-11px py-2 text-center">暂无待执飞任务</div>}
+            {dockCode && plans.map(item => (
               <div key={item.planId} className="rounded-xl p-3 transition-all bg-[rgba(0,0,0,0.2)] border border-[rgba(255,255,255,0.15)] hover:bg-[rgba(255,255,255,0.06)]">
                 <div className="flex items-center justify-between mb-1">
                   <div className="text-[#A8D6FF] text-13px">{item.lineName}</div>
@@ -429,6 +467,20 @@ export default function Drone() {
           lngLat={flyLngLat}
         />
       )}
+      {/* 飞行任务结果弹窗（原项目 ResModal：listFlyResult 图片/视频结果） */}
+      <Modal open={resVisible} onCancel={() => setResVisible(false)} footer={null} width={620} title={<span className="text-[#A8D6FF]">任务结果</span>}>
+        <div className="max-h-68vh overflow-y-auto px-2 py-1">
+          {jobResults.length === 0 && <div className="py-8 text-center text-[rgba(0,0,0,0.45)]">暂无任务结果数据</div>}
+          {jobResults.map(item => (
+            <div key={item.resultsID} className="flex items-center justify-between py-2 border-b border-dashed border-[rgba(0,0,0,0.08)]">
+              {item.resultsType === 'p'
+                ? <Image src={item.resultsUrl} width={260} />
+                : <video src={item.resultsUrl} className="w-260px h-160px" controls />}
+              <div className="text-12px text-[rgba(0,0,0,0.6)]">{item.resultsTime}</div>
+            </div>
+          ))}
+        </div>
+      </Modal>
     </div>
   )
 }

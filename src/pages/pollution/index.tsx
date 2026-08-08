@@ -20,7 +20,6 @@ interface PollutionItem {
 const leixingOptions = ['工业源', '交通源', '建筑施工', '餐饮']
 const cityOpts = cities.map(item => item.name)
 const levelObj: Record<string, string> = { '1': '红', '2': '黄', '3': '绿' }
-
 const mockData: PollutionItem[] = [
   { id: '1', name: '浙江XX化工有限公司', city: '杭州', quxian: '萧山区', xiangzhen: '城厢街道', weizhi: '工业园区A区12号', leixing: '工业源', hangye: '化工', xianzhuang: '正常生产', lng: 120.264, lat: 30.264, beizhu: '', level: '1', createTime: '2025-11-20' },
   { id: '2', name: '杭州XX建材厂', city: '杭州', quxian: '余杭区', xiangzhen: '良渚街道', weizhi: '工业区B路88号', leixing: '工业源', hangye: '建材', xianzhuang: '正常生产', lng: 119.978, lat: 30.273, beizhu: '', level: '2', createTime: '2025-11-18' },
@@ -75,6 +74,12 @@ export default function Pollution() {
   )
   const [pagination, setPagination] = useState({ current: 1, pageSize: 5 })
 
+  // 城市筛选项按角色区分（对齐原项目 accessibleCity）：省级可见全部城市，市级及以下只可见本市
+  const cityFilterOptions = useMemo(
+    () => (roleLevel === 'admin' ? cityOpts : selection?.cityName ? [selection.cityName] : cityOpts),
+    [roleLevel, selection?.cityName],
+  )
+
   const filteredData = data.filter(item =>
     !searchText || item.weizhi.includes(searchText) || item.name.includes(searchText)
   )
@@ -125,7 +130,7 @@ export default function Pollution() {
 
   const columns: TableColumnsType<PollutionItem> = [
     { title: '污染源名称', dataIndex: 'name', width: 180 },
-    { title: '城市', dataIndex: 'city', width: 80, filters: cityOpts.map(c => ({ text: c, value: c })), onFilter: (v, r) => r.city === String(v) },
+    { title: '城市', dataIndex: 'city', width: 80, filters: cityFilterOptions.map(c => ({ text: c, value: c })), onFilter: (v, r) => r.city === String(v) },
     { title: '区县', dataIndex: 'quxian', width: 90 },
     { title: '乡镇街道', dataIndex: 'xiangzhen', width: 100 },
     { title: '详细地址', dataIndex: 'weizhi', width: 150 },

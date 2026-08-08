@@ -31,7 +31,7 @@ export function addWaterRippleSurface(
       sidesurface: false,
       heightfixed: true,
       raisingHeight: 0,
-      opacity: 0.5,
+      opacity: 0.85,
     })
   scene.addLayer(layer)
   return layer

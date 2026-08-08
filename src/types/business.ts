@@ -37,6 +37,9 @@ export interface WarningRuleQuery {
   enabled?: 0 | 1
 }
 
+/** 预警规则导出查询条件（不含分页） */
+export type WarningRuleExportQuery = Omit<WarningRuleQuery, 'pageNum' | 'pageSize'>
+
 export interface AlertEventDTO {
   id: number
   ruleId?: number
@@ -54,6 +57,10 @@ export interface AlertEventDTO {
   triggerReason: string
   status: 'undispatched' | 'pending' | 'processing' | 'completed' | 'closed'
   assignedCity?: string
+  /** 预警点位经度（list 接口返回，用于大屏地图打点） */
+  lng?: number
+  /** 预警点位纬度（list 接口返回，用于大屏地图打点） */
+  lat?: number
   createTime?: string
   updateTime?: string
 }
@@ -151,6 +158,8 @@ export interface DataSourceDTO {
   deviceName: string
   dataType: string
   protocol: string
+  /** 站点类型：fixed-固定站 mobile-移动站（仅空气质量监测站需要） */
+  stationType?: string
   location?: string
   lng?: number
   lat?: number
@@ -183,6 +192,8 @@ export interface DataSourceQuery {
   deviceName?: string
   deviceId?: string
   dataType?: string
+  /** 站点类型：fixed-固定站 mobile-移动站（仅空气质量监测站有效） */
+  stationType?: string
   protocol?: string
   enabled?: 0 | 1
   cityId?: number

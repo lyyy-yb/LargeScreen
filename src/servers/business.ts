@@ -11,6 +11,7 @@ import type {
   DisposalTaskQuery,
   PageResult,
   WarningRuleDTO,
+  WarningRuleExportQuery,
   WarningRuleQuery,
 } from '@/types/business'
 
@@ -29,6 +30,20 @@ export const warningRuleApi = {
     request.put(`${API_PREFIX}/warningRule/changeStatus`, { id, enabled }),
   remove: (ids: number | number[]) =>
     request.delete(`${API_PREFIX}/warningRule/${Array.isArray(ids) ? ids.join(',') : ids}`),
+  /** 下载导入模板（返回文件流） */
+  importTemplate: () =>
+    request.post(`${API_PREFIX}/warningRule/importTemplate`, undefined, { responseType: 'blob' }),
+  /** 导入预警规则（Excel 文件上传） */
+  importData: (file: File) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    return request.post<string>(`${API_PREFIX}/warningRule/importData`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+  },
+  /** 按当前筛选条件导出预警规则（返回文件流） */
+  exportRules: (params: WarningRuleExportQuery) =>
+    request.get(`${API_PREFIX}/warningRule/export`, { params, responseType: 'blob' }),
 }
 
 export const alertEventApi = {

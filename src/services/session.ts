@@ -19,7 +19,10 @@ export function takeFallbackMessage(
 export async function loadSessionContext() {
   const info = await getInfo()
   if (info.code !== 200 || !info.user) {
-    throw new Error(info.msg || '获取当前用户信息失败')
+    const error = new Error(info.msg || '获取当前用户信息失败') as Error & { code?: string }
+    // 业务码 401 视为登录过期，交由上层统一提示并跳转登录页
+    if (info.code === 401) error.code = 'AUTH_EXPIRED'
+    throw error
   }
 
   const typedInfo = info as GetInfoResponse

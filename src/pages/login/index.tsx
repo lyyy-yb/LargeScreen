@@ -5,7 +5,7 @@ import { UserOutlined, LockOutlined, SafetyOutlined } from '@ant-design/icons'
 import { useAppStore, useAuthStore } from '@/stores'
 import { login as loginApi, captchaImage } from '@/servers/api'
 import { loadSessionContext, takeFallbackMessage } from '@/services/session'
-import loginBg from '@/assets/images/login-bg.png'
+import loginBg from '@/assets/images/login-bg.jpg'
 
 export default function Login() {
   const navigate = useNavigate()

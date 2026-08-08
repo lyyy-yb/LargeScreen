@@ -1,14 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Button, Table, Modal, Form, Input, Select, Radio, InputNumber, Switch, Tag, Space, DatePicker, App } from 'antd'
-import { PlusOutlined, EditOutlined, EyeOutlined, AlertFilled, ArrowLeftOutlined, DeleteOutlined, SendOutlined, SearchOutlined, CheckCircleOutlined } from '@ant-design/icons'
+import { PlusOutlined, EditOutlined, EyeOutlined, AlertFilled, ArrowLeftOutlined, DeleteOutlined, SendOutlined, SearchOutlined, CheckCircleOutlined, CopyOutlined, DownloadOutlined, ImportOutlined, ExportOutlined } from '@ant-design/icons'
 import RegionSelector from '@/components/RegionSelector'
 import './index.less'
 import { useAppStore, useAuthStore } from '@/stores'
 import { addOption, buildDeptRegionOptions, flattenDepartments, nameEquals } from '@/utils/deptRegion'
 import dayjs from 'dayjs'
 import { alertEventApi, disposalTaskApi, warningRuleApi } from '@/servers/business'
-import type { AlertEventDTO, DisposalTaskDTO, WarningRuleDTO } from '@/types/business'
+import type { AlertEventDTO, DisposalTaskDTO, WarningRuleDTO, WarningRuleExportQuery } from '@/types/business'
 import type { DeptInfo } from '@/types/auth'
 import { deptList, userList } from '@/servers/api'
 
@@ -190,6 +190,9 @@ export default function AlertPage() {
   const [taskFilterStatus, setTaskFilterStatus] = useState<string | undefined>(undefined)
   const [extraDepts, setExtraDepts] = useState<DeptInfo[]>([])
   const loadingDeptParentIds = useRef(new Set<number>())
+  // 预警规则导入：隐藏的文件选择框与导入中状态
+  const ruleImportInputRef = useRef<HTMLInputElement>(null)
+  const [ruleImporting, setRuleImporting] = useState(false)
   const allDepts = useMemo(() => {
     const departments = flattenDepartments([
       ...(regionContext?.departments ?? []),
@@ -332,15 +335,16 @@ export default function AlertPage() {
     roleLevel,
   ])
 
-  const loadBusinessData = useCallback(async () => {
+  const regionParams = useMemo(() => ({
+    ...(selection?.cityName ? { city: selection.cityName } : {}),
+    ...(selection?.countyName ? { district: selection.countyName } : {}),
+    ...(selection?.townName ? { town: selection.townName } : {}),
+  }), [selection])
+
+  const loadRules = useCallback(async () => {
     setLoading(true)
-    const regionParams = {
-      ...(selection?.cityName ? { city: selection.cityName } : {}),
-      ...(selection?.countyName ? { district: selection.countyName } : {}),
-      ...(selection?.townName ? { town: selection.townName } : {}),
-    }
-    const results = await Promise.allSettled([
-      warningRuleApi.list({
+    try {
+      const response = await warningRuleApi.list({
         pageNum: rulesPage,
         pageSize: rulesSize,
         ruleName: ruleAppliedName || undefined,
@@ -348,8 +352,20 @@ export default function AlertPage() {
         ruleType: ruleFilterType,
         alertLevel: ruleFilterLevel,
         enabled: ruleFilterEnabled,
-      }),
-      alertEventApi.list({
+      })
+      setRules((response.data?.records ?? []).map(toAlertRule))
+      setRulesTotal(response.data?.total ?? 0)
+    } catch {
+      message.error('预警规则加载失败')
+    } finally {
+      setLoading(false)
+    }
+  }, [message, rulesPage, rulesSize, ruleAppliedName, ruleFilterDataType, ruleFilterType, ruleFilterLevel, ruleFilterEnabled])
+
+  const loadAlerts = useCallback(async (silent = false) => {
+    if (!silent) setLoading(true)
+    try {
+      const response = await alertEventApi.list({
         pageNum: alertsPage,
         pageSize: alertsSize,
         ...regionParams,
@@ -357,43 +373,61 @@ export default function AlertPage() {
         dataType: alertFilterDataType,
         alertLevel: alertFilterLevel,
         status: alertFilterStatus,
-      }),
-      disposalTaskApi.list({
+      })
+      setAlerts((response.data?.records ?? []).map(toAlertEvent))
+      setAlertsTotal(response.data?.total ?? 0)
+    } catch {
+      if (!silent) message.error('实时预警加载失败')
+    } finally {
+      if (!silent) setLoading(false)
+    }
+  }, [
+    message, regionParams,
+    alertsPage, alertsSize, alertAppliedDevice, alertFilterDataType, alertFilterLevel, alertFilterStatus,
+  ])
+
+  const loadTasks = useCallback(async () => {
+    setLoading(true)
+    try {
+      const response = await disposalTaskApi.list({
         pageNum: tasksPage,
         pageSize: tasksSize,
         ...regionParams,
         dataType: taskFilterDataType,
         taskType: taskFilterType,
         status: taskFilterStatus,
-      }),
-    ])
-    const [ruleResult, alertResult, taskResult] = results
-    if (ruleResult.status === 'fulfilled') {
-      setRules((ruleResult.value.data?.records ?? []).map(toAlertRule))
-      setRulesTotal(ruleResult.value.data?.total ?? 0)
+      })
+      setTasks((response.data?.records ?? []).map(toDisposalTask))
+      setTasksTotal(response.data?.total ?? 0)
+    } catch {
+      setTasks([])
+      message.error('处置任务加载失败')
+    } finally {
+      setLoading(false)
     }
-    else message.error('预警规则加载失败')
-    if (alertResult.status === 'fulfilled') {
-      setAlerts((alertResult.value.data?.records ?? []).map(toAlertEvent))
-      setAlertsTotal(alertResult.value.data?.total ?? 0)
-    }
-    else message.error('实时预警加载失败')
-    if (taskResult.status === 'fulfilled') {
-      setTasks((taskResult.value.data?.records ?? []).map(toDisposalTask))
-      setTasksTotal(taskResult.value.data?.total ?? 0)
-    }
-    else { setTasks([]); message.error('处置任务加载失败') }
-    setLoading(false)
-  }, [
-    selection,
-    rulesPage, rulesSize, ruleAppliedName, ruleFilterDataType, ruleFilterType, ruleFilterLevel, ruleFilterEnabled,
-    alertsPage, alertsSize, alertAppliedDevice, alertFilterDataType, alertFilterLevel, alertFilterStatus,
-    tasksPage, tasksSize, taskFilterDataType, taskFilterType, taskFilterStatus,
-  ])
+  }, [message, regionParams, tasksPage, tasksSize, taskFilterDataType, taskFilterType, taskFilterStatus])
 
   useEffect(() => {
-    queueMicrotask(() => void loadBusinessData())
-  }, [loadBusinessData])
+    queueMicrotask(() => void loadRules())
+  }, [loadRules])
+
+  useEffect(() => {
+    queueMicrotask(() => void loadAlerts())
+  }, [loadAlerts])
+
+  useEffect(() => {
+    queueMicrotask(() => void loadTasks())
+  }, [loadTasks])
+
+  // 区域预警实时动向：进入该 tab 后立即刷新，并按 30s 间隔轮询实时预警数据
+  useEffect(() => {
+    if (activeTab !== 'trends') return
+    // 标准的列表数据拉取模式，忽略 set-state-in-effect 规则
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void loadAlerts(true)
+    const timer = window.setInterval(() => void loadAlerts(true), 30_000)
+    return () => window.clearInterval(timer)
+  }, [activeTab, loadAlerts])
 
   const applyRuleSearch = (value?: string) => {
     setRuleAppliedName((value ?? ruleSearchName).trim())
@@ -487,7 +521,7 @@ export default function AlertPage() {
         })
         message.success('派发成功')
         setIsDispatchModalVisible(false)
-        await loadBusinessData()
+        await Promise.all([loadAlerts(), loadTasks()])
       } catch {
         message.error('任务派发失败')
       } finally {
@@ -509,7 +543,8 @@ export default function AlertPage() {
     form.setFieldsValue(defaults)
     setIsRuleModalVisible(true)
   }
-  const showEditRuleModal = async (r: AlertRule) => {
+  // 编辑/复制共用：asCopy=true 时以新增模式打开弹窗，并预填选中行的全部数据
+  const openRuleModalWithData = async (r: AlertRule, asCopy: boolean) => {
     const buildFormValues = (rule: AlertRule) => {
       // 将 targetTownId 转为数组以适配多选（统一转成 string 以匹配 options）
       let townArr: (string | number)[] | undefined
@@ -528,11 +563,16 @@ export default function AlertPage() {
     }
 
     form.resetFields()
-    setEditingRule(r)
+    setEditingRule(asCopy ? null : r)
     setSelectedDataType(r.dataType)
-    // 先设置不含区域字段的基本值
+    // 先设置不含区域字段的基本值；复制时规则名追加副本后缀避免重名
     const baseValues = buildFormValues(r)
-    form.setFieldsValue({ ...baseValues, targetDistrictId: undefined, targetTownId: undefined })
+    form.setFieldsValue({
+      ...baseValues,
+      ...(asCopy ? { ruleName: `${r.ruleName}-副本` } : {}),
+      targetDistrictId: undefined,
+      targetTownId: undefined,
+    })
     setIsRuleModalVisible(true)
 
     const hide = message.loading('加载规则详情...', 0)
@@ -576,6 +616,7 @@ export default function AlertPage() {
       })
     })
   }
+  const showEditRuleModal = (r: AlertRule) => void openRuleModalWithData(r, false)
 
   const handleRuleOk = () => {
     form.validateFields().then(async values => {
@@ -621,7 +662,7 @@ export default function AlertPage() {
         setIsRuleModalVisible(false)
         form.resetFields()
         message.success(editingRule ? '更新成功' : '创建成功')
-        await loadBusinessData()
+        await loadRules()
       } catch {
         message.error('规则保存失败')
       }
@@ -635,23 +676,89 @@ export default function AlertPage() {
       onOk: async () => {
         await warningRuleApi.remove(Number(id))
         message.success('删除成功')
-        await loadBusinessData()
+        await loadRules()
       },
     })
   }
   const toggleRule = async (id: string, enabled: boolean) => {
     try {
       await warningRuleApi.changeStatus(Number(id), enabled ? 0 : 1)
-      await loadBusinessData()
+      await loadRules()
     } catch {
       message.error('规则状态更新失败')
+    }
+  }
+
+  // 下载 Blob 文件（模板下载/导出共用）
+  const downloadBlob = (blob: Blob, filename: string) => {
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = filename
+    document.body.appendChild(anchor)
+    anchor.click()
+    anchor.remove()
+    URL.revokeObjectURL(url)
+  }
+  // 后端异常时也会返回 JSON 格式的 blob，先识别再提示
+  const isJsonErrorBlob = async (blob: Blob) => {
+    if (!blob.type.includes('application/json')) return false
+    try {
+      const body = JSON.parse(await blob.text()) as { msg?: string; message?: string }
+      message.error(body.msg || body.message || '操作失败')
+    } catch {
+      message.error('操作失败')
+    }
+    return true
+  }
+
+  const handleDownloadTemplate = async () => {
+    try {
+      const res = await warningRuleApi.importTemplate()
+      const blob = res as unknown as Blob
+      if (await isJsonErrorBlob(blob)) return
+      downloadBlob(blob, '预警规则导入模板.xlsx')
+    } catch {
+      message.error('模板下载失败')
+    }
+  }
+
+  const handleExportRules = async () => {
+    try {
+      const params: WarningRuleExportQuery = {
+        ruleName: ruleAppliedName || undefined,
+        dataType: ruleFilterDataType,
+        ruleType: ruleFilterType,
+        alertLevel: ruleFilterLevel,
+        enabled: ruleFilterEnabled,
+      }
+      const res = await warningRuleApi.exportRules(params)
+      const blob = res as unknown as Blob
+      if (await isJsonErrorBlob(blob)) return
+      downloadBlob(blob, `预警规则_${dayjs().format('YYYYMMDDHHmmss')}.xlsx`)
+    } catch {
+      message.error('导出失败')
+    }
+  }
+
+  const handleImportRules = async (file: File) => {
+    setRuleImporting(true)
+    try {
+      const res = await warningRuleApi.importData(file)
+      message.success(res.msg || '导入成功')
+      setRulesPage(1)
+      await loadRules()
+    } catch {
+      message.error('导入失败')
+    } finally {
+      setRuleImporting(false)
     }
   }
   const confirmAlert = async (id: string) => {
     try {
       await alertEventApi.changeStatus(Number(id), 'processing')
       message.success('已确认')
-      await loadBusinessData()
+      await loadAlerts()
     } catch {
       message.error('预警确认失败')
     }
@@ -663,7 +770,7 @@ export default function AlertPage() {
       content: '确定清除该预警？',
       onOk: async () => {
         await alertEventApi.changeStatus(Number(id), 'closed')
-        await loadBusinessData()
+        await loadAlerts()
       },
     })
   }
@@ -676,7 +783,7 @@ export default function AlertPage() {
         try {
           await alertEventApi.remove(Number(id))
           message.success('删除成功')
-          await loadBusinessData()
+          await loadAlerts()
         } catch {
           message.error('删除失败')
         }
@@ -687,7 +794,7 @@ export default function AlertPage() {
     try {
       await disposalTaskApi.changeStatus(Number(id), status as DisposalTaskDTO['status'])
       message.success('状态已更新')
-      await loadBusinessData()
+      await loadTasks()
     } catch {
       message.error('任务状态更新失败')
     }
@@ -701,7 +808,7 @@ export default function AlertPage() {
         try {
           await disposalTaskApi.remove(Number(id))
           message.success('删除成功')
-          await loadBusinessData()
+          await loadTasks()
         } catch {
           message.error('删除失败')
         }
@@ -747,7 +854,7 @@ export default function AlertPage() {
           town: town.label,
         })
         message.success(`已下派至${town.label}`)
-        await loadBusinessData()
+        await loadTasks()
       },
     })
   }
@@ -814,7 +921,7 @@ export default function AlertPage() {
     },
     {
       title: '操作',
-      width: isTown ? 70 : 120,
+      width: isTown ? 70 : 170,
       render: (_: unknown, r: AlertRule) => (
         isTown ? (
           <Button
@@ -836,6 +943,15 @@ export default function AlertPage() {
             className="!text-[#03FBFD] hover:!text-white !p-0"
           >
             编辑
+          </Button>
+          <Button
+            type="link"
+            size="small"
+            icon={<CopyOutlined />}
+            onClick={() => void openRuleModalWithData(r, true)}
+            className="!text-[#52C41A] hover:!text-green-300 !p-0"
+          >
+            复制
           </Button>
           <Button
             type="link"
@@ -1028,19 +1144,36 @@ export default function AlertPage() {
 
         <div className="header-right-btn">
           {activeTab === 'rules' && !isTown && (
-            <Button
-              type="primary"
-              icon={<PlusOutlined />}
-              onClick={showAddRuleModal}
-              style={{
-                background: 'linear-gradient(90deg, #1890ff 0%, #03fbfd 100%)',
-                borderColor: '#03fbfd',
-                fontWeight: 600,
-                boxShadow: '0 0 10px rgba(3, 251, 253, 0.3)',
-              }}
-            >
-              新增预警规则
-            </Button>
+            <div className="flex items-center gap-2">
+              <Button icon={<DownloadOutlined />} onClick={() => void handleDownloadTemplate()}>模板下载</Button>
+              <Button icon={<ImportOutlined />} loading={ruleImporting} onClick={() => ruleImportInputRef.current?.click()}>导入</Button>
+              <Button icon={<ExportOutlined />} onClick={() => void handleExportRules()}>导出</Button>
+              <Button
+                type="primary"
+                icon={<PlusOutlined />}
+                onClick={showAddRuleModal}
+                style={{
+                  background: 'linear-gradient(90deg, #1890ff 0%, #03fbfd 100%)',
+                  borderColor: '#03fbfd',
+                  fontWeight: 600,
+                  boxShadow: '0 0 10px rgba(3, 251, 253, 0.3)',
+                }}
+              >
+                新增预警规则
+              </Button>
+              {/* 隐藏的导入文件选择框 */}
+              <input
+                ref={ruleImportInputRef}
+                type="file"
+                accept=".xls,.xlsx"
+                style={{ display: 'none' }}
+                onChange={e => {
+                  const file = e.target.files?.[0]
+                  if (file) void handleImportRules(file)
+                  e.target.value = ''
+                }}
+              />
+            </div>
           )}
         </div>
       </div>

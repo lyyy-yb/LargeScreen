@@ -49,7 +49,81 @@
   text-shadow: 0 1px 2px rgba(255, 255, 255, 0.32);
 }
 
+/* 纯 CSS 梯形 tab（上边角带弧度）：配色对齐旧切图（常态 #5c85be / 选中白蓝渐变）+ 上沿流光 */
+.screen-bottom-tabs__shape {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  clip-path: path('M0 44 L9 12 Q12 0 26 0 L122 0 Q136 0 139 12 L148 44 Z');
+  background: linear-gradient(180deg, #6d97cc, #4f78b0);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35);
+  transition: background 0.2s ease;
+
+  &::before {
+    position: absolute;
+    top: 0;
+    right: 0;
+    left: 0;
+    height: 1px;
+    content: "";
+    background: linear-gradient(90deg, transparent, rgba(32, 232, 255, 0.85), transparent) no-repeat;
+    background-size: 50% 100%;
+    animation: tab-sweep 4s linear infinite;
+  }
+}
+
+.screen-bottom-tabs__item:hover .screen-bottom-tabs__shape {
+  background: linear-gradient(180deg, #7da5d8, #5c85be);
+}
+
+.screen-bottom-tabs__item[aria-current="page"] .screen-bottom-tabs__shape {
+  background: linear-gradient(180deg, #ccf0ff 0%, #e3f2ff 55%, #f8fcff 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  filter: drop-shadow(0 0 14px rgba(160, 220, 255, 0.55));
+}
+
+.screen-bottom-tabs__label {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  color: #cfeaff;
+  text-shadow: 0 1px 4px rgba(0, 20, 50, 0.6);
+  transition: color 0.2s;
+
+  &--active {
+    color: #173b62;
+    text-shadow: 0 1px 0 rgba(255, 255, 255, 0.4);
+  }
+}
+
+.screen-bottom-tabs__item:hover .screen-bottom-tabs__label:not(.screen-bottom-tabs__label--active) {
+  color: #03fbfd;
+}
+
+@keyframes tab-sweep {
+  from {
+    background-position: -55% 0;
+  }
+
+  to {
+    background-position: 155% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .screen-bottom-tabs__shape::before {
+    animation: none;
+  }
+}
+
 .screen-header {
+  display: flex;
+  align-items: center;
   color: #dff4ff;
   font-size: 14px;
   background:
@@ -1038,6 +1112,97 @@ textarea.ant-input {
 
 @media (prefers-reduced-motion: reduce) {
   .route-page-enter {
+    animation: none;
+  }
+}
+/* 真实米制雷达扫描盘：DOM 图层避开 L7 2.29 radar shader 在部分显卡上的兼容问题 */
+.radar-scan-overlay {
+  position: relative;
+  z-index: 4;
+  flex: none;
+  pointer-events: none;
+  border-radius: 50%;
+  filter: drop-shadow(0 0 9px rgba(0, 241, 255, 0.22));
+  transform: translateZ(0);
+  transform-origin: center;
+  will-change: width, height;
+}
+
+.radar-scan-overlay__inner {
+  position: absolute;
+  inset: 0;
+  display: block;
+  transform-origin: 50% 50%;
+  will-change: transform;
+}
+
+/* 扫描盘中心雷达图标：与扫描盘同一 DOM 节点，绝对居中，不参与内倾变换 */
+.radar-scan-overlay__icon {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  filter: drop-shadow(0 0 4px rgba(0, 245, 255, 0.6));
+}
+
+.radar-scan-overlay__disc,
+.radar-scan-overlay__sweep,
+.radar-scan-overlay__cross {
+  position: absolute;
+  inset: 0;
+  display: block;
+  border-radius: 50%;
+}
+
+.radar-scan-overlay__disc {
+  border: 1px solid rgba(59, 246, 255, 0.55);
+  background:
+    radial-gradient(circle, transparent 0 24%, rgba(48, 239, 255, 0.2) 25%, transparent 26%),
+    radial-gradient(circle, transparent 0 49%, rgba(48, 239, 255, 0.15) 50%, transparent 51%),
+    radial-gradient(circle, transparent 0 74%, rgba(48, 239, 255, 0.1) 75%, transparent 76%),
+    radial-gradient(circle, rgba(15, 232, 255, 0.05), rgba(0, 186, 255, 0.02) 68%, rgba(0, 209, 255, 0.05));
+  box-shadow:
+    inset 0 0 18px rgba(0, 242, 255, 0.08),
+    0 0 10px rgba(0, 230, 255, 0.14);
+  animation: radar-scan-pulse 2.2s ease-in-out infinite;
+}
+
+.radar-scan-overlay__sweep {
+  background: conic-gradient(
+    from -18deg,
+    rgba(68, 255, 255, 0) 0deg,
+    rgba(68, 255, 255, 0) 274deg,
+    rgba(17, 226, 255, 0.05) 298deg,
+    rgba(37, 249, 255, 0.28) 346deg,
+    rgba(197, 255, 255, 0.6) 358deg,
+    rgba(68, 255, 255, 0) 360deg
+  );
+  -webkit-mask: radial-gradient(circle, transparent 0 6%, #000 7% 100%);
+  mask: radial-gradient(circle, transparent 0 6%, #000 7% 100%);
+  animation: radar-scan-rotate 3.4s linear infinite;
+  will-change: transform;
+}
+
+.radar-scan-overlay__cross {
+  inset: 46%;
+  border: 1px solid rgba(184, 255, 255, 0.9);
+  background: rgba(0, 237, 255, 0.24);
+  box-shadow: 0 0 7px rgba(0, 245, 255, 0.85);
+}
+
+@keyframes radar-scan-rotate {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes radar-scan-pulse {
+  0%, 100% { opacity: 0.72; }
+  50% { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .radar-scan-overlay__disc,
+  .radar-scan-overlay__sweep {
     animation: none;
   }
 }
