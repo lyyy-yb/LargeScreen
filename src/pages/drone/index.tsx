@@ -164,8 +164,9 @@ export default function Drone() {
 
       if (cancelled) return
       setDocks(loadedDocks)
-      setDockCode(null)
       const firstDock = loadedDocks.find(item => isValidCoordinate(item.dockLng, item.dockLat))
+      // 与原项目一致：默认选中第一台机场，右侧飞行任务/待执飞列表随之加载
+      setDockCode(loadedDocks[0]?.dockCode ?? null)
       if (firstDock) {
         moveMapTo([firstDock.dockLng, firstDock.dockLat], 13)
       } else {

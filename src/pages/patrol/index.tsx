@@ -2,38 +2,30 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Button, Select, Tag, message } from 'antd'
 import { ArrowLeftOutlined, CarOutlined } from '@ant-design/icons'
+import dayjs from 'dayjs'
 import { Scene, HeatmapLayer, Source } from '@antv/l7'
 import type { ILayer } from '@antv/l7'
 import L7MapView from '@/components/L7MapView'
 import RegionSelector from '@/components/RegionSelector'
 import { useAppStore } from '@/stores'
 import { cities, districts } from '@/utils/city'
+import { zouhangList, taskList as zouhangTaskList, taskDetail } from '@/servers/mapBox'
 
 const { Option } = Select
 
-interface CarItem { id: string; mnCode: string; siteName: string; belongUnit: string; status: string }
-interface TaskItem { date: string; car: string; distance: string; alerts: number }
+interface CarItem { id: string; mnCode: string; siteName: string; belongUnit?: string; status?: string }
 
 const factorOptions = [
   { value: 'a34001', label: 'PM2.5' }, { value: 'a34002', label: 'PM10' },
   { value: 'a34004', label: 'TSP' }, { value: 'a34010', label: '尘负荷' },
 ]
 
-const initCars: CarItem[] = [
+// 接口不可用时的降级车辆数据
+const mockCars: CarItem[] = [
   { id: '1', mnCode: 'HYD1009', siteName: '浙江环境总公司', belongUnit: '浙江环境总公司', status: '在线' },
   { id: '2', mnCode: 'HYD1010', siteName: '杭州走航车', belongUnit: '杭州市生态环境局', status: '离线' },
   { id: '3', mnCode: 'HYD1011', siteName: '宁波走航车', belongUnit: '宁波市生态环境局', status: '在线' },
   { id: '4', mnCode: 'HYD1012', siteName: '温州走航车', belongUnit: '温州市生态环境局', status: '离线' },
-]
-
-const taskHistory: TaskItem[] = [
-  { date: '2025-11-24', car: 'HYD1009', distance: '45.2km', alerts: 3 },
-  { date: '2025-11-23', car: 'HYD1011', distance: '38.7km', alerts: 1 },
-  { date: '2025-11-22', car: 'HYD1009', distance: '52.1km', alerts: 5 },
-  { date: '2025-11-21', car: 'HYD1012', distance: '29.8km', alerts: 2 },
-  { date: '2025-11-20', car: 'HYD1010', distance: '41.3km', alerts: 0 },
-  { date: '2025-11-19', car: 'HYD1009', distance: '47.6km', alerts: 4 },
-  { date: '2025-11-18', car: 'HYD1011', distance: '35.2km', alerts: 1 },
 ]
 
 const colorLegend = [
@@ -45,32 +37,58 @@ const colorLegend = [
   { color: '#2ba84a', range: '[0,25)' },
 ]
 
-// 模拟走航热力数据
-const generateHeatData = () => {
-  const data: any[] = []
-  const baseLng = 120.15, baseLat = 30.25
-  for (let i = 0; i < 200; i++) {
-    data.push({
-      lng: baseLng + (Math.random() - 0.5) * 0.12,
-      lat: baseLat + (Math.random() - 0.5) * 0.08,
-      value: Math.random() * 200 + 10,
-    })
-  }
-  return data
-}
-
 export default function Patrol() {
   const navigate = useNavigate()
   const regionContext = useAppStore(state => state.regionContext)
   const mapSelection = regionContext?.mapSelection
-  const querySelection = regionContext?.querySelection
-  const [cars, setCars] = useState<CarItem[]>(initCars)
-  const [curCarCode, setCurCarCode] = useState('HYD1009')
+  const [cars, setCars] = useState<CarItem[]>(mockCars)
+  const [curCarCode, setCurCarCode] = useState('')
   const [wakingCar, setWakingCar] = useState<string | null>(null)
   const [wageVal, setWageVal] = useState('a34001')
   const [showHeatmap, setShowHeatmap] = useState(false)
+  // 历史任务日期列表（原项目 taskList 返回 string[]）与走航轨迹明细（taskDetail）
+  const [taskDates, setTaskDates] = useState<string[]>([])
+  const [detailData, setDetailData] = useState<Record<string, unknown>[]>([])
   const sceneRef = useRef<Scene | null>(null)
   const heatLayerRef = useRef<ILayer | null>(null)
+
+  // 走航车辆列表（原项目 leftBars：zouhangList，默认选中第一辆车）
+  useEffect(() => {
+    let cancelled = false
+    zouhangList()
+      .then(res => {
+        if (cancelled) return
+        if (res?.resultCode === 0 && Array.isArray(res.data) && res.data.length) {
+          setCars(res.data)
+          setCurCarCode(String(res.data[0].mnCode ?? ''))
+        } else {
+          setCars(mockCars)
+          setCurCarCode(mockCars[0].mnCode)
+        }
+      })
+      .catch(() => {
+        if (cancelled) return
+        setCars(mockCars)
+        setCurCarCode(mockCars[0].mnCode)
+      })
+    return () => { cancelled = true }
+  }, [])
+
+  // 历史任务（原项目 rightBar：年初~今天 + mnCode 查任务日期列表，切车重查）
+  useEffect(() => {
+    if (!curCarCode) return
+    let cancelled = false
+    zouhangTaskList({
+      startDate: dayjs().startOf('year').format('YYYY-MM-DD'),
+      endDate: dayjs().format('YYYY-MM-DD'),
+      mnCode: curCarCode,
+    })
+      .then(res => {
+        if (!cancelled) setTaskDates(res?.resultCode === 0 && Array.isArray(res.data) ? res.data : [])
+      })
+      .catch(() => { if (!cancelled) setTaskDates([]) })
+    return () => { cancelled = true }
+  }, [curCarCode])
 
   const handleWake = (mnCode: string) => {
     setWakingCar(mnCode)
@@ -81,8 +99,27 @@ export default function Patrol() {
     }, 1500)
   }
 
-  const handleSelectCar = (mnCode: string) => { setCurCarCode(mnCode) }
-  const showDetailToMap = (date: string) => { setShowHeatmap(true); message.info(`加载 ${date} 走航数据`) }
+  const handleSelectCar = (mnCode: string) => { setCurCarCode(mnCode); setTaskDates([]); setShowHeatmap(false); setDetailData([]) }
+
+  // 点击历史任务 → taskDetail 查走航轨迹明细（原项目 showDetailToMap）
+  const showDetailToMap = async (taskDate: string) => {
+    try {
+      const res = await taskDetail({ taskDate, mnCode: curCarCode })
+      if (res?.resultCode === 0 && Array.isArray(res.data)) {
+        const data = (res.data as Record<string, unknown>[]).filter(item => item.a81002 && item.a81001)
+        if (!data.length) {
+          message.warning('该走航任务暂无有效轨迹数据')
+          return
+        }
+        setDetailData(data)
+        setShowHeatmap(true)
+      } else {
+        message.warning('该走航任务暂无有效轨迹数据')
+      }
+    } catch {
+      message.error('走航任务明细查询失败')
+    }
+  }
 
   const handleSceneLoaded = useCallback((scene: Scene) => {
     sceneRef.current = scene
@@ -97,17 +134,16 @@ export default function Patrol() {
       heatLayerRef.current.destroy()
       heatLayerRef.current = null
     }
-    if (!showHeatmap) return
-    // 创建热力图
-    const heatData = generateHeatData()
-    const source = new Source(heatData, {
-      parser: { type: 'json', x: 'lng', y: 'lat' },
-      transforms: [{ type: 'grid', size: 80, field: 'value', method: 'mean' }],
+    if (!showHeatmap || !detailData.length) return
+    // 与原项目一致：a81002=经度 a81001=纬度，100m 网格按当前因子均值聚合，autoFit 自动定位到走航范围
+    const source = new Source(detailData, {
+      parser: { type: 'json', x: 'a81002', y: 'a81001' },
+      transforms: [{ type: 'grid', size: 100, field: wageVal, method: 'mean' }],
     })
-    const layer = new HeatmapLayer({ zIndex: 9, autoFit: false })
+    const layer = new HeatmapLayer({ zIndex: 9, autoFit: true })
       .source(source)
       .shape('square')
-      .style({ coverage: 0.9, angle: 0 })
+      .style({ coverage: 1, angle: 0 })
       .color('mean', (v: number) => {
         if (v >= 150) return '#b60c1f'
         if (v >= 100) return '#f0603a'
@@ -118,16 +154,8 @@ export default function Patrol() {
       })
     scene.addLayer(layer)
     heatLayerRef.current = layer
-  }, [showHeatmap, wageVal])
+  }, [showHeatmap, detailData, wageVal])
 
-  const markers = [
-    { lng: 120.15, lat: 30.27, name: 'HYD1009', color: '#22C55E', size: 12 },
-    { lng: 120.21, lat: 30.25, name: 'HYD1010', color: '#EF4444', size: 12 },
-  ]
-  const visibleCars = cars
-    .filter(item => !querySelection?.cityName || item.belongUnit.includes(querySelection.cityName))
-    .filter(() => !querySelection?.countyName)
-  const visibleTaskHistory = querySelection?.countyName ? [] : taskHistory
   const mapCounty = districts.find(item => String(item.adcode) === mapSelection?.countyCode)
   const mapCity = cities.find(item => item.adcode === mapSelection?.cityCode)
   const mapCenter: [number, number] = mapCounty
@@ -138,7 +166,7 @@ export default function Patrol() {
 
   return (
     <div className="w-full h-full relative overflow-hidden" style={{ background: '#1a5ab0' }}>
-      <L7MapView id="patrol-map" center={mapCenter} zoom={mapCounty ? 11 : mapCity ? 9 : 7.5} minZoom={6} maxZoom={14} showTiles markers={markers} onSceneLoaded={handleSceneLoaded} />
+      <L7MapView id="patrol-map" center={mapCenter} zoom={mapCounty ? 11 : mapCity ? 9 : 7.5} minZoom={6} maxZoom={14} showTiles onSceneLoaded={handleSceneLoaded} />
       {/* 返回 */}
       <div className="absolute top-15px left-20px z-50">
         <Button type="text" icon={<ArrowLeftOutlined />} onClick={() => navigate('/monitor')} className="!text-[#03FBFD] !bg-[rgba(255,255,255,0.1)] hover:!bg-[rgba(255,255,255,0.2)] !rounded-2xl">返回监控大屏</Button>
@@ -147,47 +175,40 @@ export default function Patrol() {
       <div className="absolute top-45px left-1/2 -translate-x-1/2 z-50 flex gap-2 bg-[rgba(0,56,129,0.8)] px-4 py-2 rounded-xl border border-[rgba(255,255,255,0.3)] items-center">
         <RegionSelector />
         <span className="text-[#A0C7FF] text-12px">监测因子</span>
-        <Select value={wageVal} onChange={(v) => { setWageVal(v); setShowHeatmap(false) }} className="w-110px screen-select" classNames={{ popup: { root: 'screen-select-popup' } }} size="small">
+        <Select value={wageVal} onChange={(v) => setWageVal(v)} className="w-110px screen-select" classNames={{ popup: { root: 'screen-select-popup' } }} size="small">
           {factorOptions.map(o => <Option key={o.value} value={o.value}>{o.label}</Option>)}
         </Select>
       </div>
-      {/* 左侧 - 车辆列表 */}
+      {/* 左侧 - 车辆列表（卡片式，与 drone 页无人机机场列表一致） */}
       <div className="absolute left-20px top-70px bottom-20px z-50 w-320px pointer-events-none">
         <div className="bg-[rgba(0,56,129,0.85)] h-full rounded-20px border border-[rgba(255,255,255,0.3)] px-4 py-3 overflow-y-auto pointer-events-auto">
           <div className="text-[#A0C7FF] text-16px font-bold mb-3">走航车辆</div>
-          {visibleCars.map(item => (
-            <div key={item.id} className={`flex items-center gap-3 py-3 px-2 rounded-lg border-b border-dashed border-[rgba(255,255,255,0.2)] cursor-pointer transition-all ${curCarCode === item.mnCode ? 'bg-[rgba(1,194,255,0.2)]' : 'hover:bg-[rgba(255,255,255,0.05)]'}`} onClick={() => handleSelectCar(item.mnCode)}>
-              <CarOutlined className="text-22px text-[#A0C7FF]" />
-              <div className="flex-1">
-                <div className="flex items-center justify-between">
-                  <span className="text-[#A8D6FF] text-13px">{item.mnCode}</span>
-                  <Tag color={item.status === '在线' ? 'success' : 'default'} className="!text-11px">{item.status}</Tag>
-                </div>
-                <div className="text-[#78AADC] text-11px mt-0.5">{item.belongUnit}</div>
-                {item.status === '离线' && (
-                  <button className="text-[#01C2FF] text-11px mt-1 hover:underline" onClick={(e) => { e.stopPropagation(); handleWake(item.mnCode) }}>
-                    {wakingCar === item.mnCode ? '唤醒中...' : '唤醒'}
-                  </button>
-                )}
+          {cars.map(item => (
+            <div key={item.id ?? item.mnCode} className={`relative mb-3 rounded-xl border p-3 cursor-pointer transition-all ${curCarCode === item.mnCode ? 'border-[#01C2FF] bg-[rgba(1,194,255,0.15)]' : 'border-[rgba(255,255,255,0.2)] bg-[rgba(0,0,0,0.2)] hover:bg-[rgba(255,255,255,0.05)]'}`} onClick={() => handleSelectCar(item.mnCode)}>
+              <div className="flex items-center justify-between mb-1">
+                <span className="text-[#A8D6FF] text-14px font-medium flex items-center gap-1"><CarOutlined className="text-[#01C2FF]" />{item.mnCode}</span>
+                {item.status && <Tag color={item.status === '在线' ? 'success' : 'default'} className="!text-11px">{item.status}</Tag>}
               </div>
+              <div className="text-[rgba(168,214,255,0.6)] text-12px">{item.belongUnit || item.siteName}</div>
+              {item.status === '离线' && (
+                <button className="text-[#01C2FF] text-12px mt-1 hover:underline" onClick={(e) => { e.stopPropagation(); handleWake(item.mnCode) }}>
+                  {wakingCar === item.mnCode ? '唤醒中...' : '唤醒'}
+                </button>
+              )}
             </div>
           ))}
         </div>
       </div>
-      {/* 右侧 - 历史任务 */}
+      {/* 右侧 - 历史任务（卡片式，与 drone 页飞行任务列表一致） */}
       <div className="absolute right-20px top-70px bottom-20px z-50 w-320px pointer-events-none">
-        <div className="bg-[rgba(0,56,129,0.85)] h-full rounded-20px border border-[rgba(255,255,255,0.3)] px-3 py-2 flex flex-col">
-          <div className="text-[#A0C7FF] text-16px font-bold py-2 border-b border-dashed border-[rgba(255,255,255,0.3)]">历史任务</div>
-          <div className="flex-1 overflow-y-auto pointer-events-auto py-1">
-            {visibleTaskHistory.map((item, idx) => (
-              <div key={idx} className="py-3 border-b border-dashed border-[rgba(255,255,255,0.15)] cursor-pointer hover:bg-[rgba(255,255,255,0.05)]" onClick={() => showDetailToMap(item.date)}>
-                <div className="flex items-center justify-between">
-                  <span className="text-[#A8D6FF] text-13px">{item.date} 走航</span>
-                  {item.alerts > 0 && <Tag color="warning" className="!text-10px">{item.alerts}处异常</Tag>}
-                </div>
-                <div className="flex items-center justify-between mt-1 text-11px text-[rgba(168,214,255,0.5)]">
-                  <span>车辆: {item.car}</span><span>里程: {item.distance}</span>
-                </div>
+        <div className="bg-[rgba(0,56,129,0.85)] h-full rounded-20px border border-[rgba(255,255,255,0.3)] px-3 py-2 flex flex-col pointer-events-auto">
+          <div className="text-[#A0C7FF] text-16px font-bold py-2">历史任务</div>
+          <div className="flex-1 overflow-y-auto space-y-2 py-1">
+            {taskDates.length === 0 && <div className="text-[rgba(168,214,255,0.4)] text-11px py-2 text-center">暂无历史任务</div>}
+            {!!curCarCode && taskDates.map(date => (
+              <div key={date} className="rounded-xl p-3 cursor-pointer transition-all bg-[rgba(0,0,0,0.2)] border border-[rgba(255,255,255,0.15)] hover:bg-[rgba(255,255,255,0.06)]" onClick={() => showDetailToMap(date)}>
+                <div className="text-[#A8D6FF] text-13px">{date} 走航</div>
+                <div className="text-[rgba(168,214,255,0.5)] text-11px mt-1">车辆: {curCarCode}</div>
               </div>
             ))}
           </div>

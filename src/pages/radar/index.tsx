@@ -14,7 +14,7 @@ import { createRadarScanOverlay, type RadarScanOverlay } from '@/utils/radarScan
 import { PointLayer, type ILayer, type Scene } from '@antv/l7'
 
 interface AlarmItem { dapLat: number; dapLng: number; times: number; address: string; type: number }
-interface PollutionItem { name: string; weizhi: string; leixing: string; hangye: string; xianzhuang: string; lng: number; lat: number }
+interface PollutionItem { name: string; weizhi: string; leixing: string; hangye: string; xianzhuang: string; lng: number; lat: number; city?: string; quxian?: string }
 interface RadarStation { bsiId: string; bsiName: string; bsiLng: number; bsiLat: number; bsiLocation?: string; status?: string }
 
 const mockTfList: AlarmItem[] = [
@@ -165,25 +165,34 @@ export default function Radar() {
       .catch(() => { /* 类型接口不可用时保留默认“全部” */ })
   }, [])
 
-  // 污染源列表（与原项目一致：按选中雷达经纬度查附近污染源 wuranListByLngLat，切换雷达/类型时重查）
-  const loadPollution = useCallback(async (leixing: string) => {
-    const radar = radarList.find(item => String(item.bsiId) === String(selectedBsiId))
-    if (!radar || !Number.isFinite(radar.bsiLng) || !Number.isFinite(radar.bsiLat)) {
-      setPollutionList([])
-      return
-    }
-    try {
-      const res = await wuranListByLngLat({ lat: radar.bsiLat, lng: radar.bsiLng, leixing, type: '0' })
-      setPollutionList(res?.resultCode === 0 && Array.isArray(res.data) ? res.data : [])
-    } catch (e) {
-      console.warn('附近污染源查询失败', e)
-      setPollutionList([])
-    }
-  }, [radarList, selectedBsiId])
-
+  // 污染源列表（原项目：按选中雷达经纬度查附近污染源 wuranListByLngLat；新版本权限改造：
+  // 附带当前角色区域参数限制可见范围，并在前端按 querySelection 兼容过滤，切换雷达/区域/类型时重查）
   useEffect(() => {
-    void loadPollution(filterLeixing)
-  }, [loadPollution, filterLeixing])
+    const radar = radarList.find(item => String(item.bsiId) === String(selectedBsiId))
+    if (!radar || !Number.isFinite(radar.bsiLng) || !Number.isFinite(radar.bsiLat)) return
+    let cancelled = false
+    const regionParams = querySelection ? toRegionQuery(querySelection) : {}
+    wuranListByLngLat({ ...regionParams, lat: radar.bsiLat, lng: radar.bsiLng, leixing: filterLeixing, type: '0' })
+      .then(res => {
+        if (cancelled) return
+        let list: PollutionItem[] = res?.resultCode === 0 && Array.isArray(res.data) ? res.data : []
+        // 后端未按区域过滤时的前端兼容过滤：市/区县角色只可见本区域内污染源
+        if (querySelection?.cityName || querySelection?.countyName) {
+          const normalize = (value?: string) => (value || '').replace(/[市区县]$/, '')
+          list = list.filter(item =>
+            (!querySelection.cityName || normalize(item.city) === normalize(querySelection.cityName) || (item.weizhi || '').includes(normalize(querySelection.cityName))) &&
+            (!querySelection.countyName || normalize(item.quxian) === normalize(querySelection.countyName) || (item.weizhi || '').includes(normalize(querySelection.countyName)))
+          )
+        }
+        setPollutionList(list)
+      })
+      .catch(e => {
+        if (cancelled) return
+        console.warn('附近污染源查询失败', e)
+        setPollutionList([])
+      })
+    return () => { cancelled = true }
+  }, [radarList, selectedBsiId, querySelection, filterLeixing])
 
   // 进入页面查询雷达列表（借鉴原项目 antd-demo）：默认选中第一台雷达，后续自动飞到其位置
   useEffect(() => {
@@ -197,6 +206,8 @@ export default function Radar() {
         )
         setRadarList(list)
         setSelectedBsiId(list[0] ? String(list[0].bsiId) : '')
+        // 无可用雷达时清空污染源列表，避免残留旧数据
+        if (!list.length) setPollutionList([])
       })
       .catch(e => console.warn('雷达列表查询失败', e))
     return () => { cancelled = true }

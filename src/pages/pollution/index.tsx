@@ -2,12 +2,15 @@ import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Button, Table, Input, Modal, Form, Select, Upload, message, Space } from 'antd'
 import type { TableColumnsType } from 'antd'
+import type { UploadProps } from 'antd'
 import { PlusOutlined, ArrowLeftOutlined, UploadOutlined, ExclamationCircleOutlined } from '@ant-design/icons'
 import { wuranyuanPage, wuranyuanAdd, wuranyuanEdit, wuranyuanDelete } from '@/servers/api'
 import { useAppStore } from '@/stores'
 import { toRegionQuery } from '@/utils/region'
 import { cities, districts } from '@/utils/city'
 import RegionSelector from '@/components/RegionSelector'
+import { getLocalInfo } from '@/utils/storage'
+import { TOKEN } from '@/utils/enum'
 
 const { Option } = Select
 
@@ -77,7 +80,7 @@ export default function Pollution() {
   // 城市筛选项按角色区分（对齐原项目 accessibleCity）：省级可见全部城市，市级及以下只可见本市
   const cityFilterOptions = useMemo(
     () => (roleLevel === 'admin' ? cityOpts : selection?.cityName ? [selection.cityName] : cityOpts),
-    [roleLevel, selection?.cityName],
+    [roleLevel, selection],
   )
 
   const filteredData = data.filter(item =>
@@ -126,6 +129,23 @@ export default function Pollution() {
         message.error('保存失败，请重试')
       }
     }).catch(() => {})
+  }
+
+  // 批量导入（对齐原项目：xlsx 上传到 /hbdp/wuranyuan/load，成功后刷新列表）
+  const uploadProps: UploadProps = {
+    name: 'file',
+    action: '/dpSys/hbdp/wuranyuan/load',
+    accept: '.xlsx',
+    headers: { Authorization: `Bearer ${getLocalInfo<string>(TOKEN) || ''}` },
+    showUploadList: false,
+    onChange(info) {
+      if (info.file.status === 'done') {
+        message.success(`${info.file.name} 批量导入成功`)
+        void loadList()
+      } else if (info.file.status === 'error') {
+        message.error(`${info.file.name} 批量导入失败`)
+      }
+    },
   }
 
   const columns: TableColumnsType<PollutionItem> = [
@@ -183,7 +203,7 @@ export default function Pollution() {
             >
               新增
             </Button>
-            <Upload accept=".xlsx" showUploadList={false} beforeUpload={() => { message.success('批量导入成功（模拟）'); return false }}>
+            <Upload {...uploadProps}>
               <Button icon={<UploadOutlined />}>批量导入</Button>
             </Upload>
             <Input.Search placeholder="搜索名称/地址" className="w-220px" onSearch={(v) => { setSearchText(v); setPagination({ ...pagination, current: 1 }) }} enterButton allowClear />
