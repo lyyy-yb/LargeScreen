@@ -6,6 +6,7 @@ import RegionSelector from '@/components/RegionSelector'
 import './index.less'
 import { useAppStore, useAuthStore } from '@/stores'
 import { addOption, buildDeptRegionOptions, flattenDepartments, nameEquals } from '@/utils/deptRegion'
+import { getVisibleAlertTabs, type AlertTab } from '@/utils/region'
 import dayjs from 'dayjs'
 import { alertEventApi, disposalTaskApi, warningRuleApi } from '@/servers/business'
 import type { AlertEventDTO, DisposalTaskDTO, WarningRuleDTO, WarningRuleExportQuery } from '@/types/business'
@@ -22,15 +23,16 @@ interface AlertRule {
 }
 interface AlertEvent {
   id: string; ruleName: string; alertLevel: string; dataType: string;
-  deviceName: string; location: string; city: string; district: string;
-  town?: string;
+  deviceName: string; location: string;
+  /** 区域部门 ID（后端不再返回名称，展示时用部门树反查） */
+  cityId?: number; districtId?: number; townId?: number;
   triggerReason: string; status: string; createdAt: string; assignedCity?: string;
 }
 interface DisposalTask {
   id: string; alertId: string; dataType: string; taskType: string; status: string;
   assigneeName: string; requesterName: string; requireTime: string; createdAt: string;
   disposalContent?: string; photos?: string[]; completedAt?: string;
-  city: string; district: string; town?: string;
+  cityId?: number; districtId?: number; townId?: number;
 }
 
 function parseConfig(config: WarningRuleDTO['config']): Record<string, unknown> {
@@ -83,8 +85,6 @@ function toDisposalTask(item: DisposalTaskDTO): DisposalTask {
     requesterName: item.requesterName ?? '',
     requireTime: item.requireTime ?? '',
     createdAt: item.createTime ?? '',
-    city: item.city ?? '',
-    district: item.district ?? '',
     photos,
   }
 }
@@ -144,7 +144,10 @@ export default function AlertPage() {
   const user = useAuthStore(state => state.user)
   const selection = regionContext?.selection
 
-  const [activeTab, setActiveTab] = useState<'rules' | 'alerts' | 'tasks' | 'trends'>('alerts')
+  const [activeTab, setActiveTab] = useState<AlertTab>(() => getVisibleAlertTabs(regionContext?.roleKey)?.[0] ?? 'alerts')
+  // 业务角色页签限制：地市业务人员仅区域预警实时动向，区县业务人员为实时预警监控+处置任务管理；null 表示不限制
+  const visibleAlertTabs = getVisibleAlertTabs(regionContext?.roleKey)
+  const isTabVisible = (tab: AlertTab) => !visibleAlertTabs || visibleAlertTabs.includes(tab)
   const [rules, setRules] = useState<AlertRule[]>([])
   const [alerts, setAlerts] = useState<AlertEvent[]>([])
   const [tasks, setTasks] = useState<DisposalTask[]>([])
@@ -206,6 +209,11 @@ export default function AlertPage() {
     }
     return departments
   }, [extraDepts, regionContext?.departments, user?.dept])
+  /** 区域部门 ID 反查名称（后端不再返回城市/区县/乡镇名称字段） */
+  const deptNameOf = useCallback((deptId?: number) => {
+    if (deptId == null) return undefined
+    return allDepts.find(dept => Number(dept.deptId) === Number(deptId))?.deptName
+  }, [allDepts])
   const deptRegionOptions = useMemo(() => buildDeptRegionOptions(allDepts), [allDepts])
   const lockedRegion = useMemo(() => {
     if (!regionContext || regionContext.roleLevel === 'admin') return {}
@@ -485,19 +493,10 @@ export default function AlertPage() {
       taskType: 'on_site_check',
       requireTime: dayjs().add(1, 'hour'),
     }
-    // 默认选中预警事件所属区域；乡镇级角色锁定到所属乡镇
-    if (alert.city) {
-      const cityDept = allDepts.find(dept => nameEquals(dept.deptName, alert.city))
-      if (cityDept) defaults.cityId = String(cityDept.deptId)
-    }
-    if (alert.district) {
-      const districtDept = allDepts.find(dept => nameEquals(dept.deptName, alert.district))
-      if (districtDept) defaults.districtId = String(districtDept.deptId)
-    }
-    if (alert.town) {
-      const townDept = allDepts.find(dept => nameEquals(dept.deptName, alert.town))
-      if (townDept) defaults.townId = String(townDept.deptId)
-    }
+    // 默认选中预警事件所属区域（后端返回 cityId/districtId/townId 部门 ID）；乡镇级角色锁定到所属乡镇
+    if (alert.cityId != null) defaults.cityId = String(alert.cityId)
+    if (alert.districtId != null) defaults.districtId = String(alert.districtId)
+    if (alert.townId != null) defaults.townId = String(alert.townId)
     if (roleLevel !== 'admin') {
       if (lockedRegion.cityId) defaults.cityId = lockedRegion.cityId
       if (roleLevel === 'county' && lockedRegion.districtId) defaults.districtId = lockedRegion.districtId
@@ -849,9 +848,9 @@ export default function AlertPage() {
           disposalContent: task.disposalContent,
           photos: task.photos,
           completedAt: task.completedAt,
-          city: task.city,
-          district: task.district,
-          town: town.label,
+          cityId: task.cityId,
+          districtId: task.districtId,
+          townId: allDepts.find(dept => nameEquals(dept.deptName, town.label))?.deptId ?? task.townId,
         })
         message.success(`已下派至${town.label}`)
         await loadTasks()
@@ -1082,7 +1081,7 @@ export default function AlertPage() {
   }
   const alertTrends = alerts.slice(0, 20).map(item => ({
     time: item.createdAt ? dayjs(item.createdAt).format('HH:mm') : '--:--',
-    area: item.location || item.district || item.city || '杭州市',
+    area: item.location || deptNameOf(item.districtId) || deptNameOf(item.cityId) || '杭州市',
     level: item.alertLevel,
     content: item.triggerReason,
     status: statusLabels[item.status] ?? item.status,
@@ -1116,30 +1115,38 @@ export default function AlertPage() {
         </div>
 
         <div className="tech-tabs-bar">
-          <div
-            className={`tech-tab-item ${activeTab === 'rules' ? 'active' : ''}`}
-            onClick={() => setActiveTab('rules')}
-          >
-            预警规则管理
-          </div>
-          <div
-            className={`tech-tab-item ${activeTab === 'alerts' ? 'active' : ''}`}
-            onClick={() => setActiveTab('alerts')}
-          >
-            实时预警监控
-          </div>
-          <div
-            className={`tech-tab-item ${activeTab === 'tasks' ? 'active' : ''}`}
-            onClick={() => setActiveTab('tasks')}
-          >
-            处置任务管理
-          </div>
-          <div
-            className={`tech-tab-item ${activeTab === 'trends' ? 'active' : ''}`}
-            onClick={() => setActiveTab('trends')}
-          >
-            区域预警实时动向
-          </div>
+          {isTabVisible('rules') && (
+            <div
+              className={`tech-tab-item ${activeTab === 'rules' ? 'active' : ''}`}
+              onClick={() => setActiveTab('rules')}
+            >
+              预警规则管理
+            </div>
+          )}
+          {isTabVisible('alerts') && (
+            <div
+              className={`tech-tab-item ${activeTab === 'alerts' ? 'active' : ''}`}
+              onClick={() => setActiveTab('alerts')}
+            >
+              实时预警监控
+            </div>
+          )}
+          {isTabVisible('tasks') && (
+            <div
+              className={`tech-tab-item ${activeTab === 'tasks' ? 'active' : ''}`}
+              onClick={() => setActiveTab('tasks')}
+            >
+              处置任务管理
+            </div>
+          )}
+          {isTabVisible('trends') && (
+            <div
+              className={`tech-tab-item ${activeTab === 'trends' ? 'active' : ''}`}
+              onClick={() => setActiveTab('trends')}
+            >
+              区域预警实时动向
+            </div>
+          )}
         </div>
 
         <div className="header-right-btn">

@@ -5,12 +5,14 @@ import type { MenuProps } from 'antd'
 import { UserOutlined, SettingOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { useAppStore, useAuthStore } from '@/stores'
+import { isBusinessRole } from '@/utils/region'
 import hBg from '@/assets/images/bg/h-bg.png'
 
 export default function Header() {
   const navigate = useNavigate()
   const { username, logout } = useAuthStore()
   const resetRegionContext = useAppStore(state => state.resetRegionContext)
+  const regionContext = useAppStore(state => state.regionContext)
   const [currentTime, setCurrentTime] = useState(() => dayjs().format('YYYY / MM / DD HH:mm'))
 
   useEffect(() => {
@@ -28,14 +30,19 @@ export default function Header() {
   }
 
   const manageItems: MenuProps['items'] = [
-    {
-      label: <div className="px-10px py-4px text-black">数据接入</div>,
-      key: 'DATA_SOURCE',
-    },
-    {
-      label: <div className="px-10px py-4px text-black">清洗规则</div>,
-      key: 'CLEAN_RULE',
-    },
+    // 业务人员（city_business/district_business）无数据接入与清洗规则权限，仅保留数据管理
+    ...(isBusinessRole(regionContext)
+      ? []
+      : [
+          {
+            label: <div className="px-10px py-4px text-black">数据接入</div>,
+            key: 'DATA_SOURCE',
+          },
+          {
+            label: <div className="px-10px py-4px text-black">清洗规则</div>,
+            key: 'CLEAN_RULE',
+          },
+        ]),
     {
       label: <div className="px-10px py-4px text-black">数据管理</div>,
       key: 'DATA_MANAGE',

@@ -9,6 +9,8 @@ export interface AirDataLatestVO {
   districtId: number
   townId: number
   deptId: number
+  /** 站点类型：fixed-固定站 mobile-移动站 */
+  stationType?: string
   pm25: number
   pm10: number
   so2: number
@@ -19,16 +21,26 @@ export interface AirDataLatestVO {
   tsp: number
 }
 
-/** 区域小时均值统计结果（对应后端 HourlyAvgVO） */
-export interface HourlyAvgVO {
-  deptId: number
-  field: string
-  avgValue: number
-  /** 空气质量分指数 IAQI（0~500），vocs/tsp 暂不支持时为 null */
-  iaqi: number | null
-  stationCount: number
-  startTime: string
-  endTime: string
+/** 按站点类型统计的近一小时各污染物值范围（对应后端 StationAirRangeDTO） */
+export interface StationAirRange {
+  /** 站点类型：fixed-固定站 mobile-移动站 */
+  stationType: string
+  pm25Min: number | null
+  pm25Max: number | null
+  pm10Min: number | null
+  pm10Max: number | null
+  so2Min: number | null
+  so2Max: number | null
+  no2Min: number | null
+  no2Max: number | null
+  coMin: number | null
+  coMax: number | null
+  o3Min: number | null
+  o3Max: number | null
+  vocsMin: number | null
+  vocsMax: number | null
+  tspMin: number | null
+  tspMax: number | null
 }
 
 /** 地图空气质量打点（按数据源经纬度展示六级图标） */
@@ -39,7 +51,7 @@ export interface AirQualityPoint {
   /** AQI 数值（图标上方显示） */
   value: number | null
   iaqi: number | null
-  /** 区域部门 ID（旧 hourlyAvg 模式兼容） */
+  /** 区域部门 ID（兼容旧模式保留） */
   deptId?: number
   /** 空气质量等级文本（优/良/轻度污染/…，决定六级图标） */
   aqiLevel?: string

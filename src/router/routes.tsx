@@ -5,6 +5,8 @@ import { Navigate } from 'react-router-dom'
 import AuthGuard from './AuthGuard'
 import ScreenLayout from '@/layouts/ScreenLayout'
 import PageLoading from '@/components/PageLoading'
+import { useAppStore } from '@/stores'
+import { getLandingPath } from '@/utils/region'
 
 // 懒加载页面
 const Login = lazy(() => import('@/pages/login'))
@@ -24,6 +26,12 @@ const Forbidden = lazy(() => import('@/pages/forbidden'))
 // 包装懒加载组件
 function LazyComponent({ children }: { children: React.ReactNode }) {
   return <Suspense fallback={<PageLoading />}>{children}</Suspense>
+}
+
+// 根路径按角色落地：乡镇业务人员仅能进入数据管理，其余角色进入监控大屏
+function HomeRedirect() {
+  const roleKey = useAppStore(state => state.regionContext?.roleKey)
+  return <Navigate to={getLandingPath(roleKey)} replace />
 }
 
 export interface RouteMeta {
@@ -52,7 +60,7 @@ export const routes: RouteObject[] = [
     children: [
       {
         index: true,
-        element: <Navigate to="/monitor" replace />,
+        element: <HomeRedirect />,
       },
       {
         path: 'monitor',

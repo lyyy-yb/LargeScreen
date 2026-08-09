@@ -11,7 +11,50 @@ const FALLBACK_CITY = cities.find(item => item.name === '杭州市')!
 const FALLBACK_COUNTY = districts.find(item => item.name === '西湖区' && item.parent === Number(FALLBACK_CITY.adcode))!
 const FALLBACK_TOWN = '西湖风景名胜区街道'
 
-const ROLE_PRIORITY: RoleLevel[] = ['admin', 'city', 'county', 'town']
+// 角色权限字符（后台新命名）→ 展示层级映射，按优先级排序；旧权限字符保留兼容
+const ROLE_KEY_LEVELS: Array<{ level: RoleLevel; keys: string[] }> = [
+  { level: 'admin', keys: ['admin'] },
+  { level: 'city', keys: ['city_admin', 'city_business', 'city'] },
+  { level: 'county', keys: ['district_admin', 'district_business', 'county'] },
+  { level: 'town', keys: ['town_business', 'town'] },
+]
+
+// 业务人员角色：首页与区域范围与对应管理员一致（乡镇除外），但隐藏管理型界面与入口
+const BUSINESS_ROLE_KEYS = new Set(['city_business', 'district_business', 'town_business'])
+
+export type AlertTab = 'rules' | 'alerts' | 'tasks' | 'trends'
+
+// 市/区县业务人员可见的底部导航：监控大屏、光量子雷达、预警中心
+const CITY_COUNTY_BUSINESS_TAB_KEYS = ['/monitor', '/radar', '/alert']
+
+// 市/区县业务人员禁止访问的页面（矩阵未授予的功能）
+const CITY_COUNTY_BUSINESS_BLOCKED_PATHS = ['/drone', '/patrol', '/report', '/pollution', '/manage/data-source', '/manage/clean-rule']
+
+// 乡镇业务人员仅有小程序与数据管理权限，大屏页面全部不可访问
+const TOWN_BUSINESS_BLOCKED_PATHS = ['/monitor', '/radar', '/drone', '/patrol', '/alert', '/report', '/pollution']
+
+export function isBusinessRole(context?: { roleKey?: string } | null) {
+  return !!context?.roleKey && BUSINESS_ROLE_KEYS.has(context.roleKey)
+}
+
+// 底部导航可见页：返回 null 表示不限制；空数组表示无可见导航（乡镇业务人员）
+export function getVisibleTabKeys(roleKey?: string): string[] | null {
+  if (roleKey === 'city_business' || roleKey === 'district_business') return CITY_COUNTY_BUSINESS_TAB_KEYS
+  if (roleKey === 'town_business') return []
+  return null
+}
+
+// 角色禁止直接访问的路由；返回空数组表示不限制
+export function getBlockedPaths(roleKey?: string): string[] {
+  if (roleKey === 'town_business') return TOWN_BUSINESS_BLOCKED_PATHS
+  if (roleKey === 'city_business' || roleKey === 'district_business') return CITY_COUNTY_BUSINESS_BLOCKED_PATHS
+  return []
+}
+
+// 角色登录/重定向落地页：乡镇业务人员仅能进入数据管理
+export function getLandingPath(roleKey?: string): string {
+  return roleKey === 'town_business' ? '/manage/data-manage' : '/monitor'
+}
 
 function normalizeName(value = '') {
   return value.trim().replace(/\s+/g, '')
@@ -24,12 +67,31 @@ function nameEquals(left: string, right: string) {
   return a.replace(/[省市区县]$/, '') === b.replace(/[省市区县]$/, '')
 }
 
-export function resolveRoleLevel(rawRoles: string[] = [], userRoles: RoleInfo[] = []): RoleLevel {
+export function resolveRole(
+  rawRoles: string[] = [],
+  userRoles: RoleInfo[] = [],
+): { level: RoleLevel; roleKey: string } {
   const roleKeys = new Set([
     ...rawRoles.map(role => role.toLowerCase()),
     ...userRoles.map(role => role.roleKey?.toLowerCase()).filter(Boolean),
   ])
-  return ROLE_PRIORITY.find(role => roleKeys.has(role)) || 'town'
+  for (const { level, keys } of ROLE_KEY_LEVELS) {
+    const matched = keys.find(key => roleKeys.has(key))
+    if (matched) return { level, roleKey: matched }
+  }
+  return { level: 'town', roleKey: '' }
+}
+
+export function resolveRoleLevel(rawRoles: string[] = [], userRoles: RoleInfo[] = []): RoleLevel {
+  return resolveRole(rawRoles, userRoles).level
+}
+
+// 预警中心可见页签：地市业务人员仅区域预警实时动向；区县业务人员为实时预警监控+处置任务管理；
+// 返回 null 表示不限制（管理员/乡镇等维持原有逻辑）
+export function getVisibleAlertTabs(roleKey?: string): AlertTab[] | null {
+  if (roleKey === 'city_business') return ['trends']
+  if (roleKey === 'district_business') return ['alerts', 'tasks']
+  return null
 }
 
 function flattenDepartments(items: DeptInfo[]): DeptInfo[] {
@@ -114,10 +176,11 @@ export function createRegionContext(
   rawRoles: string[] = [],
   departments: DeptInfo[] = [],
 ): RegionContext {
-  const roleLevel = resolveRoleLevel(rawRoles, user.roles)
+  const { level: roleLevel, roleKey } = resolveRole(rawRoles, user.roles)
   if (roleLevel === 'admin') {
     return {
       roleLevel,
+      roleKey,
       defaultSelection: PROVINCE,
       selection: PROVINCE,
       mapSelection: PROVINCE,
@@ -158,6 +221,7 @@ export function createRegionContext(
 
   return {
     roleLevel,
+    roleKey,
     defaultSelection,
     selection: defaultSelection,
     mapSelection,

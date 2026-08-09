@@ -5,6 +5,7 @@ import { message } from 'antd'
 import { useAppStore, useAuthStore } from '@/stores'
 import PageLoading from '@/components/PageLoading'
 import { loadSessionContext, takeFallbackMessage } from '@/services/session'
+import { getBlockedPaths, getLandingPath } from '@/utils/region'
 
 interface AuthGuardProps {
   children: ReactNode
@@ -56,6 +57,11 @@ export default function AuthGuard({ children }: AuthGuardProps) {
 
   if (!initialized || !regionContext?.initialized) {
     return <PageLoading />
+  }
+
+  // 业务角色禁止直接访问未授权页面（乡镇业务人员无大屏页面权限），重定向到各自落地页
+  if (getBlockedPaths(regionContext?.roleKey).includes(location.pathname)) {
+    return <Navigate to={getLandingPath(regionContext?.roleKey)} replace />
   }
 
   return <>{children}</>

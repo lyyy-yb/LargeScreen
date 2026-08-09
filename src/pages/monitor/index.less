@@ -41,80 +41,16 @@
 
 .station-panel {
   left: 16px;
+  gap: 14px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  backdrop-filter: none;
 }
 
 .status-panel {
   right: 16px;
-}
-
-.station-panel__title {
-  min-height: 42px;
-  padding: 0 12px !important;
-  border: 0 !important;
-  border-radius: 0 !important;
-  border-bottom: 1px dashed rgba(83, 166, 224, 0.34) !important;
-  background: transparent !important;
-  box-shadow: none !important;
-}
-
-.station-panel__title span:last-child {
-  color: #d9efff;
-  font-size: 15px;
-  font-weight: 700;
-  letter-spacing: 0.4px;
-}
-
-.station-list {
-  padding: 7px 9px 2px;
-  margin: 0 -2px;
-}
-
-.station-card {
-  min-height: 84px;
-  padding: 12px 11px 10px !important;
-  border-color: rgba(45, 117, 184, 0.34) !important;
-  border-radius: 7px !important;
-  background: linear-gradient(120deg, rgba(22, 90, 165, 0.64), rgba(12, 59, 126, 0.58)) !important;
-  box-shadow: inset 0 0 18px rgba(34, 137, 233, 0.09);
-  backdrop-filter: blur(5px);
-
-  &:hover {
-    border-color: rgba(46, 220, 255, 0.72) !important;
-    transform: translateX(2px);
-  }
-
-  &[aria-pressed="true"] {
-    border-color: rgba(70, 226, 255, 0.86) !important;
-    background: linear-gradient(120deg, rgba(27, 104, 193, 0.8), rgba(14, 73, 158, 0.74)) !important;
-    box-shadow:
-      inset 3px 0 0 #20e8ff,
-      0 0 15px rgba(12, 183, 246, 0.18) !important;
-  }
-
-  > div:first-child > div span:last-child {
-    color: #eef9ff !important;
-    font-size: 14px !important;
-    font-weight: 700;
-  }
-
-  > div:first-child > span {
-    color: #78aedd !important;
-    font-size: 10.5px !important;
-    letter-spacing: 0.2px;
-  }
-
-  .grid > div > div:first-child {
-    color: #20f0ff;
-    font-family: "Bahnschrift", "DIN Alternate", Consolas, monospace !important;
-    font-size: 17px !important;
-    font-weight: 700;
-    letter-spacing: 0.3px;
-  }
-
-  .grid > div > div:last-child {
-    color: #78b4e5 !important;
-    font-size: 10.5px !important;
-  }
 }
 
 .monitor-map-stage {
@@ -316,6 +252,12 @@
   }
 }
 
+/* 左侧卡片标题底部虚线分隔（仅底部一条，其余三边无线条） */
+.panel-title-divider {
+  border: 0;
+  border-bottom: 1px dashed rgba(82, 166, 225, 0.4);
+}
+
 .status-card__overview {
   display: grid;
   grid-template-columns: 108px minmax(0, 1fr);
@@ -468,5 +410,26 @@
 
   img {
     border-radius: 50%;
+  }
+}
+
+/* 空气质量站数据弹窗（固定站/移动站） */
+.station-data-modal {
+  .ant-modal-content {
+    padding: 16px 18px;
+    border: 1px solid rgba(0, 180, 255, 0.4);
+    border-radius: 10px;
+    background: linear-gradient(160deg, rgba(8, 40, 86, 0.98), rgba(4, 22, 55, 0.98));
+    box-shadow:
+      inset 0 0 20px rgba(0, 180, 255, 0.08),
+      0 12px 40px rgba(0, 10, 35, 0.7);
+  }
+
+  .ant-modal-close {
+    color: #7bd7ff;
+
+    &:hover {
+      color: #fff;
+    }
   }
 }

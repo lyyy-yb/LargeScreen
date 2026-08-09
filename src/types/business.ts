@@ -49,10 +49,13 @@ export interface AlertEventDTO {
   deviceId?: string
   deviceName: string
   location: string
-  city: string
-  district: string
+  /** 地市部门 ID（dept_id 体系，后端不再返回名称） */
+  cityId?: number
+  /** 区县部门 ID */
+  districtId?: number
   townId?: number
-  town?: string
+  /** 站点类型：fixed-固定站 mobile-移动站 */
+  stationType?: string
   deptId?: number
   triggerReason: string
   status: 'undispatched' | 'pending' | 'processing' | 'completed' | 'closed'
@@ -72,9 +75,11 @@ export interface AlertEventQuery {
   alertLevel?: string
   dataType?: string
   deviceName?: string
-  city?: string
-  district?: string
-  town?: string
+  /** 地市部门 ID（后端按 ID 筛选，不再支持名称） */
+  cityId?: number
+  districtId?: number
+  townId?: number
+  stationType?: string
   status?: string
 }
 
@@ -86,6 +91,34 @@ export interface DispatchTaskPayload {
   townId?: number
   requireTime?: string
   disposalContent?: string
+}
+
+/** 预警面板列表项（alertEvent/dashboard 返回） */
+export interface AlertDashboardItem {
+  /** 预警规则名称 */
+  ruleName: string
+  /** 监测位置 */
+  location: string
+  /** 预警时间 */
+  alertTime: string
+}
+
+/** 预警面板数据：统计 + 近一小时最新预警列表（alertEvent/dashboard 返回） */
+export interface AlertDashboardVO {
+  /** 有效预警数（排除已清除和已关闭） */
+  effectiveCount: number
+  /** 待处置预警数（待派发 + 待处置） */
+  pendingCount: number
+  /** 处置中预警数 */
+  processingCount: number
+  /** 已完成预警数 */
+  completedCount: number
+  /** 今日派单数 */
+  todayDispatchCount: number
+  /** 今日处置数（今日关闭的预警） */
+  todayClosedCount: number
+  /** 近一小时最新预警列表 */
+  latestAlerts: AlertDashboardItem[]
 }
 
 export interface DisposalTaskDTO {
@@ -102,10 +135,10 @@ export interface DisposalTaskDTO {
   disposalContent?: string
   photos?: string | string[]
   completedAt?: string
-  city?: string
-  district?: string
+  /** 地市部门 ID（后端不再返回名称） */
+  cityId?: number
+  districtId?: number
   townId?: number
-  town?: string
   deptId?: number
   createTime?: string
   updateTime?: string
@@ -120,9 +153,9 @@ export interface DisposalTaskQuery {
   status?: string
   assigneeName?: string
   requesterName?: string
-  city?: string
-  district?: string
-  town?: string
+  cityId?: number
+  districtId?: number
+  townId?: number
 }
 
 export interface CleanRuleDTO {

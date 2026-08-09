@@ -5,6 +5,7 @@ import { UserOutlined, LockOutlined, SafetyOutlined } from '@ant-design/icons'
 import { useAppStore, useAuthStore } from '@/stores'
 import { login as loginApi, captchaImage } from '@/servers/api'
 import { loadSessionContext, takeFallbackMessage } from '@/services/session'
+import { getLandingPath } from '@/utils/region'
 import loginBg from '@/assets/images/login-bg.jpg'
 
 export default function Login() {
@@ -12,6 +13,7 @@ export default function Login() {
   const [form] = Form.useForm()
   const { token, initialized, setToken, setSession, logout } = useAuthStore()
   const { setRegionContext, resetRegionContext } = useAppStore()
+  const regionContext = useAppStore(state => state.regionContext)
   const [isLoading, setLoading] = useState(false)
   const [captchaImg, setCaptchaImg] = useState('')
   const [captchaUuid, setCaptchaUuid] = useState('')
@@ -30,9 +32,10 @@ export default function Login() {
 
   useEffect(() => {
     if (token && initialized) {
-      navigate('/monitor')
+      // 按角色落地：乡镇业务人员仅能进入数据管理
+      navigate(getLandingPath(regionContext?.roleKey))
     }
-  }, [token, initialized, navigate])
+  }, [token, initialized, navigate, regionContext?.roleKey])
 
   useEffect(() => {
     queueMicrotask(() => void loadCaptcha())
@@ -57,7 +60,7 @@ export default function Login() {
         setRegionContext(regionContext)
         const fallbackMessage = takeFallbackMessage(regionContext, tokenVal, true)
         if (fallbackMessage) message.warning(fallbackMessage)
-        navigate('/monitor')
+        navigate(getLandingPath(regionContext.roleKey))
       } else {
         throw new Error(res?.msg || res?.message || '登录失败')
       }

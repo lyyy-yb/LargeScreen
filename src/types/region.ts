@@ -13,6 +13,8 @@ export interface RegionSelection {
 
 export interface RegionContext {
   roleLevel: RoleLevel
+  /** 命中的角色权限字符（如 city_admin / city_business），用于同层级下的角色差异控制 */
+  roleKey?: string
   defaultSelection: RegionSelection
   selection: RegionSelection
   mapSelection: RegionSelection

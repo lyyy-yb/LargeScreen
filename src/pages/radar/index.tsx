@@ -8,7 +8,7 @@ import { leidaList, alarmPointAll, dockList, options4leixing, wuranListByLngLat 
 import { cities, districts } from '@/utils/city'
 import RegionSelector from '@/components/RegionSelector'
 import { useAppStore } from '@/stores'
-import { toRegionQuery } from '@/utils/region'
+import { toRegionQuery, isBusinessRole } from '@/utils/region'
 import { getPerspectiveIcon } from '@/utils/iconPerspective'
 import { createRadarScanOverlay, type RadarScanOverlay } from '@/utils/radarScanOverlay'
 import { PointLayer, type ILayer, type Scene } from '@antv/l7'
@@ -17,19 +17,6 @@ interface AlarmItem { dapLat: number; dapLng: number; times: number; address: st
 interface PollutionItem { name: string; weizhi: string; leixing: string; hangye: string; xianzhuang: string; lng: number; lat: number; city?: string; quxian?: string }
 interface RadarStation { bsiId: string; bsiName: string; bsiLng: number; bsiLat: number; bsiLocation?: string; status?: string }
 
-const mockTfList: AlarmItem[] = [
-  { dapLat: 30.264, dapLng: 120.264, times: 25, address: '萧山区工业园区', type: 1 },
-  { dapLat: 30.184, dapLng: 120.264, times: 18, address: '萧山区物流中心', type: 1 },
-  { dapLat: 30.273, dapLng: 119.978, times: 15, address: '余杭区工业区', type: 1 },
-  { dapLat: 30.048, dapLng: 119.960, times: 8, address: '富阳区化工园区', type: 1 },
-]
-const mockCgList: AlarmItem[] = [
-  { dapLat: 30.246, dapLng: 120.210, times: 5, address: '西湖区文三路科技街', type: 0 },
-  { dapLat: 30.226, dapLng: 120.197, times: 3, address: '上城区延安路商业区', type: 0 },
-  { dapLat: 30.319, dapLng: 120.141, times: 8, address: '拱墅区万达广场', type: 0 },
-  { dapLat: 30.259, dapLng: 120.130, times: 2, address: '西湖区西溪湿地', type: 0 },
-  { dapLat: 30.208, dapLng: 120.211, times: 12, address: '滨江区滨江天街', type: 0 },
-]
 const mockDocks = [
   { dockName: '临平交通-塘栖机场', dockCode: 'DOCK001' },
   { dockName: '良渚街道综合信息指挥室', dockCode: 'DOCK002' },
@@ -85,7 +72,7 @@ function AlarmPointPanel({
             <div className="flex items-start justify-between gap-2">
               <button type="button" onClick={() => onLocate(item)} className="min-w-0 text-left flex-1 cursor-pointer">
                 <div className="text-[#edf8ff] text-12px font-600 leading-17px truncate">{item.address}</div>
-                <div className="mt-0.5 text-9px text-[#bdddf8]/52">最近 1 小时监测</div>
+                <div className="mt-0.5 text-9px text-[#bdddf8]/52">最近 24 小时监测</div>
               </button>
               <div className="shrink-0 flex items-baseline gap-1 rounded-7px px-2 py-1 bg-[rgba(3,42,98,0.38)]">
                 <span className="text-15px font-mono font-800" style={{ color: accent }}>{item.times}</span>
@@ -114,8 +101,8 @@ export default function Radar() {
   const [wxInfo, setWxInfo] = useState<AlarmItem | null>(null)
   const [filterLeixing, setFilterLeixing] = useState('')
   const [modal, contextHolder] = Modal.useModal()
-  const [tfList, setTfList] = useState<AlarmItem[]>(mockTfList)
-  const [cgList, setCgList] = useState<AlarmItem[]>(mockCgList)
+  const [tfList, setTfList] = useState<AlarmItem[]>([])
+  const [cgList, setCgList] = useState<AlarmItem[]>([])
   const [pollutionList, setPollutionList] = useState<PollutionItem[]>([])
   // 污染源类型筛选（与原项目一致：options4leixing 接口动态获取）
   const [leixingFilters, setLeixingFilters] = useState<{ value: string; label: string }[]>([{ value: '', label: '全部' }])
@@ -134,15 +121,12 @@ export default function Radar() {
   const [flyLngLat, setFlyLngLat] = useState<{ lng: number; lat: number }>({ lng: 0, lat: 0 })
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; lng: number; lat: number } | null>(null)
 
-  // 加载无人机场数据与 mock 点位（污染源改为按选中雷达坐标查询，见下方 loadPollution）
+  // 加载无人机场数据（突发/常规点位由选中雷达的 alarmPoint 查询驱动，见下方 useEffect）
   useEffect(() => {
     const loadData = async () => {
       if (!querySelection) return
       const params = toRegionQuery(querySelection)
       const isHangzhouScope = !querySelection.cityName || querySelection.cityName === '杭州市'
-      const matchesCounty = (value: string) => !querySelection.countyName || value.includes(querySelection.countyName)
-      setCgList(isHangzhouScope ? mockCgList.filter(item => matchesCounty(item.address)) : [])
-      setTfList(isHangzhouScope ? mockTfList.filter(item => matchesCounty(item.address)) : [])
       setDocks(isHangzhouScope && !querySelection.countyName ? mockDocks : [])
       try {
         const dockRes = await dockList(params)
@@ -213,23 +197,34 @@ export default function Radar() {
     return () => { cancelled = true }
   }, [querySelection])
 
-  // 按选中雷达查询突发/常规告警点位
+  // 按选中雷达查询突发/常规告警点位（与 monitor 统一默认 hour=24；结果为空/失败时清空列表，不使用 mock 数据）
   useEffect(() => {
-    if (!selectedBsiId) return
     let cancelled = false
-    alarmPointAll({ BsiId: selectedBsiId, hour: 1 })
-      .then(res => {
-        if (cancelled || res?.resultCode !== 0 || !Array.isArray(res.data)) return
+    const loadAlarm = async () => {
+      if (!selectedBsiId) {
+        setCgList([])
+        setTfList([])
+        return
+      }
+      try {
+        const res = await alarmPointAll({ BsiId: selectedBsiId, hour: 24 })
+        if (cancelled) return
+        const data: AlarmItem[] = res?.resultCode === 0 && Array.isArray(res.data) ? res.data : []
         const cg: AlarmItem[] = []
         const tf: AlarmItem[] = []
-        res.data.forEach((item: AlarmItem) => {
+        data.forEach((item: AlarmItem) => {
           if (item.type === 1) cg.push(item)
           else if (item.type === 2) tf.push(item)
         })
-        setCgList(cg.length ? cg : mockCgList)
-        setTfList(tf.length ? tf : mockTfList)
-      })
-      .catch(() => { /* 告警点位查询失败保留当前列表 */ })
+        setCgList(cg)
+        setTfList(tf)
+      } catch {
+        if (cancelled) return
+        setCgList([])
+        setTfList([])
+      }
+    }
+    void loadAlarm()
     // 切换雷达后清除旧的定位高亮
     highlightLayerRef.current?.setData({ type: 'FeatureCollection', features: [] })
     return () => { cancelled = true }
@@ -469,10 +464,13 @@ export default function Radar() {
               </article>
             ))}
           </div>
-          <div className="flex items-center justify-between gap-2 pt-2 mt-1 border-t border-[rgba(137,219,255,0.16)] pointer-events-auto">
-            <Button className="!flex-1 !rounded-full !text-[#8aefff] !border-[rgba(98,220,255,0.38)] !bg-[rgba(58,186,224,0.08)]" onClick={() => navigate('/pollution')}>管理污染源</Button>
-            <Button type="primary" className="!flex-1 !rounded-full" onClick={() => navigate('/pollution')}>新增污染源</Button>
-          </div>
+          {/* 业务角色无污染源管理页权限，隐藏管理/新增入口 */}
+          {!isBusinessRole(regionContext) && (
+            <div className="flex items-center justify-between gap-2 pt-2 mt-1 border-t border-[rgba(137,219,255,0.16)] pointer-events-auto">
+              <Button className="!flex-1 !rounded-full !text-[#8aefff] !border-[rgba(98,220,255,0.38)] !bg-[rgba(58,186,224,0.08)]" onClick={() => navigate('/pollution')}>管理污染源</Button>
+              <Button type="primary" className="!flex-1 !rounded-full" onClick={() => navigate('/pollution')}>新增污染源</Button>
+            </div>
+          )}
         </div>
       </div>
       {/* 底部时间选择 */}

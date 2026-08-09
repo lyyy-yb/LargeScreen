@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Button, Table, Modal, Form, Input, Select, Tag, message } from 'antd'
 import { EyeOutlined, WarningOutlined, ImportOutlined, ArrowLeftOutlined } from '@ant-design/icons'
+import { useAppStore } from '@/stores'
 
 interface AirQualityRecord { id: string; monitorTime: string; pm25: number; o3: number; temperature: number; pressure: number; humidity: number; windSpeed: number; windDirection: string; rainfall: number; dataLevel: 'minute' | 'hour' }
 interface MobileCarRecord { id: string; monitorTime: string; totalSuspendedParticulates: number; fineParticulates: number; latitude: number; longitude: number; roadDustLoad: number }
@@ -88,6 +89,9 @@ const mockDataSources: DataSource[] = [
 
 export default function DataManage() {
   const navigate = useNavigate()
+  const roleKey = useAppStore(state => state.regionContext?.roleKey)
+  // 乡镇业务人员无监控大屏权限，不显示返回按钮
+  const showBackToMonitor = roleKey !== 'town_business'
   const [dataSources] = useState<DataSource[]>(mockDataSources)
   const [selectedType, setSelectedType] = useState('')
   const [selectedStatus, setSelectedStatus] = useState('')
@@ -137,14 +141,16 @@ export default function DataManage() {
     <div className="alert-page-container">
       <div className="alert-header-bar">
         <div className="header-left">
-          <Button
-            type="text"
-            icon={<ArrowLeftOutlined />}
-            onClick={() => navigate('/monitor')}
-            className="!text-[#03FBFD] hover:!text-white !px-2 !h-28px"
-          >
-            返回监控大屏
-          </Button>
+          {showBackToMonitor && (
+            <Button
+              type="text"
+              icon={<ArrowLeftOutlined />}
+              onClick={() => navigate('/monitor')}
+              className="!text-[#03FBFD] hover:!text-white !px-2 !h-28px"
+            >
+              返回监控大屏
+            </Button>
+          )}
         </div>
 
         <div className="header-right" />

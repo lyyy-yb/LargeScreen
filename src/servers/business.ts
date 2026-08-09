@@ -1,5 +1,6 @@
 import { request } from './request'
 import type {
+  AlertDashboardVO,
   AlertEventDTO,
   AlertEventQuery,
   CleanRuleDTO,
@@ -47,6 +48,9 @@ export const warningRuleApi = {
 }
 
 export const alertEventApi = {
+  /** 预警面板数据：统计 + 近一小时最新预警列表（大屏预警处置卡片专用） */
+  dashboard: () =>
+    request.get<AlertDashboardVO>(`${API_PREFIX}/alertEvent/dashboard`),
   list: (params: AlertEventQuery) =>
     request.get<PageResult<AlertEventDTO>>(`${API_PREFIX}/alertEvent/list`, { params }),
   detail: (id: number) =>
