@@ -58,7 +58,7 @@ export interface AlertEventDTO {
   stationType?: string
   deptId?: number
   triggerReason: string
-  status: 'undispatched' | 'pending' | 'processing' | 'completed' | 'closed'
+  status: 'undispatched' | 'pending' | 'processing' | 'completed' | 'closed' | 'cleared'
   assignedCity?: string
   /** 预警点位经度（list 接口返回，用于大屏地图打点） */
   lng?: number
@@ -80,7 +80,21 @@ export interface AlertEventQuery {
   districtId?: number
   townId?: number
   stationType?: string
+  /** 状态筛选，优先级高于 includeHistory */
   status?: string
+  /** 是否显示历史预警（已清除/已关闭），默认只显示活跃预警 */
+  includeHistory?: boolean
+  /** 预警时间-开始（YYYY-MM-DD HH:mm:ss） */
+  startTime?: string
+  /** 预警时间-结束（YYYY-MM-DD HH:mm:ss） */
+  endTime?: string
+}
+
+/** 预警事件审核（确认关闭/退回重办） */
+export interface AlertReviewPayload {
+  alertId: number
+  /** confirm-确认关闭 return-退回重办 */
+  action: 'confirm' | 'return'
 }
 
 export interface DispatchTaskPayload {

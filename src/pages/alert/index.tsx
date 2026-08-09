@@ -1,13 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Button, Table, Modal, Form, Input, Select, Radio, InputNumber, Switch, Tag, Space, DatePicker, App } from 'antd'
-import { PlusOutlined, EditOutlined, EyeOutlined, AlertFilled, ArrowLeftOutlined, DeleteOutlined, SendOutlined, SearchOutlined, CheckCircleOutlined, CopyOutlined, DownloadOutlined, ImportOutlined, ExportOutlined } from '@ant-design/icons'
+import { PlusOutlined, EditOutlined, EyeOutlined, AlertFilled, ArrowLeftOutlined, DeleteOutlined, SendOutlined, SearchOutlined, CheckCircleOutlined, CopyOutlined, DownloadOutlined, ImportOutlined, ExportOutlined, RollbackOutlined } from '@ant-design/icons'
 import RegionSelector from '@/components/RegionSelector'
 import './index.less'
 import { useAppStore, useAuthStore } from '@/stores'
 import { addOption, buildDeptRegionOptions, flattenDepartments, nameEquals } from '@/utils/deptRegion'
 import { getVisibleAlertTabs, type AlertTab } from '@/utils/region'
 import dayjs from 'dayjs'
+import type { Dayjs } from 'dayjs'
 import { alertEventApi, disposalTaskApi, warningRuleApi } from '@/servers/business'
 import type { AlertEventDTO, DisposalTaskDTO, WarningRuleDTO, WarningRuleExportQuery } from '@/types/business'
 import type { DeptInfo } from '@/types/auth'
@@ -185,6 +186,10 @@ export default function AlertPage() {
   const [alertFilterDataType, setAlertFilterDataType] = useState<string | undefined>(undefined)
   const [alertFilterLevel, setAlertFilterLevel] = useState<string | undefined>(undefined)
   const [alertFilterStatus, setAlertFilterStatus] = useState<string | undefined>(undefined)
+  // 历史预警开关：开启后展示全量（含已清除/已关闭），默认只显示活跃预警
+  const [alertIncludeHistory, setAlertIncludeHistory] = useState(false)
+  // 预警时间范围筛选（startTime/endTime）
+  const [alertTimeRange, setAlertTimeRange] = useState<[Dayjs | null, Dayjs | null] | null>(null)
   const [tasksPage, setTasksPage] = useState(1)
   const [tasksSize, setTasksSize] = useState(15)
   const [tasksTotal, setTasksTotal] = useState(0)
@@ -381,6 +386,9 @@ export default function AlertPage() {
         dataType: alertFilterDataType,
         alertLevel: alertFilterLevel,
         status: alertFilterStatus,
+        includeHistory: alertIncludeHistory || undefined,
+        startTime: alertTimeRange?.[0]?.format('YYYY-MM-DD HH:mm:ss'),
+        endTime: alertTimeRange?.[1]?.format('YYYY-MM-DD HH:mm:ss'),
       })
       setAlerts((response.data?.records ?? []).map(toAlertEvent))
       setAlertsTotal(response.data?.total ?? 0)
@@ -392,6 +400,7 @@ export default function AlertPage() {
   }, [
     message, regionParams,
     alertsPage, alertsSize, alertAppliedDevice, alertFilterDataType, alertFilterLevel, alertFilterStatus,
+    alertIncludeHistory, alertTimeRange,
   ])
 
   const loadTasks = useCallback(async () => {
@@ -753,23 +762,54 @@ export default function AlertPage() {
       setRuleImporting(false)
     }
   }
-  const confirmAlert = async (id: string) => {
-    try {
-      await alertEventApi.changeStatus(Number(id), 'processing')
-      message.success('已确认')
-      await loadAlerts()
-    } catch {
-      message.error('预警确认失败')
-    }
+  // 确认关闭（仅已处置状态，review 接口 action=confirm）
+  const confirmAlert = (id: string) => {
+    modal.confirm({
+      className: 'dark-confirm-modal',
+      title: '确认关闭',
+      content: '确定确认关闭该预警？',
+      onOk: async () => {
+        try {
+          await alertEventApi.review({ alertId: Number(id), action: 'confirm' })
+          message.success('已确认关闭')
+          await loadAlerts()
+        } catch {
+          message.error('预警确认失败')
+        }
+      },
+    })
   }
-  const closeAlert = (id: string) => {
+  // 退回重办（仅已处置状态，review 接口 action=return）
+  const returnAlert = (id: string) => {
+    modal.confirm({
+      className: 'dark-confirm-modal',
+      title: '确认退回',
+      content: '确定将该预警退回重办？',
+      onOk: async () => {
+        try {
+          await alertEventApi.review({ alertId: Number(id), action: 'return' })
+          message.success('已退回重办')
+          await loadAlerts()
+        } catch {
+          message.error('预警退回失败')
+        }
+      },
+    })
+  }
+  // 清除预警（仅待派发状态，clear 接口）
+  const clearAlert = (id: string) => {
     modal.confirm({
       className: 'dark-confirm-modal',
       title: '确认清除',
       content: '确定清除该预警？',
       onOk: async () => {
-        await alertEventApi.changeStatus(Number(id), 'closed')
-        await loadAlerts()
+        try {
+          await alertEventApi.clear(Number(id))
+          message.success('已清除')
+          await loadAlerts()
+        } catch {
+          message.error('预警清除失败')
+        }
       },
     })
   }
@@ -999,6 +1039,7 @@ export default function AlertPage() {
           processing: { l: '处置中', c: 'blue' },
           completed: { l: '已处置', c: 'green' },
           closed: { l: '已关闭', c: 'default' },
+          cleared: { l: '已清除', c: 'default' },
         }
         return <Tag color={m[t]?.c}>{m[t]?.l}</Tag>
       },
@@ -1010,16 +1051,19 @@ export default function AlertPage() {
       render: (_: unknown, r: AlertEvent) => (
         <div className="flex items-center gap-1">
           <Button type="link" size="small" icon={<EyeOutlined />} className="!text-[#03FBFD] hover:!text-white !p-0" onClick={() => { setSelectedAlert(r); setIsAlertModalVisible(true); alertEventApi.detail(Number(r.id)).then(res => { if (res.data) setSelectedAlert(toAlertEvent(res.data)) }).catch(() => {}) }}>详情</Button>
-          {!isTown && r.status === 'pending' && (
-            <Button type="link" size="small" icon={<CheckCircleOutlined />} className="!text-[#52C41A] hover:!text-green-300 !p-0" onClick={() => confirmAlert(r.id)}>确认</Button>
-          )}
           {!isTown && r.status === 'undispatched' && (
-            <Button type="link" size="small" icon={<SendOutlined />} className="!text-[#1890FF] hover:!text-blue-300 !p-0" onClick={() => showDispatchModal(r)}>派发</Button>
+            <>
+              <Button type="link" size="small" icon={<SendOutlined />} className="!text-[#1890FF] hover:!text-blue-300 !p-0" onClick={() => showDispatchModal(r)}>派发</Button>
+              <Button type="link" size="small" danger icon={<DeleteOutlined />} className="!p-0" onClick={() => clearAlert(r.id)}>清除</Button>
+            </>
           )}
-          {!isTown && r.status !== 'closed' && r.status !== 'completed' && (
-            <Button type="link" size="small" danger icon={<DeleteOutlined />} className="!p-0" onClick={() => closeAlert(r.id)}>清除</Button>
+          {!isTown && r.status === 'completed' && (
+            <>
+              <Button type="link" size="small" icon={<CheckCircleOutlined />} className="!text-[#52C41A] hover:!text-green-300 !p-0" onClick={() => confirmAlert(r.id)}>确认</Button>
+              <Button type="link" size="small" icon={<RollbackOutlined />} className="!text-[#FA8C16] hover:!text-orange-300 !p-0" onClick={() => returnAlert(r.id)}>退回</Button>
+            </>
           )}
-          {!isTown && (r.status === 'closed' || r.status === 'completed') && (
+          {!isTown && (r.status === 'closed' || r.status === 'completed' || r.status === 'cleared') && (
             <Button type="link" size="small" danger icon={<DeleteOutlined />} className="!p-0" onClick={() => deleteAlert(r.id)}>删除</Button>
           )}
         </div>
@@ -1078,6 +1122,7 @@ export default function AlertPage() {
     processing: '处置中',
     completed: '已处置',
     closed: '已关闭',
+    cleared: '已清除',
   }
   const alertTrends = alerts.slice(0, 20).map(item => ({
     time: item.createdAt ? dayjs(item.createdAt).format('HH:mm') : '--:--',
@@ -1087,7 +1132,7 @@ export default function AlertPage() {
     status: statusLabels[item.status] ?? item.status,
   }))
   const levelColorMap: Record<string, string> = { level1: '#FF4D4F', level2: '#FA8C16', level3: '#FAAD14', level4: '#1890FF' }
-  const statusColorMap: Record<string, string> = { '待派发': '#FAAD14', '待处置': '#FA8C16', '处置中': '#1890FF', '已处置': '#52C41A', '已关闭': '#8C8C8C' }
+  const statusColorMap: Record<string, string> = { '待派发': '#FAAD14', '待处置': '#FA8C16', '处置中': '#1890FF', '已处置': '#52C41A', '已关闭': '#8C8C8C', '已清除': '#8C8C8C' }
 
   return (
     <div className="alert-page-container">
@@ -1274,8 +1319,26 @@ export default function AlertPage() {
                 { value: 'pending', label: '待处置' },
                 { value: 'processing', label: '处置中' },
                 { value: 'completed', label: '已处置' },
-                { value: 'closed', label: '已关闭' },
               ]}
+              allowClear
+            />
+            <div className="flex items-center gap-1.5">
+              <span className="text-12px text-white/60 whitespace-nowrap">历史预警</span>
+              <Switch
+                size="small"
+                className="tech-switch"
+                checked={alertIncludeHistory}
+                onChange={v => { setAlertIncludeHistory(v); setAlertsPage(1) }}
+              />
+            </div>
+            <DatePicker.RangePicker
+              className="model_from_input !w-340px"
+              classNames={{ popup: { root: 'alert-rule-dropdown' } }}
+              showTime
+              format="YYYY-MM-DD HH:mm:ss"
+              placeholder={['预警开始时间', '预警结束时间']}
+              value={alertTimeRange}
+              onChange={v => { setAlertTimeRange(v); setAlertsPage(1) }}
               allowClear
             />
           </div>
