@@ -7,7 +7,7 @@ import dayjs from 'dayjs'
 import CityDistrictMap from '@/components/CityDistrictMap'
 import CountyBoundaryMap from '@/components/CountyBoundaryMap'
 import ZJ3DMap from '@/components/ZJ3DMap'
-import { useAppStore } from '@/stores'
+import { useAppStore, useAuthStore } from '@/stores'
 import { cities, districts } from '@/utils/city'
 import type { RegionSelection } from '@/types/region'
 import { toRegionQuery } from '@/utils/region'
@@ -563,10 +563,19 @@ export default function Monitor() {
   } = useAppStore()
   const roleLevel = regionContext?.roleLevel || 'town'
   const selection = regionContext?.selection
-  const mapSelection = regionContext?.mapSelection
+  const username = useAuthStore(state => state.username)
+  // quzhou 账号特殊处理：地图锁定衢州市级视图（CityDistrictMap 会自动飞行聚焦智造新城），不进区县视图
+  const isQuzhouAccount = !!username && username.toLowerCase().includes('quzhou')
+  const quzhouMapSelection: RegionSelection = {
+    provinceCode: '330000',
+    provinceName: '浙江省',
+    cityCode: '330800',
+    cityName: '衢州市',
+  }
+  const mapSelection = isQuzhouAccount ? quzhouMapSelection : regionContext?.mapSelection
   const isProvinceView = !mapSelection?.cityCode
   const activeCity = cities.find(city => city.adcode === mapSelection?.cityCode)
-  const activeCounty = districts.find(item => String(item.adcode) === mapSelection?.countyCode)
+  const activeCounty = isQuzhouAccount ? undefined : districts.find(item => String(item.adcode) === mapSelection?.countyCode)
   const [hoverRegion, setHoverRegion] = useState<string | null>(null)
   const [droneStations, setDroneStations] = useState<MonitorStation[]>([])
   const [radarStations, setRadarStations] = useState<MonitorStation[]>([])

@@ -272,7 +272,8 @@ export default function CityDistrictMap({
               .source(zhizaoRes)
               .shape('line')
               .color('#ffd166')
-              .size(2)
+              // 边界特别加粗（4px），比区县边界（2px）更粗以突出智造新城
+              .size(4)
               .style({ raisingHeight: 13000, heightfixed: true, opacity: 1, depth: false })
             scene.addLayer(zzLine)
 
