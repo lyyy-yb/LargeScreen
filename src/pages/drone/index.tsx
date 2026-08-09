@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Button, Tag, Modal, Image, message } from 'antd'
+import { Button, Tag, Modal, Image, Spin, message } from 'antd'
 import { ArrowLeftOutlined, RocketOutlined, VideoCameraOutlined, EnvironmentOutlined, DashboardOutlined, SendOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import L7MapView from '@/components/L7MapView'
@@ -116,10 +116,14 @@ export default function Drone() {
   // 飞行任务 / 待执飞任务（与原项目一致：按选中机场 dockCode + 年初~今天时间范围真实查询）
   const [jobs, setJobs] = useState<TaskItem[]>([])
   const [plans, setPlans] = useState<PlanItem[]>([])
+  const [docksLoading, setDocksLoading] = useState(true)
+  const [jobsLoading, setJobsLoading] = useState(false)
+  const [plansLoading, setPlansLoading] = useState(false)
   // 任务结果弹窗（原项目 ResModal：listFlyResult 查图片/视频结果）
   const [resVisible, setResVisible] = useState(false)
   const [curJobID, setCurJobID] = useState('')
   const [jobResults, setJobResults] = useState<FlyResultItem[]>([])
+  const [resultsLoading, setResultsLoading] = useState(false)
 
   // 地图中心控制（首次加载数据后飞到机场）
   const [mapCenter, setMapCenter] = useState<[number, number] | undefined>(undefined)
@@ -148,6 +152,7 @@ export default function Drone() {
       if (!querySelection) return
       const params = toRegionQuery(querySelection)
       let loadedDocks: DockItem[] = []
+      setDocksLoading(true)
       try {
         const res = await dockList(params)
         if (res?.resultCode === 0 && Array.isArray(res.data)) {
@@ -163,6 +168,7 @@ export default function Drone() {
       }
 
       if (cancelled) return
+      setDocksLoading(false)
       setDocks(loadedDocks)
       const firstDock = loadedDocks.find(item => isValidCoordinate(item.dockLng, item.dockLat))
       // 与原项目一致：默认选中第一台机场，右侧飞行任务/待执飞列表随之加载
@@ -183,18 +189,24 @@ export default function Drone() {
     if (!dockCode) return
     let cancelled = false
     const param = { dockCode, startDate: dayjs().startOf('year').format('YYYY-MM-DD'), endDate: dayjs().format('YYYY-MM-DD') }
+    // 标准的列表数据拉取模式，忽略 set-state-in-effect 规则
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setJobsLoading(true)
+    setPlansLoading(true)
     listFlyJob(param)
       .then(res => {
         if (cancelled) return
         setJobs(res?.resultCode === 0 && Array.isArray(res.data) ? res.data : mockTasks.filter(i => i.dockCode === dockCode))
       })
       .catch(() => { if (!cancelled) setJobs(mockTasks.filter(i => i.dockCode === dockCode)) })
+      .finally(() => { if (!cancelled) setJobsLoading(false) })
     listFlyPlan(param)
       .then(res => {
         if (cancelled) return
         setPlans(res?.resultCode === 0 && Array.isArray(res.data) ? res.data : mockPlans.filter(i => i.dockCode === dockCode))
       })
       .catch(() => { if (!cancelled) setPlans(mockPlans.filter(i => i.dockCode === dockCode)) })
+      .finally(() => { if (!cancelled) setPlansLoading(false) })
     return () => { cancelled = true }
   }, [dockCode])
 
@@ -206,11 +218,15 @@ export default function Drone() {
   useEffect(() => {
     if (!curJobID) return
     let cancelled = false
+    // 标准的列表数据拉取模式，忽略 set-state-in-effect 规则
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setResultsLoading(true)
     listFlyResult({ jobID: curJobID })
       .then(res => {
         if (!cancelled) setJobResults(res?.resultCode === 0 && Array.isArray(res.data) ? res.data : [])
       })
       .catch(() => { if (!cancelled) setJobResults([]) })
+      .finally(() => { if (!cancelled) setResultsLoading(false) })
     return () => { cancelled = true }
   }, [curJobID])
 
@@ -310,6 +326,15 @@ export default function Drone() {
       <div className="absolute left-20px top-70px bottom-20px z-50 w-340px pointer-events-none">
         <div className="bg-[rgba(0,56,129,0.85)] h-full rounded-20px border border-[rgba(255,255,255,0.3)] px-4 py-3 overflow-y-auto pointer-events-auto">
           <div className="text-[#A0C7FF] text-16px font-bold mb-3">无人机机场</div>
+          {docksLoading && (
+            <div className="flex flex-col items-center justify-center gap-2 py-8 text-[#A8D6FF] text-12px">
+              <Spin size="small" />
+              <span>机场列表加载中…</span>
+            </div>
+          )}
+          {!docksLoading && !docks.length && (
+            <div className="text-[rgba(168,214,255,0.4)] text-11px py-2 text-center">暂无无人机机场</div>
+          )}
           {docks.map(item => (
             <div key={item.dockCode} className={`relative mb-3 rounded-xl border p-3 cursor-pointer transition-all ${dockCode === item.dockCode ? 'border-[#01C2FF] bg-[rgba(1,194,255,0.15)]' : 'border-[rgba(255,255,255,0.2)] bg-[rgba(0,0,0,0.2)] hover:bg-[rgba(255,255,255,0.05)]'}`} onClick={() => flyTo(item)}>
               <div className="flex items-center justify-between mb-1">
@@ -359,7 +384,8 @@ export default function Drone() {
           <div className="text-[#A0C7FF] text-16px font-bold py-2">飞行任务</div>
           <div className="flex-1 overflow-y-auto space-y-2 py-1">
             {!dockCode && <div className="text-[rgba(168,214,255,0.4)] text-11px py-2 text-center">请先在左侧选择无人机机场</div>}
-            {dockCode && jobs.length === 0 && <div className="text-[rgba(168,214,255,0.4)] text-11px py-2 text-center">暂无飞行任务</div>}
+            {dockCode && jobsLoading && <div className="flex items-center justify-center gap-2 py-2 text-[#A8D6FF] text-11px"><Spin size="small" />加载中…</div>}
+            {dockCode && !jobsLoading && jobs.length === 0 && <div className="text-[rgba(168,214,255,0.4)] text-11px py-2 text-center">暂无飞行任务</div>}
             {dockCode && jobs.map(item => (
               <div key={item.jobID} className="rounded-xl p-3 cursor-pointer transition-all bg-[rgba(0,0,0,0.2)] border border-[rgba(255,255,255,0.15)] hover:bg-[rgba(255,255,255,0.06)]" onClick={() => showJobResult(item.jobID)}>
                 <div className="flex items-center justify-between mb-1">
@@ -375,7 +401,8 @@ export default function Drone() {
           <div className="text-[#A0C7FF] text-16px font-bold py-2">待执飞任务</div>
           <div className="flex-1 overflow-y-auto space-y-2 py-1">
             {!dockCode && <div className="text-[rgba(168,214,255,0.4)] text-11px py-2 text-center">请先在左侧选择无人机机场</div>}
-            {dockCode && plans.length === 0 && <div className="text-[rgba(168,214,255,0.4)] text-11px py-2 text-center">暂无待执飞任务</div>}
+            {dockCode && plansLoading && <div className="flex items-center justify-center gap-2 py-2 text-[#A8D6FF] text-11px"><Spin size="small" />加载中…</div>}
+            {dockCode && !plansLoading && plans.length === 0 && <div className="text-[rgba(168,214,255,0.4)] text-11px py-2 text-center">暂无待执飞任务</div>}
             {dockCode && plans.map(item => (
               <div key={item.planId} className="rounded-xl p-3 transition-all bg-[rgba(0,0,0,0.2)] border border-[rgba(255,255,255,0.15)] hover:bg-[rgba(255,255,255,0.06)]">
                 <div className="flex items-center justify-between mb-1">
@@ -469,9 +496,9 @@ export default function Drone() {
         />
       )}
       {/* 飞行任务结果弹窗（原项目 ResModal：listFlyResult 图片/视频结果） */}
-      <Modal open={resVisible} onCancel={() => setResVisible(false)} footer={null} width={620} title={<span className="text-[#A8D6FF]">任务结果</span>}>
+      <Modal open={resVisible} onCancel={() => setResVisible(false)} footer={null} width={620} loading={resultsLoading} title={<span className="text-[#A8D6FF]">任务结果</span>}>
         <div className="max-h-68vh overflow-y-auto px-2 py-1">
-          {jobResults.length === 0 && <div className="py-8 text-center text-[rgba(0,0,0,0.45)]">暂无任务结果数据</div>}
+          {!resultsLoading && jobResults.length === 0 && <div className="py-8 text-center text-[rgba(0,0,0,0.45)]">暂无任务结果数据</div>}
           {jobResults.map(item => (
             <div key={item.resultsID} className="flex items-center justify-between py-2 border-b border-dashed border-[rgba(0,0,0,0.08)]">
               {item.resultsType === 'p'

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Button, Modal } from 'antd'
+import { Button, Modal, Spin } from 'antd'
 import { ExclamationCircleOutlined } from '@ant-design/icons'
 import { dockList, wrjPatrol } from '@/servers/mapBox'
 import { cities, districts } from '@/utils/city'
@@ -31,12 +31,14 @@ const mockDocks: DockItem[] = [
 export default function FlyListModel({ visible, setVisible, curCity, curDistrict, lngLat }: FlyListModelProps) {
   const querySelection = useAppStore(state => state.regionContext?.querySelection)
   const [docks, setDocks] = useState<DockItem[]>([])
+  const [loading, setLoading] = useState(false)
   const [modal, contextHolder] = Modal.useModal()
 
   useEffect(() => {
     const loadDocks = async () => {
       const cityName = cities.find(_ => `${_.adcode}` === curCity)?.name || ''
       const districtName = districts.find(_ => `${_.adcode}` === curDistrict)?.name || ''
+      setLoading(true)
       try {
         const res = await dockList(querySelection
           ? toRegionQuery(querySelection)
@@ -49,7 +51,7 @@ export default function FlyListModel({ visible, setVisible, curCity, curDistrict
       setDocks(mockDocks)
     }
 
-    void loadDocks()
+    void loadDocks().finally(() => setLoading(false))
   }, [curCity, curDistrict, querySelection])
 
   const showConfirm = (dockName: string, dockCode: string) => {
@@ -60,7 +62,7 @@ export default function FlyListModel({ visible, setVisible, curCity, curDistrict
       content: `您将派遣无人机：[${dockName}]，前往地址：[${lngLat.lng}, ${lngLat.lat}]，请再次确认`,
       okText: '确认',
       cancelText: '取消',
-      onOk() { patrol(inData) },
+      onOk: () => patrol(inData),
     })
   }
 
@@ -86,7 +88,13 @@ export default function FlyListModel({ visible, setVisible, curCity, curDistrict
       footer={null}
     >
       <div className="flex-col w-full c-#A8D6FF">
-        {docks.map(item => (
+        {loading && (
+          <div className="flex flex-col items-center justify-center gap-2 py-6 c-#8aa8c8">
+            <Spin size="small" />
+            <span>机场列表加载中…</span>
+          </div>
+        )}
+        {!loading && docks.map(item => (
           <div key={item.dockCode} className="line-height-30px w-full inline-flex items-center justify-between py-1">
             <div className="inline-flex items-center line-height-26px">
               <div className="mr-4px">{item.dockName}</div>
@@ -94,7 +102,7 @@ export default function FlyListModel({ visible, setVisible, curCity, curDistrict
             <Button size="small" onClick={() => showConfirm(item.dockName, item.dockCode)}>选择</Button>
           </div>
         ))}
-        {docks.length === 0 && <div className="w-full text-align-center line-height-60px color-#999">暂无数据</div>}
+        {!loading && docks.length === 0 && <div className="w-full text-align-center line-height-60px color-#999">暂无数据</div>}
       </div>
       {contextHolder}
     </Modal>

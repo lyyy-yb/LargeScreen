@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Button, Table, Modal, Form, Input, Select, Radio, InputNumber, Switch, Tag, Space, DatePicker, App } from 'antd'
+import { Button, Table, Modal, Form, Input, Select, Radio, InputNumber, Switch, Tag, Space, DatePicker, Image, App } from 'antd'
 import { PlusOutlined, EditOutlined, EyeOutlined, AlertFilled, ArrowLeftOutlined, DeleteOutlined, SendOutlined, SearchOutlined, CheckCircleOutlined, CopyOutlined, DownloadOutlined, ImportOutlined, ExportOutlined, RollbackOutlined } from '@ant-design/icons'
 import RegionSelector from '@/components/RegionSelector'
 import './index.less'
@@ -154,9 +154,17 @@ export default function AlertPage() {
   const [tasks, setTasks] = useState<DisposalTask[]>([])
   const [loading, setLoading] = useState(false)
   const [isRuleModalVisible, setIsRuleModalVisible] = useState(false)
+  const [ruleSaving, setRuleSaving] = useState(false)
+  const [templateDownloading, setTemplateDownloading] = useState(false)
+  const [exportLoading, setExportLoading] = useState(false)
   const [isAlertModalVisible, setIsAlertModalVisible] = useState(false)
   const [isTaskModalVisible, setIsTaskModalVisible] = useState(false)
   const [isDisposalModalVisible, setIsDisposalModalVisible] = useState(false)
+  // 提交处置结果弹窗（处置中 → 已提交，走 disposalTask edit 接口）
+  const [isCommitModalVisible, setIsCommitModalVisible] = useState(false)
+  const [commitTask, setCommitTask] = useState<DisposalTask | null>(null)
+  const [commitSubmitting, setCommitSubmitting] = useState(false)
+  const [commitForm] = Form.useForm()
   const [selectedAlert, setSelectedAlert] = useState<AlertEvent | null>(null)
   const [selectedTask, setSelectedTask] = useState<DisposalTask | null>(null)
   const [editingRule, setEditingRule] = useState<AlertRule | null>(null)
@@ -665,6 +673,7 @@ export default function AlertPage() {
         targetTownId: townValue,
       }
       try {
+        setRuleSaving(true)
         if (editingRule) await warningRuleApi.edit({ ...payload, id: Number(editingRule.id) })
         else await warningRuleApi.add(payload)
         setIsRuleModalVisible(false)
@@ -673,6 +682,8 @@ export default function AlertPage() {
         await loadRules()
       } catch {
         message.error('规则保存失败')
+      } finally {
+        setRuleSaving(false)
       }
     })
   }
@@ -721,6 +732,7 @@ export default function AlertPage() {
   }
 
   const handleDownloadTemplate = async () => {
+    setTemplateDownloading(true)
     try {
       const res = await warningRuleApi.importTemplate()
       const blob = res as unknown as Blob
@@ -728,10 +740,13 @@ export default function AlertPage() {
       downloadBlob(blob, '预警规则导入模板.xlsx')
     } catch {
       message.error('模板下载失败')
+    } finally {
+      setTemplateDownloading(false)
     }
   }
 
   const handleExportRules = async () => {
+    setExportLoading(true)
     try {
       const params: WarningRuleExportQuery = {
         ruleName: ruleAppliedName || undefined,
@@ -746,6 +761,8 @@ export default function AlertPage() {
       downloadBlob(blob, `预警规则_${dayjs().format('YYYYMMDDHHmmss')}.xlsx`)
     } catch {
       message.error('导出失败')
+    } finally {
+      setExportLoading(false)
     }
   }
 
@@ -854,6 +871,85 @@ export default function AlertPage() {
       },
     })
   }
+  // 任务确认完成（仅已提交状态，与预警表格公用 alertEvent/review 接口，后端联动预警关闭+任务完成）
+  const confirmTask = (alertId: string) => {
+    modal.confirm({
+      className: 'dark-confirm-modal',
+      title: '确认完成',
+      content: '确定确认该处置任务已完成？',
+      onOk: async () => {
+        try {
+          await alertEventApi.review({ alertId: Number(alertId), action: 'confirm' })
+          message.success('已确认完成')
+          await loadTasks()
+        } catch {
+          message.error('任务确认失败')
+        }
+      },
+    })
+  }
+  // 任务退回重办（仅已提交状态，与预警表格公用 alertEvent/review 接口，后端联动预警退回处置中+任务退回执行中）
+  const returnTask = (alertId: string) => {
+    modal.confirm({
+      className: 'dark-confirm-modal',
+      title: '确认退回',
+      content: '确定将该处置任务退回重办？',
+      onOk: async () => {
+        try {
+          await alertEventApi.review({ alertId: Number(alertId), action: 'return' })
+          message.success('已退回重办')
+          await loadTasks()
+        } catch {
+          message.error('任务退回失败')
+        }
+      },
+    })
+  }
+  // 提交处置结果（处置中 → 已提交）
+  const showCommitModal = (task: DisposalTask) => {
+    setCommitTask(task)
+    commitForm.resetFields()
+    commitForm.setFieldsValue({ completedAt: dayjs() })
+    setIsCommitModalVisible(true)
+  }
+  const handleCommitOk = () => {
+    commitForm.validateFields().then(async values => {
+      if (!commitTask) return
+      setCommitSubmitting(true)
+      try {
+        await disposalTaskApi.edit({
+          id: Number(commitTask.id),
+          alertId: Number(commitTask.alertId),
+          dataType: commitTask.dataType,
+          taskType: commitTask.taskType,
+          status: 'committed',
+          assigneeName: commitTask.assigneeName,
+          requesterName: commitTask.requesterName,
+          requireTime: commitTask.requireTime,
+          disposalContent: values.disposalContent,
+          photos: commitTask.photos,
+          completedAt: values.completedAt?.format('YYYY-MM-DD HH:mm:ss'),
+          cityId: commitTask.cityId,
+          districtId: commitTask.districtId,
+          townId: commitTask.townId,
+        })
+        message.success('处置结果已提交')
+        setIsCommitModalVisible(false)
+        await loadTasks()
+      } catch {
+        message.error('处置结果提交失败')
+      } finally {
+        setCommitSubmitting(false)
+      }
+    }).catch(() => { /* 表单校验失败，由表单项自行提示 */ })
+  }
+  /** 任务区域名称（部门树反查，市/区县/乡镇拼接） */
+  const taskRegionOf = (task: DisposalTask) => {
+    return [deptNameOf(task.cityId), deptNameOf(task.districtId), deptNameOf(task.townId)].filter(Boolean).join(' / ') || '—'
+  }
+  const taskStatusText = (status: string) => (
+    { pending: '待接收', processing: '处置中', committed: '已提交', completed: '已完成' } as Record<string, string>
+  )[status] ?? status
   const dispatchToTown = (task: DisposalTask) => {
     const availableTownOptions = selection?.townName
       ? [{ value: selection.townName, label: selection.townName }]
@@ -1083,11 +1179,11 @@ export default function AlertPage() {
       render: (t: string) => {
         const m: Record<string, { l: string; c: string }> = {
           pending: { l: '待接收', c: 'orange' },
-          received: { l: '已接收', c: 'blue' },
           processing: { l: '处置中', c: 'blue' },
+          committed: { l: '已提交', c: 'cyan' },
           completed: { l: '已完成', c: 'green' },
         }
-        return <Tag color={m[t]?.c}>{m[t]?.l}</Tag>
+        return <Tag color={m[t]?.c ?? 'default'}>{m[t]?.l ?? t}</Tag>
       },
     },
     { title: '处置人', dataIndex: 'assigneeName', width: 80, render: (t: string) => t || '未分配' },
@@ -1098,14 +1194,22 @@ export default function AlertPage() {
       render: (_: unknown, r: DisposalTask) => (
         <div className="flex items-center gap-1">
           <Button type="link" size="small" icon={<EyeOutlined />} className="!text-[#03FBFD] hover:!text-white !p-0" onClick={() => { setSelectedTask(r); setIsTaskModalVisible(true); disposalTaskApi.detail(Number(r.id)).then(res => { if (res.data) setSelectedTask(toDisposalTask(res.data)) }).catch(() => {}) }}>详情</Button>
-          {!isTown && r.status === 'pending' && <Button type="link" size="small" icon={<CheckCircleOutlined />} className="!text-[#52C41A] hover:!text-green-300 !p-0" onClick={() => updateTaskStatus(r.id, 'received')}>接收</Button>}
-          {!isTown && r.status === 'received' && (
+          {!isTown && r.status === 'pending' && (
+            <Button type="link" size="small" icon={<CheckCircleOutlined />} className="!text-[#52C41A] hover:!text-green-300 !p-0" onClick={() => updateTaskStatus(r.id, 'processing')}>接收</Button>
+          )}
+          {!isTown && r.status === 'processing' && (
             <>
-              <Button type="link" size="small" icon={<EditOutlined />} className="!text-[#1890FF] hover:!text-blue-300 !p-0" onClick={() => updateTaskStatus(r.id, 'processing')}>处置</Button>
+              <Button type="link" size="small" icon={<EditOutlined />} className="!text-[#1890FF] hover:!text-blue-300 !p-0" onClick={() => showCommitModal(r)}>处置</Button>
               <Button type="link" size="small" icon={<SendOutlined />} className="!text-[#FA8C16] hover:!text-orange-300 !p-0" onClick={() => dispatchToTown(r)}>下派</Button>
             </>
           )}
-          {r.status === 'completed' && r.disposalContent && (
+          {!isTown && r.status === 'committed' && (
+            <>
+              <Button type="link" size="small" icon={<CheckCircleOutlined />} className="!text-[#52C41A] hover:!text-green-300 !p-0" onClick={() => confirmTask(r.alertId)}>确认</Button>
+              <Button type="link" size="small" icon={<RollbackOutlined />} className="!text-[#FA8C16] hover:!text-orange-300 !p-0" onClick={() => returnTask(r.alertId)}>退回</Button>
+            </>
+          )}
+          {(r.status === 'committed' || r.status === 'completed') && r.disposalContent && (
             <Button type="link" size="small" icon={<EyeOutlined />} className="!text-[#03FBFD] hover:!text-white !p-0" onClick={() => { setSelectedTask(r); setIsDisposalModalVisible(true) }}>查看</Button>
           )}
           {!isTown && r.status === 'completed' && (
@@ -1197,9 +1301,9 @@ export default function AlertPage() {
         <div className="header-right-btn">
           {activeTab === 'rules' && !isTown && (
             <div className="flex items-center gap-2">
-              <Button icon={<DownloadOutlined />} onClick={() => void handleDownloadTemplate()}>模板下载</Button>
+              <Button icon={<DownloadOutlined />} loading={templateDownloading} onClick={() => void handleDownloadTemplate()}>模板下载</Button>
               <Button icon={<ImportOutlined />} loading={ruleImporting} onClick={() => ruleImportInputRef.current?.click()}>导入</Button>
-              <Button icon={<ExportOutlined />} onClick={() => void handleExportRules()}>导出</Button>
+              <Button icon={<ExportOutlined />} loading={exportLoading} onClick={() => void handleExportRules()}>导出</Button>
               <Button
                 type="primary"
                 icon={<PlusOutlined />}
@@ -1368,8 +1472,8 @@ export default function AlertPage() {
               onChange={v => { setTaskFilterStatus(v); setTasksPage(1) }}
               options={[
                 { value: 'pending', label: '待接收' },
-                { value: 'received', label: '已接收' },
                 { value: 'processing', label: '处置中' },
+                { value: 'committed', label: '已提交' },
                 { value: 'completed', label: '已完成' },
               ]}
               allowClear
@@ -1480,7 +1584,7 @@ export default function AlertPage() {
           ? <Button onClick={() => { setIsRuleModalVisible(false); form.resetFields() }}>关闭</Button>
           : [
               <Button key="cancel" onClick={() => { setIsRuleModalVisible(false); form.resetFields() }}>取消</Button>,
-              <Button key="ok" type="primary" onClick={handleRuleOk}>确定</Button>,
+              <Button key="ok" type="primary" loading={ruleSaving} onClick={handleRuleOk}>确定</Button>,
             ]}
       >
         <Form
@@ -1772,8 +1876,20 @@ export default function AlertPage() {
       <Modal title={<span className="text-[#03FBFD] font-bold">任务详情</span>} open={isTaskModalVisible} onCancel={() => setIsTaskModalVisible(false)} width={550} footer={null} styles={{ body: { padding: '20px 24px' } }}>
         {selectedTask && (
           <div className="space-y-2 p-3 rounded" style={{ backgroundColor: 'rgba(3,251,253,0.05)', border: '1px solid rgba(3,251,253,0.15)' }}>
-            {[['任务ID', selectedTask.id], ['关联预警', selectedTask.alertId], ['类型', taskTypeOptions.find(o => o.value === selectedTask.taskType)?.label || ''], ['处置人', selectedTask.assigneeName || '未分配'], ['派发人', selectedTask.requesterName], ['要求时间', selectedTask.requireTime]].map(([k, v]) => (
-              <div key={k} className="flex justify-between"><span className="text-[#03FBFD]">{k}</span><span className="text-white/75">{v}</span></div>
+            {[
+              ['任务ID', selectedTask.id],
+              ['关联预警', selectedTask.alertId],
+              ['接入类型', dataTypeOptions.find(o => o.value === selectedTask.dataType)?.label || selectedTask.dataType],
+              ['任务类型', taskTypeOptions.find(o => o.value === selectedTask.taskType)?.label || ''],
+              ['状态', taskStatusText(selectedTask.status)],
+              ['处置人', selectedTask.assigneeName || '未分配'],
+              ['派发人', selectedTask.requesterName],
+              ['所属区域', taskRegionOf(selectedTask)],
+              ['要求时间', selectedTask.requireTime],
+              ['创建时间', selectedTask.createdAt],
+              ...(selectedTask.completedAt ? [['完成时间', selectedTask.completedAt]] : []),
+            ].map(([k, v]) => (
+              <div key={k} className="flex justify-between"><span className="text-[#03FBFD]">{k}</span><span className="text-white/75 text-right max-w-[62%]">{v}</span></div>
             ))}
             {selectedTask.disposalContent && (
               <div className="mt-2 pt-2" style={{ borderTop: '1px solid rgba(3,251,253,0.15)' }}>
@@ -1793,14 +1909,18 @@ export default function AlertPage() {
               <span className="text-[#03FBFD] block mb-2">处置内容</span>
               <div className="p-3 rounded text-white/75" style={{ backgroundColor: 'rgba(0,0,0,0.2)', border: '1px solid rgba(3,251,253,0.15)' }}>{selectedTask.disposalContent}</div>
             </div>
-            {selectedTask.photos && (
+            {selectedTask.photos && selectedTask.photos.length > 0 && (
               <div>
                 <span className="text-[#03FBFD] block mb-2">现场照片</span>
-                <div className="flex gap-3">
-                  {selectedTask.photos.map((_, i) => (
-                    <div key={i} className="w-20 h-20 rounded flex items-center justify-center border text-white/50" style={{ backgroundColor: 'rgba(0,0,0,0.15)', borderColor: 'rgba(3,251,253,0.2)' }}>
-                      <SearchOutlined className="text-xl" />
-                    </div>
+                <div className="flex gap-3 flex-wrap">
+                  {selectedTask.photos.map((url, i) => (
+                    <Image
+                      key={i}
+                      src={url}
+                      width={80}
+                      height={80}
+                      style={{ objectFit: 'cover', borderRadius: 4, border: '1px solid rgba(3,251,253,0.2)' }}
+                    />
                   ))}
                 </div>
               </div>
@@ -1813,6 +1933,38 @@ export default function AlertPage() {
             )}
           </div>
         )}
+      </Modal>
+
+      {/* 提交处置结果 Modal（处置中 → 已提交） */}
+      <Modal
+        title={<span className="alert-rule-modal-title">提交处置结果</span>}
+        open={isCommitModalVisible}
+        onCancel={() => setIsCommitModalVisible(false)}
+        width={560}
+        className="alert-rule-modal"
+        footer={[
+          <Button key="cancel" onClick={() => setIsCommitModalVisible(false)}>取消</Button>,
+          <Button key="ok" type="primary" loading={commitSubmitting} onClick={handleCommitOk}>提交</Button>,
+        ]}
+      >
+        <Form
+          form={commitForm}
+          layout="horizontal"
+          labelCol={{ style: { width: 90, textAlign: 'right', color: '#03FBFD', paddingRight: 10 } }}
+          className="alert-rule-form pt-2"
+        >
+          <Form.Item label="处置内容" name="disposalContent" rules={[{ required: true, message: '请输入处置内容' }]}>
+            <Input.TextArea className="model_from_input" rows={3} placeholder="请输入处置过程与结果说明" />
+          </Form.Item>
+          <Form.Item label="完成时间" name="completedAt" rules={[{ required: true, message: '请选择完成时间' }]}>
+            <DatePicker
+              className="model_from_input w-full"
+              showTime
+              format="YYYY-MM-DD HH:mm:ss"
+              placeholder="请选择完成时间"
+            />
+          </Form.Item>
+        </Form>
       </Modal>
     </div>
   )

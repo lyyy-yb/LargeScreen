@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Button, Select, Modal, Popover, QRCode, message } from 'antd'
+import { Button, Select, Modal, Popover, QRCode, Spin, message } from 'antd'
 import { ArrowLeftOutlined, EnvironmentOutlined, ExclamationCircleOutlined, InboxOutlined, SendOutlined, WarningFilled } from '@ant-design/icons'
 import L7MapView from '@/components/L7MapView'
 import FlyListModel from '@/components/MapBox/FlyListModel'
@@ -27,6 +27,7 @@ interface AlarmPointPanelProps {
   subtitle: string
   items: AlarmItem[]
   urgent?: boolean
+  loading?: boolean
   onLocate: (item: AlarmItem) => void
   onShare: (item: AlarmItem) => void
   dispatchContent: (item: AlarmItem) => React.ReactNode
@@ -38,6 +39,7 @@ function AlarmPointPanel({
   subtitle,
   items,
   urgent = false,
+  loading = false,
   onLocate,
   onShare,
   dispatchContent,
@@ -64,7 +66,13 @@ function AlarmPointPanel({
         <span className="min-w-26px h-22px px-2 rounded-full flex items-center justify-center text-11px font-mono font-700" style={{ color: accent, background: `${accent}1f`, border: `1px solid ${accent}55` }}>{items.length}</span>
       </header>
       <div className="flex-1 min-h-0 overflow-y-auto pointer-events-auto space-y-1.5 pt-1 pr-0.5">
-        {items.map((item, idx) => (
+        {loading && (
+          <div className="flex flex-col items-center justify-center gap-1.5 py-6 text-[#c5e5ff]/60 text-11px">
+            <Spin size="small" />
+            <span>点位数据加载中…</span>
+          </div>
+        )}
+        {!loading && items.map((item, idx) => (
           <article
             key={`${item.address}-${idx}`}
             className="rounded-10px border border-[rgba(133,213,255,0.16)] px-2.5 py-2 bg-[rgba(17,91,167,0.52)] hover:bg-[rgba(27,112,191,0.68)] hover:border-[rgba(116,226,255,0.42)] transition-all"
@@ -103,12 +111,15 @@ export default function Radar() {
   const [modal, contextHolder] = Modal.useModal()
   const [tfList, setTfList] = useState<AlarmItem[]>([])
   const [cgList, setCgList] = useState<AlarmItem[]>([])
+  const [alarmLoading, setAlarmLoading] = useState(false)
   const [pollutionList, setPollutionList] = useState<PollutionItem[]>([])
+  const [pollutionLoading, setPollutionLoading] = useState(false)
   // 污染源类型筛选（与原项目一致：options4leixing 接口动态获取）
   const [leixingFilters, setLeixingFilters] = useState<{ value: string; label: string }[]>([{ value: '', label: '全部' }])
   const [docks, setDocks] = useState(mockDocks)
   // 雷达列表与当前选中雷达（借鉴原项目：进页查雷达列表并自动飞到雷达位置）
   const [radarList, setRadarList] = useState<RadarStation[]>([])
+  const [radarLoading, setRadarLoading] = useState(false)
   const [selectedBsiId, setSelectedBsiId] = useState('')
   const [sceneReady, setSceneReady] = useState(false)
   const sceneRef = useRef<Scene | null>(null)
@@ -156,6 +167,9 @@ export default function Radar() {
     if (!radar || !Number.isFinite(radar.bsiLng) || !Number.isFinite(radar.bsiLat)) return
     let cancelled = false
     const regionParams = querySelection ? toRegionQuery(querySelection) : {}
+    // 标准的列表数据拉取模式，忽略 set-state-in-effect 规则
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setPollutionLoading(true)
     wuranListByLngLat({ ...regionParams, lat: radar.bsiLat, lng: radar.bsiLng, leixing: filterLeixing, type: '0' })
       .then(res => {
         if (cancelled) return
@@ -175,6 +189,7 @@ export default function Radar() {
         console.warn('附近污染源查询失败', e)
         setPollutionList([])
       })
+      .finally(() => { if (!cancelled) setPollutionLoading(false) })
     return () => { cancelled = true }
   }, [radarList, selectedBsiId, querySelection, filterLeixing])
 
@@ -182,6 +197,9 @@ export default function Radar() {
   useEffect(() => {
     let cancelled = false
     const params = querySelection ? toRegionQuery(querySelection) : {}
+    // 标准的列表数据拉取模式，忽略 set-state-in-effect 规则
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setRadarLoading(true)
     leidaList(params)
       .then(res => {
         if (cancelled) return
@@ -194,6 +212,7 @@ export default function Radar() {
         if (!list.length) setPollutionList([])
       })
       .catch(e => console.warn('雷达列表查询失败', e))
+      .finally(() => { if (!cancelled) setRadarLoading(false) })
     return () => { cancelled = true }
   }, [querySelection])
 
@@ -207,6 +226,7 @@ export default function Radar() {
         return
       }
       try {
+        setAlarmLoading(true)
         const res = await alarmPointAll({ BsiId: selectedBsiId, hour: 24 })
         if (cancelled) return
         const data: AlarmItem[] = res?.resultCode === 0 && Array.isArray(res.data) ? res.data : []
@@ -222,6 +242,8 @@ export default function Radar() {
         if (cancelled) return
         setCgList([])
         setTfList([])
+      } finally {
+        if (!cancelled) setAlarmLoading(false)
       }
     }
     void loadAlarm()
@@ -405,6 +427,7 @@ export default function Radar() {
           onChange={(value: string) => setSelectedBsiId(value)}
           placeholder="全部雷达"
           allowClear
+          loading={radarLoading}
           className="w-150px screen-select"
           classNames={{ popup: { root: 'screen-select-popup' } }}
           size="small"
@@ -418,6 +441,7 @@ export default function Radar() {
           subtitle="高频异常点位，建议优先处置"
           items={tfList}
           urgent
+          loading={alarmLoading}
           onLocate={flyTo}
           onShare={showWX}
           dispatchContent={showContent}
@@ -427,6 +451,7 @@ export default function Radar() {
           title="常规点位"
           subtitle="持续关注的例行监测点位"
           items={cgList}
+          loading={alarmLoading}
           onLocate={flyTo}
           onShare={showWX}
           dispatchContent={showContent}
@@ -444,7 +469,13 @@ export default function Radar() {
             <Select value={filterLeixing} onChange={setFilterLeixing} className="w-100px pointer-events-auto screen-select" classNames={{ popup: { root: 'screen-select-popup' } }} size="small" options={leixingFilters} />
           </div>
           <div className="flex-1 min-h-0 overflow-y-auto pointer-events-auto py-1 space-y-2 pr-0.5">
-            {pollutionList.length === 0 && (
+            {pollutionLoading && (
+              <div className="h-full flex flex-col items-center justify-center gap-2 text-[#c5e5ff]/50">
+                <Spin size="small" />
+                <span className="text-12px">附近污染源加载中…</span>
+              </div>
+            )}
+            {!pollutionLoading && pollutionList.length === 0 && (
               <div className="h-full flex flex-col items-center justify-center gap-2 text-[#c5e5ff]/50">
                 <InboxOutlined className="text-28px" />
                 <span className="text-12px">当前雷达附近暂无污染源数据</span>

@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Button, Select, Tag, message } from 'antd'
+import { Button, Select, Tag, Spin, message } from 'antd'
 import { ArrowLeftOutlined, CarOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { Scene, HeatmapLayer, Source } from '@antv/l7'
@@ -49,12 +49,18 @@ export default function Patrol() {
   // 历史任务日期列表（原项目 taskList 返回 string[]）与走航轨迹明细（taskDetail）
   const [taskDates, setTaskDates] = useState<string[]>([])
   const [detailData, setDetailData] = useState<Record<string, unknown>[]>([])
+  const [carsLoading, setCarsLoading] = useState(true)
+  const [tasksLoading, setTasksLoading] = useState(false)
+  const [loadingDate, setLoadingDate] = useState<string | null>(null)
   const sceneRef = useRef<Scene | null>(null)
   const heatLayerRef = useRef<ILayer | null>(null)
 
   // 走航车辆列表（原项目 leftBars：zouhangList，默认选中第一辆车）
   useEffect(() => {
     let cancelled = false
+    // 标准的列表数据拉取模式，忽略 set-state-in-effect 规则
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setCarsLoading(true)
     zouhangList()
       .then(res => {
         if (cancelled) return
@@ -71,6 +77,7 @@ export default function Patrol() {
         setCars(mockCars)
         setCurCarCode(mockCars[0].mnCode)
       })
+      .finally(() => { if (!cancelled) setCarsLoading(false) })
     return () => { cancelled = true }
   }, [])
 
@@ -78,6 +85,9 @@ export default function Patrol() {
   useEffect(() => {
     if (!curCarCode) return
     let cancelled = false
+    // 标准的列表数据拉取模式，忽略 set-state-in-effect 规则
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setTasksLoading(true)
     zouhangTaskList({
       startDate: dayjs().startOf('year').format('YYYY-MM-DD'),
       endDate: dayjs().format('YYYY-MM-DD'),
@@ -87,6 +97,7 @@ export default function Patrol() {
         if (!cancelled) setTaskDates(res?.resultCode === 0 && Array.isArray(res.data) ? res.data : [])
       })
       .catch(() => { if (!cancelled) setTaskDates([]) })
+      .finally(() => { if (!cancelled) setTasksLoading(false) })
     return () => { cancelled = true }
   }, [curCarCode])
 
@@ -103,6 +114,8 @@ export default function Patrol() {
 
   // 点击历史任务 → taskDetail 查走航轨迹明细（原项目 showDetailToMap）
   const showDetailToMap = async (taskDate: string) => {
+    if (loadingDate) return
+    setLoadingDate(taskDate)
     try {
       const res = await taskDetail({ taskDate, mnCode: curCarCode })
       if (res?.resultCode === 0 && Array.isArray(res.data)) {
@@ -118,6 +131,8 @@ export default function Patrol() {
       }
     } catch {
       message.error('走航任务明细查询失败')
+    } finally {
+      setLoadingDate(null)
     }
   }
 
@@ -183,6 +198,12 @@ export default function Patrol() {
       <div className="absolute left-20px top-70px bottom-20px z-50 w-320px pointer-events-none">
         <div className="bg-[rgba(0,56,129,0.85)] h-full rounded-20px border border-[rgba(255,255,255,0.3)] px-4 py-3 overflow-y-auto pointer-events-auto">
           <div className="text-[#A0C7FF] text-16px font-bold mb-3">走航车辆</div>
+          {carsLoading && (
+            <div className="flex flex-col items-center justify-center gap-2 py-6 text-[#A8D6FF] text-12px">
+              <Spin size="small" />
+              <span>车辆列表加载中…</span>
+            </div>
+          )}
           {cars.map(item => (
             <div key={item.id ?? item.mnCode} className={`relative mb-3 rounded-xl border p-3 cursor-pointer transition-all ${curCarCode === item.mnCode ? 'border-[#01C2FF] bg-[rgba(1,194,255,0.15)]' : 'border-[rgba(255,255,255,0.2)] bg-[rgba(0,0,0,0.2)] hover:bg-[rgba(255,255,255,0.05)]'}`} onClick={() => handleSelectCar(item.mnCode)}>
               <div className="flex items-center justify-between mb-1">
@@ -204,10 +225,11 @@ export default function Patrol() {
         <div className="bg-[rgba(0,56,129,0.85)] h-full rounded-20px border border-[rgba(255,255,255,0.3)] px-3 py-2 flex flex-col pointer-events-auto">
           <div className="text-[#A0C7FF] text-16px font-bold py-2">历史任务</div>
           <div className="flex-1 overflow-y-auto space-y-2 py-1">
-            {taskDates.length === 0 && <div className="text-[rgba(168,214,255,0.4)] text-11px py-2 text-center">暂无历史任务</div>}
+            {tasksLoading && <div className="flex items-center justify-center gap-2 py-2 text-[#A8D6FF] text-11px"><Spin size="small" />加载中…</div>}
+            {!tasksLoading && taskDates.length === 0 && <div className="text-[rgba(168,214,255,0.4)] text-11px py-2 text-center">暂无历史任务</div>}
             {!!curCarCode && taskDates.map(date => (
               <div key={date} className="rounded-xl p-3 cursor-pointer transition-all bg-[rgba(0,0,0,0.2)] border border-[rgba(255,255,255,0.15)] hover:bg-[rgba(255,255,255,0.06)]" onClick={() => showDetailToMap(date)}>
-                <div className="text-[#A8D6FF] text-13px">{date} 走航</div>
+                <div className="text-[#A8D6FF] text-13px flex items-center gap-1.5">{date} 走航{loadingDate === date && <Spin size="small" />}</div>
                 <div className="text-[rgba(168,214,255,0.5)] text-11px mt-1">车辆: {curCarCode}</div>
               </div>
             ))}

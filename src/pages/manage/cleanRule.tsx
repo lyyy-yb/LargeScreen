@@ -152,6 +152,8 @@ export default function CleanRule() {
   }
   const [isModalVisible, setIsModalVisible] = useState(false)
   const [isDetailModalVisible, setIsDetailModalVisible] = useState(false)
+  const [detailLoading, setDetailLoading] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
   const [editingItem, setEditingItem] = useState<CleanRule | null>(null)
   const [form] = Form.useForm()
   const [selectedDataType, setSelectedDataType] = useState<string>('')
@@ -180,6 +182,7 @@ export default function CleanRule() {
   const showDetailModal = async (record: CleanRule) => {
     setEditingItem(record)
     setIsDetailModalVisible(true)
+    setDetailLoading(true)
     try {
       const res = await cleanRuleApi.detail(Number(record.id))
       if (res.data) {
@@ -190,11 +193,14 @@ export default function CleanRule() {
           config: parseConfig(res.data.config),
         })
       }
-    } catch { /* 详情获取失败时保留表格行数据 */ }
+    } catch { /* 详情获取失败时保留表格行数据 */ } finally {
+      setDetailLoading(false)
+    }
   }
 
   const handleOk = () => {
     form.validateFields().then(async (values) => {
+      setSubmitting(true)
       try {
         const config: Record<string, unknown> = {}
         if (values.ruleType === 'range') {
@@ -222,6 +228,8 @@ export default function CleanRule() {
         loadList()
       } catch {
         message.error('保存失败，请重试')
+      } finally {
+        setSubmitting(false)
       }
     }).catch(() => {})
   }
@@ -389,7 +397,7 @@ export default function CleanRule() {
         className="alert-rule-modal"
         footer={[
           <Button key="cancel" onClick={() => { setIsModalVisible(false); form.resetFields() }}>取消</Button>,
-          <Button key="ok" type="primary" onClick={handleOk}>确定</Button>,
+          <Button key="ok" type="primary" loading={submitting} onClick={handleOk}>确定</Button>,
         ]}
       >
         <Form
@@ -468,6 +476,7 @@ export default function CleanRule() {
         onCancel={() => setIsDetailModalVisible(false)}
         footer={null}
         width={550}
+        loading={detailLoading}
         className="alert-rule-modal"
       >
         {editingItem && (

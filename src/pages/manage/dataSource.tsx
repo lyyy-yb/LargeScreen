@@ -68,6 +68,8 @@ export default function DataSource() {
   const [filterConnStatus, setFilterConnStatus] = useState<string | undefined>(undefined)
   const [filterEnabled, setFilterEnabled] = useState<0 | 1 | undefined>(undefined)
   const [extraDepts, setExtraDepts] = useState<DeptInfo[]>([])
+  const [submitting, setSubmitting] = useState(false)
+  const [detailLoading, setDetailLoading] = useState(false)
   const loadingDeptParentIds = useRef(new Set<number>())
   const deptListLoaded = useRef(false)
   const [form] = Form.useForm()
@@ -310,10 +312,13 @@ export default function DataSource() {
   const showDetailModal = async (record: DataSourceDTO) => {
     setEditingItem(record)
     setIsDetailModalVisible(true)
+    setDetailLoading(true)
     try {
       const res = await dataSourceApi.detail(record.id)
       if (res.data) setEditingItem(res.data)
-    } catch { /* 详情获取失败时保留表格行数据 */ }
+    } catch { /* 详情获取失败时保留表格行数据 */ } finally {
+      setDetailLoading(false)
+    }
   }
 
   const handleOk = () => {
@@ -328,6 +333,7 @@ export default function DataSource() {
       }
       // 归属部门取最深一级已选区域
       const deptId = regionPayload.townId || regionPayload.districtId || regionPayload.cityId
+      setSubmitting(true)
       try {
         if (editingItem) {
           await dataSourceApi.edit({ ...editingItem, ...values, ...regionPayload, deptId })
@@ -341,6 +347,8 @@ export default function DataSource() {
         fetchData()
       } catch {
         message.error(editingItem ? '编辑失败' : '新增失败')
+      } finally {
+        setSubmitting(false)
       }
     })
   }
@@ -545,7 +553,7 @@ export default function DataSource() {
         className="alert-rule-modal"
         footer={[
           <Button key="cancel" onClick={() => { setIsModalVisible(false); form.resetFields() }}>取消</Button>,
-          <Button key="ok" type="primary" onClick={handleOk}>确定</Button>,
+          <Button key="ok" type="primary" loading={submitting} onClick={handleOk}>确定</Button>,
         ]}
       >
         <Form
@@ -644,6 +652,7 @@ export default function DataSource() {
         onCancel={() => setIsDetailModalVisible(false)}
         footer={null}
         width={550}
+        loading={detailLoading}
         className="alert-rule-modal"
       >
         {editingItem && (

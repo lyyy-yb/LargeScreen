@@ -140,7 +140,8 @@ export interface DisposalTaskDTO {
   alertId: number
   dataType: string
   taskType: string
-  status: 'pending' | 'received' | 'processing' | 'completed'
+  /** 状态：pending-待接收 processing-处置中 committed-已提交 completed-已完成（received 已废弃） */
+  status: 'pending' | 'processing' | 'committed' | 'completed'
   assigneeId?: number
   assigneeName?: string
   requesterId?: number

@@ -41,9 +41,12 @@ export default function Pollution() {
   const querySelection = regionContext?.querySelection
   const roleLevel = regionContext?.roleLevel
   const [data, setData] = useState<PollutionItem[]>([])
+  const [loading, setLoading] = useState(false)
+  const [submitting, setSubmitting] = useState(false)
 
   const loadList = useCallback(async () => {
     if (!querySelection) return
+    setLoading(true)
     try {
       const res = await wuranyuanPage({ pageNo: 1, pageSize: 999, ...toRegionQuery(querySelection) })
       if (res?.resultCode === 0 || res?.code === 200) {
@@ -53,6 +56,8 @@ export default function Pollution() {
       }
     } catch {
       /* 接口异常时降级到本地 mock 数据 */
+    } finally {
+      setLoading(false)
     }
     const normalize = (value: string) => value.replace(/[市区县]$/, '')
     setData(mockData.filter(item =>
@@ -115,6 +120,7 @@ export default function Pollution() {
   }
   const handleOk = () => {
     form.validateFields().then(async (values) => {
+      setSubmitting(true)
       try {
         if (curRow) {
           await wuranyuanEdit({ ...values, id: curRow.id })
@@ -127,6 +133,8 @@ export default function Pollution() {
         loadList()
       } catch {
         message.error('保存失败，请重试')
+      } finally {
+        setSubmitting(false)
       }
     }).catch(() => {})
   }
@@ -216,6 +224,7 @@ export default function Pollution() {
           dataSource={filteredData}
           columns={columns}
           rowKey="id"
+          loading={loading}
           size="small"
           scroll={{ x: 1400, y: 'calc(100vh - 220px)' }}
           pagination={{ ...pagination, total: filteredData.length, showTotal: (t) => `共 ${t} 条`, showQuickJumper: true, onChange: (p, ps) => setPagination({ current: p, pageSize: ps }) }}
@@ -230,7 +239,7 @@ export default function Pollution() {
         className="alert-rule-modal"
         footer={[
           <Button key="cancel" onClick={() => { setVisible(false); form.resetFields() }}>取消</Button>,
-          <Button key="ok" type="primary" onClick={handleOk}>确定</Button>,
+          <Button key="ok" type="primary" loading={submitting} onClick={handleOk}>确定</Button>,
         ]}
       >
         <Form

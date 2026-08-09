@@ -285,12 +285,17 @@ const STATION_DATA_COLUMNS: ColumnsType<AirDataLatestVO> = [
 function StationDataModal({ stationType, onClose }: { stationType: 'fixed' | 'mobile'; onClose: () => void }) {
   const [tab, setTab] = useState(stationType)
   const [rows, setRows] = useState<AirDataLatestVO[]>([])
+  const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     let cancelled = false
+    // 标准的列表数据拉取模式，忽略 set-state-in-effect 规则
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setLoading(true)
     airDataLatest({ stationType: tab })
       .then(res => { if (!cancelled) setRows(Array.isArray(res.data) ? res.data : []) })
       .catch(() => { if (!cancelled) setRows([]) })
+      .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
   }, [tab])
 
@@ -317,6 +322,7 @@ function StationDataModal({ stationType, onClose }: { stationType: 'fixed' | 'mo
           columns={STATION_DATA_COLUMNS}
           dataSource={rows}
           rowKey="id"
+          loading={loading}
           size="small"
           pagination={false}
           scroll={{ x: 900, y: 380 }}
