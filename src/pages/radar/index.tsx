@@ -1,11 +1,12 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, type CSSProperties } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Button, Select, Modal, Popover, QRCode, Spin, message } from 'antd'
+import { Button, Select, Modal, Popover, QRCode, Spin, Form, Input, message } from 'antd'
 import { ArrowLeftOutlined, EnvironmentOutlined, ExclamationCircleOutlined, InboxOutlined, SendOutlined, WarningFilled } from '@ant-design/icons'
 import L7MapView from '@/components/L7MapView'
 import FlyListModel from '@/components/MapBox/FlyListModel'
 import { leidaList, alarmPointAll, dockList, options4leixing, wuranListByLngLat } from '@/servers/mapBox'
-import { cities, districts } from '@/utils/city'
+import { wuranyuanAdd } from '@/servers/api'
+import { cities, districts, type CityItem, type DistrictItem } from '@/utils/city'
 import RegionSelector from '@/components/RegionSelector'
 import { useAppStore } from '@/stores'
 import { toRegionQuery, isBusinessRole } from '@/utils/region'
@@ -16,6 +17,195 @@ import { PointLayer, type ILayer, type Scene } from '@antv/l7'
 interface AlarmItem { dapLat: number; dapLng: number; times: number; address: string; type: number }
 interface PollutionItem { name: string; weizhi: string; leixing: string; hangye: string; xianzhuang: string; lng: number; lat: number; city?: string; quxian?: string }
 interface RadarStation { bsiId: string; bsiName: string; bsiLng: number; bsiLat: number; bsiLocation?: string; status?: string }
+
+/** 告警点位弹窗固定估算尺寸（锚定定位计算用） */
+const ALARM_POPUP_W = 296
+const ALARM_POPUP_H = 200
+
+/** 告警点位点击弹窗（对齐 antd-demo customDiv warn/error 分支：“是否确认为污染源” 取消/确认） */
+function AlarmPointPopup({ popup, onCancel, onConfirm }: {
+  popup: { item: AlarmItem; x: number; y: number }
+  onCancel: () => void
+  onConfirm: (item: AlarmItem) => void
+}) {
+  const { item, x, y } = popup
+  const showAbove = y >= ALARM_POPUP_H + 14
+  const style: CSSProperties = {
+    width: ALARM_POPUP_W,
+    left: `min(max(${ALARM_POPUP_W / 2 + 8}px, ${x}px), calc(100% - ${ALARM_POPUP_W / 2 + 8}px))`,
+    top: showAbove ? y - 14 : y + 14,
+    transform: `translate(-50%, ${showAbove ? '-100%' : '0'})`,
+  }
+  return (
+    <div
+      className="absolute z-[9998] rounded-10px p-3 text-[#A8D6FF] shadow-xl"
+      style={{ ...style, background: 'rgba(4,22,52,0.95)', border: '1px solid rgba(0,180,255,0.35)', backdropFilter: 'blur(8px)' }}
+      onClick={e => e.stopPropagation()}
+    >
+      <div className="text-[#03FBFD] text-13px font-700 mb-2">是否确认为污染源</div>
+      <div className="space-y-1 text-12px">
+        <p>位置：{item.address || '--'}</p>
+        <p>经纬度：{item.dapLng}，{item.dapLat}</p>
+        <p>次数：{item.times}</p>
+      </div>
+      <div className="flex justify-end gap-2 mt-3">
+        <Button size="small" onClick={onCancel}>取消</Button>
+        <Button size="small" type="primary" onClick={() => onConfirm(item)}>确认</Button>
+      </div>
+    </div>
+  )
+}
+
+/** 地图空白处点击弹窗（对齐 antd-demo showFlyPopup：单按钮“派遣无人机”） */
+function DispatchPointPopup({ popup, onDispatch }: {
+  popup: { x: number; y: number; lng: number; lat: number }
+  onDispatch: (lngLat: { lng: number; lat: number }) => void
+}) {
+  const style: CSSProperties = {
+    left: popup.x,
+    top: Math.max(popup.y - 12, 8),
+    transform: popup.y > 60 ? 'translate(-50%, -100%)' : 'translate(-50%, 0)',
+  }
+  return (
+    <div
+      className="absolute z-[9998] rounded-8px shadow-xl overflow-hidden"
+      style={{ ...style, background: 'rgba(4,22,52,0.95)', border: '1px solid rgba(0,180,255,0.35)' }}
+      onClick={e => e.stopPropagation()}
+    >
+      <button
+        type="button"
+        className="flex items-center gap-1.5 px-4 py-2 text-13px text-[#03FBFD] cursor-pointer hover:bg-[rgba(1,194,255,0.15)] transition-colors"
+        onClick={() => onDispatch({ lng: popup.lng, lat: popup.lat })}
+      >
+        <SendOutlined />
+        <span>派遣无人机</span>
+      </button>
+    </div>
+  )
+}
+
+/** 新建污染源弹窗（告警点确认后打开，预填经纬度与地址，对齐 antd-demo CreateModel） */
+function CreatePollutionModal({ open, initial, leixingOptions, cityItems, districtItems, onClose, onCreated }: {
+  open: boolean
+  initial: { weizhi?: string; lng?: number; lat?: number; city?: string; quxian?: string } | null
+  leixingOptions: { value: string; label: string }[]
+  cityItems: CityItem[]
+  districtItems: DistrictItem[]
+  onClose: () => void
+  onCreated: () => void
+}) {
+  const [form] = Form.useForm()
+  const [submitting, setSubmitting] = useState(false)
+  // 城市选中值用 useWatch 跟随表单（setFieldsValue 预填也会触发），区县选项联动
+  const modalCity = Form.useWatch('city', form) as string | undefined
+
+  useEffect(() => {
+    if (!open) return
+    form.resetFields()
+    form.setFieldsValue({
+      weizhi: initial?.weizhi,
+      lng: initial?.lng != null ? String(initial.lng) : undefined,
+      lat: initial?.lat != null ? String(initial.lat) : undefined,
+      city: initial?.city,
+      quxian: initial?.quxian,
+      level: '1',
+    })
+  }, [open, initial, form])
+
+  // 区县选项随所选城市联动
+  const countyOpts = districtItems
+    .filter(item => !modalCity || item.parent === Number(cityItems.find(city => city.name === modalCity)?.adcode))
+    .map(item => item.name)
+
+  const handleOk = async () => {
+    let values
+    try {
+      values = await form.validateFields()
+    } catch {
+      return
+    }
+    setSubmitting(true)
+    try {
+      await wuranyuanAdd({ ...values, lng: Number(values.lng), lat: Number(values.lat), type: '0' })
+      message.success('新增污染源成功')
+      onCreated()
+      onClose()
+      form.resetFields()
+    } catch {
+      message.error('保存失败，请重试')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <Modal
+      title={<span className="alert-rule-modal-title">新增污染源</span>}
+      open={open}
+      onCancel={onClose}
+      width={780}
+      className="alert-rule-modal"
+      footer={[
+        <Button key="cancel" onClick={onClose}>取消</Button>,
+        <Button key="ok" type="primary" loading={submitting} onClick={handleOk}>确定</Button>,
+      ]}
+    >
+      <Form
+        form={form}
+        layout="horizontal"
+        labelCol={{ style: { width: 90, textAlign: 'right', color: '#03FBFD', paddingRight: 10 } }}
+        className="alert-rule-form pt-2"
+      >
+        <Form.Item label="名称" name="name" rules={[{ required: true, message: '请输入名称' }]}>
+          <Input className="model_from_input" placeholder="请输入名称" />
+        </Form.Item>
+        <div className="grid grid-cols-2 gap-x-2">
+          <Form.Item label="城市" name="city" rules={[{ required: true, message: '请选择城市' }]}>
+            <Select className="model_from_sel" popupClassName="alert-rule-dropdown" placeholder="请选择城市" options={cityItems.map(item => ({ value: item.name, label: item.name }))} />
+          </Form.Item>
+          <Form.Item label="区县" name="quxian" rules={[{ required: true, message: '请选择区县' }]}>
+            <Select className="model_from_sel" popupClassName="alert-rule-dropdown" placeholder="请选择区县" options={countyOpts.map(name => ({ value: name, label: name }))} />
+          </Form.Item>
+        </div>
+        <div className="grid grid-cols-2 gap-x-2">
+          <Form.Item label="乡镇街道" name="xiangzhen">
+            <Input className="model_from_input" placeholder="请输入乡镇街道" />
+          </Form.Item>
+          <Form.Item label="详细地址" name="weizhi" rules={[{ required: true, message: '请输入详细地址' }]}>
+            <Input className="model_from_input" placeholder="请输入详细地址" />
+          </Form.Item>
+        </div>
+        <div className="grid grid-cols-2 gap-x-2">
+          <Form.Item label="类型" name="leixing" rules={[{ required: true, message: '请选择类型' }]}>
+            <Select className="model_from_sel" popupClassName="alert-rule-dropdown" placeholder="请选择类型" options={leixingOptions} />
+          </Form.Item>
+          <Form.Item label="行业" name="hangye">
+            <Input className="model_from_input" placeholder="请输入行业" />
+          </Form.Item>
+        </div>
+        <div className="grid grid-cols-2 gap-x-2">
+          <Form.Item label="现状" name="xianzhuang">
+            <Input className="model_from_input" placeholder="请输入现状" />
+          </Form.Item>
+          <Form.Item label="级别" name="level" rules={[{ required: true, message: '请选择级别' }]}>
+            <Select className="model_from_sel" popupClassName="alert-rule-dropdown" options={[{ value: '1', label: '红' }, { value: '2', label: '黄' }, { value: '3', label: '绿' }]} />
+          </Form.Item>
+        </div>
+        <div className="grid grid-cols-2 gap-x-2">
+          <Form.Item label="经度" name="lng" rules={[{ required: true, message: '请输入经度' }]}>
+            <Input type="number" className="model_from_input" placeholder="请输入经度" />
+          </Form.Item>
+          <Form.Item label="纬度" name="lat" rules={[{ required: true, message: '请输入纬度' }]}>
+            <Input type="number" className="model_from_input" placeholder="请输入纬度" />
+          </Form.Item>
+        </div>
+        <Form.Item label="备注" name="beizhu">
+          <Input.TextArea className="model_from_input" rows={2} placeholder="请输入备注" />
+        </Form.Item>
+      </Form>
+    </Modal>
+  )
+}
 
 const mockDocks = [
   { dockName: '临平交通-塘栖机场', dockCode: 'DOCK001' },
@@ -131,6 +321,15 @@ export default function Radar() {
   const [flyVisible, setFlyVisible] = useState(false)
   const [flyLngLat, setFlyLngLat] = useState<{ lng: number; lat: number }>({ lng: 0, lat: 0 })
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; lng: number; lat: number } | null>(null)
+  // 告警点位点击弹窗 / 地图空白点击派遣弹窗 / 新建污染源弹窗（对齐 antd-demo mapBox popup 链路）
+  const [alarmPopup, setAlarmPopup] = useState<{ item: AlarmItem; x: number; y: number } | null>(null)
+  const [dispatchPopup, setDispatchPopup] = useState<{ x: number; y: number; lng: number; lat: number } | null>(null)
+  const [createVisible, setCreateVisible] = useState(false)
+  const [createInitial, setCreateInitial] = useState<{ weizhi?: string; lng?: number; lat?: number; city?: string; quxian?: string } | null>(null)
+  // 新增污染源成功后触发附近污染源列表重查
+  const [pollutionVersion, setPollutionVersion] = useState(0)
+  // 图层点击与场景点击的时序去重（点击告警点时不再弹派遣入口）
+  const lastMarkerClickRef = useRef(0)
 
   // 加载无人机场数据（突发/常规点位由选中雷达的 alarmPoint 查询驱动，见下方 useEffect）
   useEffect(() => {
@@ -173,7 +372,16 @@ export default function Radar() {
     wuranListByLngLat({ ...regionParams, lat: radar.bsiLat, lng: radar.bsiLng, leixing: filterLeixing, type: '0' })
       .then(res => {
         if (cancelled) return
-        let list: PollutionItem[] = res?.resultCode === 0 && Array.isArray(res.data) ? res.data : []
+        const rawList: PollutionItem[] = res?.resultCode === 0 && Array.isArray(res.data) ? res.data : []
+        // 后端字段可能为 null（如新增时未表现状/行业），统一兜底空串避免渲染报错
+        let list: PollutionItem[] = rawList.map(item => ({
+          ...item,
+          name: item.name ?? '',
+          weizhi: item.weizhi ?? '',
+          leixing: item.leixing ?? '',
+          hangye: item.hangye ?? '',
+          xianzhuang: item.xianzhuang ?? '',
+        }))
         // 后端未按区域过滤时的前端兼容过滤：市/区县角色只可见本区域内污染源
         if (querySelection?.cityName || querySelection?.countyName) {
           const normalize = (value?: string) => (value || '').replace(/[市区县]$/, '')
@@ -191,7 +399,7 @@ export default function Radar() {
       })
       .finally(() => { if (!cancelled) setPollutionLoading(false) })
     return () => { cancelled = true }
-  }, [radarList, selectedBsiId, querySelection, filterLeixing])
+  }, [radarList, selectedBsiId, querySelection, filterLeixing, pollutionVersion])
 
   // 进入页面查询雷达列表（借鉴原项目 antd-demo）：默认选中第一台雷达，后续自动飞到其位置
   useEffect(() => {
@@ -351,10 +559,47 @@ export default function Radar() {
     </div>
   )
 
-  // 地图右键 → 显示上下文菜单（无人机派遣入口）
+  // 点击地图告警点位 → 弹窗“是否确认为污染源”（对齐 antd-demo LayerPopup 交互）
+  const handleMarkerClick = useCallback((feature: Record<string, unknown>, pos: { x: number; y: number }) => {
+    lastMarkerClickRef.current = Date.now()
+    const item: AlarmItem = {
+      dapLng: Number(feature.lng),
+      dapLat: Number(feature.lat),
+      address: String(feature.name ?? ''),
+      times: Number(feature.times) || 0,
+      type: Number(feature.alarmType) || 1,
+    }
+    if (!Number.isFinite(item.dapLng) || !Number.isFinite(item.dapLat)) return
+    setDispatchPopup(null)
+    setContextMenu(null)
+    setAlarmPopup({ item, x: pos.x, y: pos.y })
+  }, [])
+
+  // 确认为污染源 → 打开新建污染源弹窗并预填经纬度与地址（对齐 antd-demo setToSource → ppObj → CreateModel）
+  const confirmAsPollution = (item: AlarmItem) => {
+    setAlarmPopup(null)
+    setCreateInitial({
+      weizhi: item.address,
+      lng: item.dapLng,
+      lat: item.dapLat,
+      city: mapSelection?.cityName,
+      quxian: mapSelection?.countyName,
+    })
+    setCreateVisible(true)
+  }
+
+  // 地图右键 → 显示上下文菜单（无人机派遣入口）；左键空白 → 派遣无人机弹窗
   const handleSceneLoaded = useCallback((scene: Scene) => {
     sceneRef.current = scene
     setSceneReady(true)
+    // 左键点击地图空白处 → 派遣无人机弹窗（对齐 antd-demo showFlyPopup；刚点击过告警点位时跳过）
+    scene.on('click', (ev: any) => {
+      if (Date.now() - lastMarkerClickRef.current < 300) return
+      if (!ev?.lngLat || typeof ev.x !== 'number' || typeof ev.y !== 'number') return
+      setAlarmPopup(null)
+      setContextMenu(null)
+      setDispatchPopup({ x: ev.x, y: ev.y, lng: ev.lngLat.lng, lat: ev.lngLat.lat })
+    })
     // 阻止地图默认右键菜单
     scene.on('contextmenu', (ev: any) => {
       ev.originalEvent?.preventDefault()
@@ -400,8 +645,8 @@ export default function Radar() {
   }
 
   const markers = [
-    ...tfList.map(i => ({ lng: i.dapLng, lat: i.dapLat, name: i.address, color: '#FFB024', size: 14 })),
-    ...cgList.map(i => ({ lng: i.dapLng, lat: i.dapLat, name: i.address, color: '#FF3936', size: 10 })),
+    ...tfList.map(i => ({ lng: i.dapLng, lat: i.dapLat, name: i.address, color: '#FFB024', size: 14, times: i.times, alarmType: i.type })),
+    ...cgList.map(i => ({ lng: i.dapLng, lat: i.dapLat, name: i.address, color: '#FF3936', size: 10, times: i.times, alarmType: i.type })),
   ]
   const mapCounty = districts.find(item => String(item.adcode) === mapSelection?.countyCode)
   const mapCity = cities.find(item => item.adcode === mapSelection?.cityCode)
@@ -414,7 +659,7 @@ export default function Radar() {
 
   return (
     <div className="w-full h-full relative overflow-hidden" style={{ background: '#1a5ab0' }}>
-      <L7MapView id="radar-map" center={mapCenter} zoom={mapZoom} minZoom={6} maxZoom={14} showTiles markers={markers} onSceneLoaded={handleSceneLoaded} />
+      <L7MapView id="radar-map" center={mapCenter} zoom={mapZoom} minZoom={6} maxZoom={14} showTiles markers={markers} onSceneLoaded={handleSceneLoaded} onMarkerClick={handleMarkerClick} />
       {/* 返回按钮 */}
       <div className="absolute top-15px left-20px z-50">
         <Button type="text" icon={<ArrowLeftOutlined />} onClick={() => navigate('/monitor')} className="!text-[#03FBFD] !bg-[rgba(255,255,255,0.1)] hover:!bg-[rgba(255,255,255,0.2)] !rounded-2xl">返回监控大屏</Button>
@@ -484,14 +729,18 @@ export default function Radar() {
             {pollutionList.map((item, idx) => (
               <article key={`${item.name}-${idx}`} className="rounded-11px border border-[rgba(133,213,255,0.17)] px-3 py-2.5 cursor-pointer bg-[rgba(17,91,167,0.5)] hover:bg-[rgba(27,112,191,0.68)] hover:border-[rgba(116,226,255,0.42)] transition-all" onClick={() => locatePollution(item)}>
                 <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0 text-13px text-[#edf8ff] font-600 truncate">{item.name}</div>
-                  <span className={`shrink-0 rounded-full px-2 py-0.5 text-9px ${item.xianzhuang.includes('停产') ? 'text-[#ffb36b] bg-[rgba(255,154,74,0.14)]' : 'text-[#66f0b3] bg-[rgba(45,221,152,0.13)]'}`}>{item.xianzhuang}</span>
+                  <div className="min-w-0 text-13px text-[#edf8ff] font-600 truncate">{item.name || '--'}</div>
+                  {item.xianzhuang && (
+                    <span className={`shrink-0 rounded-full px-2 py-0.5 text-9px ${item.xianzhuang.includes('停产') ? 'text-[#ffb36b] bg-[rgba(255,154,74,0.14)]' : 'text-[#66f0b3] bg-[rgba(45,221,152,0.13)]'}`}>{item.xianzhuang}</span>
+                  )}
                 </div>
-                <div className="mt-1.5 flex items-start gap-1.5 text-10px text-[#c9e4f8]/64"><EnvironmentOutlined className="mt-0.5 text-[#71eaff]" /><span className="leading-15px line-clamp-2">{item.weizhi}</span></div>
-                <div className="flex items-center gap-1.5 mt-2">
-                  <span className="rounded-5px px-2 py-0.5 text-9px text-[#9cefff] bg-[rgba(54,200,234,0.1)] border border-[rgba(89,215,245,0.22)]">{item.leixing}</span>
-                  <span className="rounded-5px px-2 py-0.5 text-9px text-[#d9bdff] bg-[rgba(174,105,233,0.1)] border border-[rgba(188,125,242,0.22)]">{item.hangye}</span>
-                </div>
+                <div className="mt-1.5 flex items-start gap-1.5 text-10px text-[#c9e4f8]/64"><EnvironmentOutlined className="mt-0.5 text-[#71eaff]" /><span className="leading-15px line-clamp-2">{item.weizhi || '--'}</span></div>
+                {(item.leixing || item.hangye) && (
+                  <div className="flex items-center gap-1.5 mt-2">
+                    {item.leixing && <span className="rounded-5px px-2 py-0.5 text-9px text-[#9cefff] bg-[rgba(54,200,234,0.1)] border border-[rgba(89,215,245,0.22)]">{item.leixing}</span>}
+                    {item.hangye && <span className="rounded-5px px-2 py-0.5 text-9px text-[#d9bdff] bg-[rgba(174,105,233,0.1)] border border-[rgba(188,125,242,0.22)]">{item.hangye}</span>}
+                  </div>
+                )}
               </article>
             ))}
           </div>
@@ -540,7 +789,32 @@ export default function Radar() {
           </div>
         </div>
       )}
-      {/* 派遣无人机巡逻弹窗（右键菜单触发） */}
+      {/* 告警点位点击弹窗：是否确认为污染源（对齐 antd-demo LayerPopup） */}
+      {alarmPopup && (
+        <AlarmPointPopup popup={alarmPopup} onCancel={() => setAlarmPopup(null)} onConfirm={confirmAsPollution} />
+      )}
+      {/* 地图空白处点击弹窗：派遣无人机（对齐 antd-demo showFlyPopup） */}
+      {dispatchPopup && (
+        <DispatchPointPopup
+          popup={dispatchPopup}
+          onDispatch={lngLat => {
+            setFlyLngLat(lngLat)
+            setDispatchPopup(null)
+            setFlyVisible(true)
+          }}
+        />
+      )}
+      {/* 新建污染源弹窗（告警点确认后预填坐标打开） */}
+      <CreatePollutionModal
+        open={createVisible}
+        initial={createInitial}
+        leixingOptions={leixingFilters.filter(item => item.value)}
+        cityItems={cities}
+        districtItems={districts}
+        onClose={() => setCreateVisible(false)}
+        onCreated={() => setPollutionVersion(version => version + 1)}
+      />
+      {/* 派遣无人机巡逻弹窗（右键菜单/地图点击弹窗触发） */}
       {flyVisible && (
         <FlyListModel
           visible={flyVisible}

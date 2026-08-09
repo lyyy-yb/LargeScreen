@@ -146,8 +146,9 @@ export default function CountyBoundaryMap({
             pickLight: true,
             raisingHeight: FLOAT_BASE,
             opacity: 0.06,
-            sourceColor: '#4fb8f0',
-            targetColor: '#0a4a8a',
+            // 侧面统一淡蓝（与边界线 #3fc6ff 同色系），替代原深蓝渐变
+            sourceColor: '#8fdcff',
+            targetColor: '#3fc6ff',
           })
         scene.addLayer(countyBase)
 

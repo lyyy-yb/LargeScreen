@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { Scene, RasterLayer, PointLayer } from '@antv/l7'
+import { Scene, RasterLayer, PointLayer, type ILayer } from '@antv/l7'
 import { Map as L7Map } from '@antv/l7-maps'
 
 interface L7MapViewProps {
@@ -13,12 +13,14 @@ interface L7MapViewProps {
   showTiles?: boolean
   /** 城市标签数据 */
   cityData?: Array<{ name: string; lng: number; lat: number; [key: string]: any }>
-  /** 点位数据 */
-  markers?: Array<{ lng: number; lat: number; name: string; color?: string; size?: number }>
+  /** 点位数据（可携带任意额外字段，点击时随 feature 原样回传） */
+  markers?: Array<{ lng: number; lat: number; name: string; color?: string; size?: number; [key: string]: unknown }>
   /** 点位图标 URL（传入则用图片图标替代圆形） */
   markerIconUrl?: string
   /** 地图场景加载完成回调（可用于注册点击事件等） */
   onSceneLoaded?: (scene: Scene) => void
+  /** 点位点击回调：feature 为打点原始数据，pos 为相对地图容器的像素坐标 */
+  onMarkerClick?: (feature: Record<string, unknown>, pos: { x: number; y: number }) => void
 }
 
 export default function L7MapView({
@@ -33,12 +35,17 @@ export default function L7MapView({
   markers = [],
   markerIconUrl,
   onSceneLoaded,
+  onMarkerClick,
 }: L7MapViewProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const sceneRef = useRef<Scene | null>(null)
   const cameraRef = useRef({ center, zoom })
   const markerDataRef = useRef(markers)
   const markerIconRef = useRef(markerIconUrl)
+  const onMarkerClickRef = useRef(onMarkerClick)
+  useEffect(() => {
+    onMarkerClickRef.current = onMarkerClick
+  }, [onMarkerClick])
   const markerLayersRef = useRef<Parameters<Scene['removeLayer']>[0][]>([])
   const markerRenderVersionRef = useRef(0)
   const [centerLng, centerLat] = center
@@ -62,7 +69,7 @@ export default function L7MapView({
         })
         .shape('marker-icon')
         .size(22)
-      const markerLabelLayer = new PointLayer({ zIndex: 11 })
+      const markerLabelLayer = new PointLayer({ zIndex: 11, enablePicking: false })
         .source(data, {
           parser: { type: 'json', x: 'lng', y: 'lat' },
         })
@@ -78,6 +85,7 @@ export default function L7MapView({
       scene.addLayer(pointLayer)
       scene.addLayer(markerLabelLayer)
       markerLayersRef.current = [pointLayer, markerLabelLayer]
+      bindMarkerClick(pointLayer)
       return
     }
 
@@ -89,7 +97,7 @@ export default function L7MapView({
       .color('color', (color: string) => color || '#03FBFD')
       .size('size', (size: number) => size || 10)
       .style({ opacity: 0.9, strokeWidth: 1, stroke: '#fff' })
-    const markerLabelLayer = new PointLayer({ zIndex: 11 })
+    const markerLabelLayer = new PointLayer({ zIndex: 11, enablePicking: false })
       .source(data, {
         parser: { type: 'json', x: 'lng', y: 'lat' },
       })
@@ -105,6 +113,17 @@ export default function L7MapView({
     scene.addLayer(pointLayer)
     scene.addLayer(markerLabelLayer)
     markerLayersRef.current = [pointLayer, markerLabelLayer]
+    bindMarkerClick(pointLayer)
+  }
+
+  /** 点位图层点击：回传 feature 原始数据与点击像素坐标（供页面侧锚定弹窗） */
+  const bindMarkerClick = (pointLayer: ILayer) => {
+    pointLayer.on('click', (e: any) => {
+      const feature = e?.feature
+      if (!feature || !onMarkerClickRef.current) return
+      const pos = typeof e?.x === 'number' && typeof e?.y === 'number' ? { x: e.x, y: e.y } : { x: 0, y: 0 }
+      onMarkerClickRef.current(feature as Record<string, unknown>, pos)
+    })
   }
 
   useEffect(() => {

@@ -89,7 +89,7 @@ export default function Pollution() {
   )
 
   const filteredData = data.filter(item =>
-    !searchText || item.weizhi.includes(searchText) || item.name.includes(searchText)
+    !searchText || (item.weizhi || '').includes(searchText) || (item.name || '').includes(searchText)
   )
 
   const handleAdd = () => {

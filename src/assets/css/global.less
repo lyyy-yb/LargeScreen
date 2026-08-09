@@ -943,9 +943,19 @@ textarea.ant-input {
       background: rgba(16, 48, 96, 0.6) !important;
       transition: all 0.2s ease;
 
-      // 隐藏 antd 测量行
+      // antd 测量行：承担表头/表体列宽同步测量，不能 display:none（会导致表头与表体错位），
+      // 仅以零高度 + 无边框背景方式视觉隐藏
       &.ant-table-measure-row {
-        display: none !important;
+        height: 0 !important;
+        background: transparent !important;
+
+        > td {
+          padding: 0 !important;
+          border: none !important;
+          height: 0 !important;
+          line-height: 0 !important;
+          background: transparent !important;
+        }
       }
 
       &:nth-child(even) {

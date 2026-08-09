@@ -205,8 +205,9 @@ export default function CityDistrictMap({
             pickLight: true,
             raisingHeight: FLOAT_BASE,
             opacity: 0.06,
-            sourceColor: '#4fb8f0',
-            targetColor: '#0a4a8a',
+            // 侧面统一淡蓝（与边界线 #3fc6ff 同色系），替代原深蓝渐变
+            sourceColor: '#8fdcff',
+            targetColor: '#3fc6ff',
           })
         scene.addLayer(polygonLayer)
 
@@ -268,12 +269,25 @@ export default function CityDistrictMap({
               })
             scene.addLayer(zzFill)
 
+            // 智造新城边墙（有高度的区域边：琥珀金光墙，与边界线 #ffd166 同色系；边界线 13000 高于墙顶避免遮挡）
+            const zzWall = new LineLayer({ zIndex: 7, enablePicking: false })
+              .source(zhizaoRes)
+              .shape('wall')
+              .size(3500)
+              .style({
+                heightfixed: true,
+                opacity: 0.45,
+                sourceColor: '#ffd166',
+                targetColor: '#ffd166',
+              })
+            scene.addLayer(zzWall)
+
             const zzLine = new LineLayer({ zIndex: 8, enablePicking: false })
               .source(zhizaoRes)
               .shape('line')
               .color('#ffd166')
-              // 边界特别加粗（4px），比区县边界（2px）更粗以突出智造新城
-              .size(4)
+              // 边界再次加粗（6px），比区县边界（2px）明显更粗以突出智造新城
+              .size(6)
               .style({ raisingHeight: 13000, heightfixed: true, opacity: 1, depth: false })
             scene.addLayer(zzLine)
 

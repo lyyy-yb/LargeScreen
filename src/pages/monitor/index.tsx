@@ -161,7 +161,7 @@ function AirStationRangeCard({ title, range, latestTime, onView }: {
       <div className="flex-1 min-h-0 grid grid-cols-2 content-start gap-2.5">
         {AIR_RANGE_FIELDS.map(field => (
           <div key={field.key} className="flex items-center justify-between rounded-4px border border-[#2f7fd6]/60 bg-[#1c64be]/55 px-2 py-1.5">
-            <span className="text-[#7fa8cc] text-8px whitespace-nowrap">{field.label}</span>
+            <span className="text-[#d6ecff] text-8px whitespace-nowrap">{field.label}</span>
             <button
               type="button"
               onClick={onView}
@@ -194,9 +194,9 @@ const MOCK_ALERT_DASHBOARD: AlertDashboardVO = {
   ],
 }
 
-/** 最新预警轮播参数：单条高度（含间距）与可视条数 */
+/** 最新预警轮播参数：单条高度（含间距）与最大可视条数（实际条数按可用高度动态计算，避免列表被卡片裁切） */
 const ALERT_CAROUSEL_ITEM_HEIGHT = 46
-const ALERT_CAROUSEL_VISIBLE = 4
+const ALERT_CAROUSEL_MAX_VISIBLE = 5
 /** 最新预警最多展示条数 */
 const ALERT_LATEST_LIMIT = 10
 
@@ -210,10 +210,24 @@ function AlertStatCard({ label, count, bg }: { label: string; count: number; bg:
   )
 }
 
-/** 最新预警轮播：每 3 秒向上滚动一条，列表复制一份后滚过一圈无动画归位，实现无缝循环 */
+/** 最新预警轮播：每 3 秒向上滚动一条，列表复制一份后滚过一圈无动画归位，实现无缝循环；
+ * 可视条数按容器实际可用高度动态反算，保证列表高度始终是条目高度整数倍且不被卡片裁切 */
 function AlertLatestCarousel({ items, onNavigate }: { items: AlertDashboardItem[]; onNavigate: () => void }) {
   const [tick, setTick] = useState(0)
-  const enabled = items.length > ALERT_CAROUSEL_VISIBLE
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [visible, setVisible] = useState(3)
+
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    const measure = () => setVisible(Math.max(1, Math.min(ALERT_CAROUSEL_MAX_VISIBLE, Math.floor(el.clientHeight / ALERT_CAROUSEL_ITEM_HEIGHT))))
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
+
+  const enabled = items.length > visible
 
   useEffect(() => {
     if (!enabled) return
@@ -221,31 +235,35 @@ function AlertLatestCarousel({ items, onNavigate }: { items: AlertDashboardItem[
     return () => window.clearInterval(timer)
   }, [enabled])
 
+  // 可视条数变化时偏移取模归位，避免滚动位置超出新可视范围
   const offset = enabled ? tick % (items.length + 1) : 0
   const displayItems = enabled ? [...items, ...items] : items
 
   return (
-    <div className="overflow-hidden" style={{ height: ALERT_CAROUSEL_VISIBLE * ALERT_CAROUSEL_ITEM_HEIGHT }}>
-      <div
-        style={{
-          transform: `translateY(-${offset * ALERT_CAROUSEL_ITEM_HEIGHT}px)`,
-          transition: offset !== 0 ? 'transform 0.5s ease' : 'none',
-        }}
-      >
-        {displayItems.map((item, idx) => (
-          <div
-            key={`${item.alertTime}-${idx}`}
-            onClick={onNavigate}
-            className="h-40px mb-1.5 rounded-6px border border-[#2f7fd6]/60 bg-[#1c64be]/55 px-2.5 py-1 cursor-pointer transition-colors hover:border-[#2f9bff]"
-          >
-            <div className="flex items-center gap-1.5">
-              <span className="shrink-0 w-5px h-5px rounded-full bg-[#ff6868] shadow-[0_0_6px_#ff6868]" />
-              <span className="flex-1 min-w-0 text-[#d2ecff] text-11px font-bold truncate" title={item.ruleName}>{item.ruleName}</span>
-              <span className="shrink-0 text-[#5c92c1] text-9px font-mono">{item.alertTime ? dayjs(item.alertTime).format('HH:mm') : '--'}</span>
+    <div ref={containerRef} className="min-h-0 flex-1">
+      {/* 内层视口高度精确为条目高度整数倍，底部不会露出半条被裁切的条目 */}
+      <div className="overflow-hidden" style={{ height: visible * ALERT_CAROUSEL_ITEM_HEIGHT }}>
+        <div
+          style={{
+            transform: `translateY(-${offset * ALERT_CAROUSEL_ITEM_HEIGHT}px)`,
+            transition: offset !== 0 ? 'transform 0.5s ease' : 'none',
+          }}
+        >
+          {displayItems.map((item, idx) => (
+            <div
+              key={`${item.alertTime}-${idx}`}
+              onClick={onNavigate}
+              className="h-40px mb-1.5 rounded-6px border border-[#2f7fd6]/60 bg-[#1c64be]/55 px-2.5 py-1 cursor-pointer transition-colors hover:border-[#2f9bff]"
+            >
+              <div className="flex items-center gap-1.5">
+                <span className="shrink-0 w-5px h-5px rounded-full bg-[#ff6868] shadow-[0_0_6px_#ff6868]" />
+                <span className="flex-1 min-w-0 text-[#d2ecff] text-11px font-bold truncate" title={item.ruleName}>{item.ruleName}</span>
+                <span className="shrink-0 text-[#5c92c1] text-9px font-mono">{item.alertTime ? dayjs(item.alertTime).format('HH:mm') : '--'}</span>
+              </div>
+              <div className="mt-0.5 pl-6.5 text-10px text-[#5c92c1] truncate" title={item.location}>{item.location}</div>
             </div>
-            <div className="mt-0.5 pl-6.5 text-10px text-[#5c92c1] truncate" title={item.location}>{item.location}</div>
-          </div>
-        ))}
+          ))}
+        </div>
       </div>
     </div>
   )
@@ -596,8 +614,8 @@ export default function Monitor() {
   // 预警处置：dashboard 面板数据（统计 + 近一小时最新预警，接口异常时回退 mock）
   const [alertDashboard, setAlertDashboard] = useState<AlertDashboardVO | null>(null)
   const [airPoints, setAirPoints] = useState<AirQualityPoint[]>([])
-  // 数据源列表返回的雷达站/无人机传感器站（作为增量补充打点）
-  const [sourceDevicePoints, setSourceDevicePoints] = useState<MapDevicePoint[]>([])
+  // 数据源列表总数（左下“在线数据源”展示）
+  const [sourceTotal, setSourceTotal] = useState(0)
   const [airDetail, setAirDetail] = useState<AirPointDetail | null>(null)
   // 扁平化部门树（用于按区域名匹配 deptId）
   const allDepts = useMemo(() => flattenDepts(regionContext?.departments ?? []), [regionContext?.departments])
@@ -693,14 +711,6 @@ export default function Monitor() {
     })
   }, [droneStations, radarStations])
 
-  // 数据源列表的雷达/无人机站作增量补充（按类型+坐标去重，避免与原接口重复打点）
-  const deviceMapPoints = useMemo<MapDevicePoint[]>(() => {
-    const pointKey = (point: MapDevicePoint) => `${point.type}:${point.lng.toFixed(4)},${point.lat.toFixed(4)}`
-    const seen = new Set(legacyDevicePoints.map(pointKey))
-    const extra = sourceDevicePoints.filter(point => !seen.has(pointKey(point)))
-    return [...legacyDevicePoints, ...extra]
-  }, [legacyDevicePoints, sourceDevicePoints])
-
   const cityDistricts = useMemo(() => {
     if (!activeCity) return []
     return districts.filter(item => item.parent === Number(activeCity.adcode))
@@ -728,8 +738,8 @@ export default function Monitor() {
     return () => { cancelled = true; window.clearInterval(timer) }
   }, [])
 
-  // 地图打点（数据源列表 needAqi=1）：按 dataType 分流——
-  // air_quality_station 微站→AQI 六级图标；radar_station→雷达图标；drone_sensor→无人机场图标
+  // 地图打点（数据源列表 needAqi=1）：仅打空气质量站微站（AQI 六级图标）；
+  // 雷达/无人机场由 leida/list、wurenji/dockList 独立接口打点，不在此处增量补充
   useEffect(() => {
     const cityDeptId = findCityDeptId(allDepts, selection?.cityName)
     const districtDeptId = selection?.countyName
@@ -746,6 +756,8 @@ export default function Monitor() {
         const records = (res.data?.records ?? []).filter(
           item => Number.isFinite(item.lng) && Number.isFinite(item.lat),
         )
+        // 左下“在线数据源”展示列表总数
+        setSourceTotal(Number(res.data?.total) || 0)
 
         // 空气质量微站：按 aqiLevel 打六级图标，图标上方显示综合 AQI 值
         const airStations: AirQualityPoint[] = records
@@ -766,26 +778,11 @@ export default function Monitor() {
             o3Iaqi: item.o3Iaqi ?? null,
           }))
         setAirPoints(airStations)
-
-        // 雷达站/无人机传感器站：打设备图标（在线状态由 connectionStatus 决定）
-        const devices: MapDevicePoint[] = records.flatMap(item => {
-          if (item.dataType !== 'radar_station' && item.dataType !== 'drone_sensor') return []
-          return [{
-            id: String(item.id),
-            type: item.dataType === 'radar_station' ? 'radar' as const : 'drone' as const,
-            name: item.deviceName,
-            address: item.location ?? '',
-            lng: item.lng as number,
-            lat: item.lat as number,
-            online: item.connectionStatus === 'online',
-          }]
-        })
-        setSourceDevicePoints(devices)
       })
       .catch(() => {
         if (!cancelled) {
           setAirPoints([])
-          setSourceDevicePoints([])
+          setSourceTotal(0)
         }
       })
     return () => { cancelled = true }
@@ -920,7 +917,7 @@ export default function Monitor() {
             <AlertStatCard label="今日处置" count={alertDashboard?.todayClosedCount ?? 0} bg="rgba(168,85,247,0.75)" />
           </div>
 
-          <div className="text-[#7bd7ff] text-11px font-bold mb-1.5">最新预警</div>
+          <div className="text-[#7bd7ff] text-11px font-bold mb-1.5 shrink-0">最新预警</div>
           {latestAlerts.length ? (
             <AlertLatestCarousel items={latestAlerts} onNavigate={() => navigate('/alert')} />
           ) : (
@@ -938,13 +935,13 @@ export default function Monitor() {
 
       {/* 主地图展示区域 */}
       <main
-        data-device-point-count={deviceMapPoints.length}
+        data-device-point-count={legacyDevicePoints.length}
         className="monitor-map-stage flex-1 relative overflow-hidden min-w-0 rounded-12px border border-[#00d4ff]/35 shadow-[0_0_24px_rgba(0,180,255,0.15)]"
       >
         {isProvinceView ? (
           <ZJ3DMap
             selectedCity={selection?.cityName}
-            devicePoints={deviceMapPoints}
+            devicePoints={legacyDevicePoints}
             airPoints={airPoints}
             radarAlarmPoints={radarAlarmPoints}
             onCityClick={handleCityClick}
@@ -952,13 +949,13 @@ export default function Monitor() {
             onAirPointClick={handleAirPointClick}
           />
         ) : activeCounty ? (
-          <CountyBoundaryMap county={activeCounty} devicePoints={deviceMapPoints} airPoints={airPoints} radarAlarmPoints={radarAlarmPoints} onAirPointClick={handleAirPointClick} />
+          <CountyBoundaryMap county={activeCounty} devicePoints={legacyDevicePoints} airPoints={airPoints} radarAlarmPoints={radarAlarmPoints} onAirPointClick={handleAirPointClick} />
         ) : activeCity ? (
           <CityDistrictMap
             city={activeCity}
             districtItems={cityDistricts}
             selectedDistrict={selection?.countyName}
-            devicePoints={deviceMapPoints}
+            devicePoints={legacyDevicePoints}
             airPoints={airPoints}
             radarAlarmPoints={radarAlarmPoints}
             onDistrictClick={selectDistrict}
@@ -1085,11 +1082,11 @@ export default function Monitor() {
           />
         )}
 
-        {/* 左下浮层：数据源概况 */}
+        {/* 左下浮层：数据源概况（在线数据源取 dataSource/list 的 total，其余暂无数据源先显示 0） */}
         <div className="source-summary absolute bottom-56px left-3 z-20 text-11px text-[#b2d9ff]/90 space-y-1 font-mono p-2.5 rounded-6px bg-[rgba(4,22,52,0.45)] border border-[#00d4ff]/25">
-          <div>在线数据源：<span className="text-[#00ffff] font-bold">89</span></div>
-          <div>数据总量：<span className="text-[#00ffff] font-bold">58675</span></div>
-          <div>数据准确性：<span className="text-[#00ffff] font-bold">100%</span></div>
+          <div>在线数据源：<span className="text-[#00ffff] font-bold">{sourceTotal}</span></div>
+          <div>数据总量：<span className="text-[#00ffff] font-bold">0</span></div>
+          <div>数据准确性：<span className="text-[#00ffff] font-bold">0%</span></div>
         </div>
 
         {/* 右下浮层：监测分布总结 */}
