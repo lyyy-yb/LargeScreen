@@ -4,7 +4,7 @@ import { Mapbox } from '@antv/l7-maps'
 import type { MapDevicePoint } from '@/types/mapDevice'
 import type { AirQualityPoint } from '@/types/airData'
 import { createDeviceMapLayers, type DeviceMapLayers } from '@/utils/mapDeviceLayers'
-import { createAirQualityLayers, type AirMapLayers } from '@/utils/mapAirLayers'
+import { createAirQualityLayers, type AirMapLayers, type AirPointClickPos } from '@/utils/mapAirLayers'
 import { createAlertLayers, type AlertMapLayers, type AlertMapPoint } from '@/utils/mapAlertLayers'
 import { createRadarAlarmLayers, type RadarAlarmLayers, type RadarAlarmPoint } from '@/utils/mapRadarAlarmLayers'
 import { addSatelliteTiles } from '@/utils/mapSatelliteTiles'
@@ -20,7 +20,7 @@ interface ZJ3DMapProps {
   alertPoints?: AlertMapPoint[]
   /** 雷达突发告警点（hbdp/leida/alarmPoint，常显） */
   radarAlarmPoints?: RadarAlarmPoint[]
-  onAirPointClick?: (point: AirQualityPoint) => void
+  onAirPointClick?: (point: AirQualityPoint, pos?: AirPointClickPos) => void
 }
 
 // 薄区块风格：区域面几乎透明直接透出卫星底图，边界亮线承担轮廓表达
@@ -356,7 +356,7 @@ export default function ZJ3DMap({
           scene,
           airPointsRef.current,
           TEXT_TOP + 4000,
-          point => onAirPointClickRef.current?.(point),
+          (point, pos) => onAirPointClickRef.current?.(point, pos),
         )
 
         // 13. 预警点位标记（alertEvent/list 经纬度，warn-l1~l3 图标）

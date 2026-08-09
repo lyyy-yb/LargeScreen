@@ -5,7 +5,7 @@ import type { CityItem, DistrictItem } from '@/utils/city'
 import type { MapDevicePoint } from '@/types/mapDevice'
 import type { AirQualityPoint } from '@/types/airData'
 import { createDeviceMapLayers, type DeviceMapLayers } from '@/utils/mapDeviceLayers'
-import { createAirQualityLayers, type AirMapLayers } from '@/utils/mapAirLayers'
+import { createAirQualityLayers, type AirMapLayers, type AirPointClickPos } from '@/utils/mapAirLayers'
 import { createAlertLayers, type AlertMapLayers, type AlertMapPoint } from '@/utils/mapAlertLayers'
 import { createRadarAlarmLayers, type RadarAlarmLayers, type RadarAlarmPoint } from '@/utils/mapRadarAlarmLayers'
 import { addSatelliteTiles } from '@/utils/mapSatelliteTiles'
@@ -23,7 +23,7 @@ interface CityDistrictMapProps {
   alertPoints?: AlertMapPoint[]
   /** 雷达突发告警点（hbdp/leida/alarmPoint，常显） */
   radarAlarmPoints?: RadarAlarmPoint[]
-  onAirPointClick?: (point: AirQualityPoint) => void
+  onAirPointClick?: (point: AirQualityPoint, pos?: AirPointClickPos) => void
 }
 
 // 漂浮地图风格（L7 floatmap 示例）：区块抬离地面 + 光幕接地 + 块底/块顶双细线
@@ -416,7 +416,7 @@ export default function CityDistrictMap({
           scene,
           airPointsRef.current,
           TEXT_TOP + 4000,
-          point => onAirPointClickRef.current?.(point),
+          (point, pos) => onAirPointClickRef.current?.(point, pos),
         )
 
         // 预警点位标记（alertEvent/list 经纬度，warn-l1~l3 图标，与空气质量打点切换显示）

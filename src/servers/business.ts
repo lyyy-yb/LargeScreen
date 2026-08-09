@@ -3,6 +3,7 @@ import type {
   AlertDashboardVO,
   AlertEventDTO,
   AlertEventQuery,
+  AlertReviewPayload,
   CleanRuleDTO,
   CleanRuleQuery,
   DataSourceDTO,
@@ -61,6 +62,12 @@ export const alertEventApi = {
     request.put(`${API_PREFIX}/alertEvent`, data),
   changeStatus: (id: number, status: AlertEventDTO['status']) =>
     request.put(`${API_PREFIX}/alertEvent/changeStatus`, { id, status }),
+  /** 清除预警事件（仅待派发状态可操作） */
+  clear: (id: number) =>
+    request.put(`${API_PREFIX}/alertEvent/clear/${id}`),
+  /** 审核预警事件：confirm-确认关闭 return-退回重办（仅已处置状态可操作） */
+  review: (data: AlertReviewPayload) =>
+    request.put(`${API_PREFIX}/alertEvent/review`, data),
   dispatch: (data: DispatchTaskPayload) =>
     request.post<string>(`${API_PREFIX}/alertEvent/dispatch`, data),
   remove: (ids: number | number[]) =>
@@ -110,4 +117,7 @@ export const dataSourceApi = {
     request.put(`${API_PREFIX}/dataSource/changeStatus`, { id, enabled }),
   remove: (ids: number | number[]) =>
     request.delete(`${API_PREFIX}/dataSource/${Array.isArray(ids) ? ids.join(',') : ids}`),
+  /** AQI 详情（当前 AQI + 近 12 小时各污染物小时均值趋势；后端异常时页面侧回退 mock） */
+  aqiDetail: (id: number) =>
+    request.get<unknown>(`${API_PREFIX}/dataSource/${id}/aqiDetail`),
 }

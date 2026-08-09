@@ -1,12 +1,16 @@
 import { PointLayer, type ILayer, type Scene } from '@antv/l7'
-// Popup 未从 @antv/l7 主入口的 ES 模块导出，需从子包引入
-import { Popup } from '@antv/l7-component'
 import type { AirQualityPoint } from '@/types/airData'
 import { AQI_LEVEL_ICON, resolveAqiLevelKey } from './airQuality'
 
 export interface AirMapLayers {
   iconLayer: ILayer
   setData: (points: AirQualityPoint[]) => void
+}
+
+/** 点击打点时的屏幕像素坐标（相对地图容器，供页面侧锚定详情弹窗） */
+export interface AirPointClickPos {
+  x: number
+  y: number
 }
 
 /** 无空气质量数据的微站图标名与图片 */
@@ -28,37 +32,17 @@ function decorate(points: AirQualityPoint[]) {
   }))
 }
 
-/** 构建点击详情弹窗 HTML（L7 Popup 内容：综合 AQI + 各污染物分指数 IAQI） */
-function buildPopupHTML(point: AirQualityPoint): string {
-  const fmt = (v: number | null | undefined) => (v != null && Number.isFinite(Number(v)) ? String(Math.round(Number(v) * 10) / 10) : '--')
-  const cells = ([
-    ['PM2.5', point.pm25Iaqi], ['PM10', point.pm10Iaqi], ['SO₂', point.so2Iaqi],
-    ['NO₂', point.no2Iaqi], ['CO', point.coIaqi], ['O₃', point.o3Iaqi],
-  ] as [string, number | null | undefined][])
-    .map(([label, v]) => `<div class="air-detail-cell"><div class="air-detail-value">${fmt(v)}</div><div class="air-detail-field">${label}</div></div>`)
-    .join('')
-  return `
-    <div class="air-detail-popup">
-      <div class="air-detail-title">${point.name} 监测详情</div>
-      <div class="air-detail-aqi">
-        <span class="air-detail-aqi-label">综合 AQI</span>
-        <span class="air-detail-aqi-value">${fmt(point.value)}</span>
-        ${point.aqiLevel ? `<span class="air-detail-aqi-badge">${point.aqiLevel}</span>` : ''}
-      </div>
-      <div class="air-detail-grid">${cells}</div>
-    </div>`
-}
-
 /**
  * 创建空气质量打点图层：按 IAQI 六级显示对应图标（aq-good ~ aq-severe）。
- * 点击图标在该点上方弹出 L7 Popup 展示各项 IAQI 详情。
- * @param onPointClick 点击图标额外回调（可选）
+ * 点击图标通过 onPointClick 回调通知页面（含点击像素坐标），详情弹窗由页面侧统一渲染，
+ * 避免图层内 Popup 与页面弹窗同时出现。
+ * @param onPointClick 点击图标回调（可选）
  */
 export async function createAirQualityLayers(
   scene: Scene,
   points: AirQualityPoint[],
   raisingHeight = 0,
-  onPointClick?: (point: AirQualityPoint) => void,
+  onPointClick?: (point: AirQualityPoint, pos?: AirPointClickPos) => void,
 ): Promise<AirMapLayers> {
   // 注册六级 AQI 图标与无数据占位图标：直接使用设计原始切图，不做透视/光晕等立体加工
   const iconEntries: [string, string][] = [
@@ -72,7 +56,7 @@ export async function createAirQualityLayers(
 
   const data = decorate(points)
 
-  // 六级图标层（开启拾取，点击弹出站点详情）
+  // 六级图标层（开启拾取，点击由页面侧弹出唯一详情弹窗）
   const iconLayer = new PointLayer({
     zIndex: 30,
     name: 'air-quality-icon-layer',
@@ -85,31 +69,13 @@ export async function createAirQualityLayers(
     .style({ raisingHeight, heightfixed: true, depth: false })
   scene.addLayer(iconLayer)
 
-  // 点击详情弹窗（L7 Popup，自动锚定在对应图标上方并随地图移动）
-  let detailPopup: Popup | null = null
-  const ensurePopup = () => {
-    if (!detailPopup) {
-      detailPopup = new Popup({
-        offsets: [0, -26],
-        closeButton: true,
-        closeOnClick: false,
-        className: 'air-quality-popup',
-        maxWidth: '340px',
-      })
-      scene.addPopup(detailPopup)
-    }
-    return detailPopup
-  }
   iconLayer.on('click', (e: any) => {
     const props = e?.feature
     if (!props?.name) return
     // 无空气质量数据的微站仅占位展示，不弹详情弹窗
     if (!hasAirQualityData(props as AirQualityPoint)) return
-    onPointClick?.(props as AirQualityPoint)
-    const popup = ensurePopup()
-    popup.setLnglat([props.lng, props.lat])
-    popup.setHTML(buildPopupHTML(props as AirQualityPoint))
-    popup.show()
+    const pos = typeof e?.x === 'number' && typeof e?.y === 'number' ? { x: e.x, y: e.y } : undefined
+    onPointClick?.(props as AirQualityPoint, pos)
   })
 
   return {

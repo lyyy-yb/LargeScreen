@@ -5,7 +5,7 @@ import type { DistrictItem } from '@/utils/city'
 import type { MapDevicePoint } from '@/types/mapDevice'
 import type { AirQualityPoint } from '@/types/airData'
 import { createDeviceMapLayers, type DeviceMapLayers } from '@/utils/mapDeviceLayers'
-import { createAirQualityLayers, type AirMapLayers } from '@/utils/mapAirLayers'
+import { createAirQualityLayers, type AirMapLayers, type AirPointClickPos } from '@/utils/mapAirLayers'
 import { createAlertLayers, type AlertMapLayers, type AlertMapPoint } from '@/utils/mapAlertLayers'
 import { createRadarAlarmLayers, type RadarAlarmLayers, type RadarAlarmPoint } from '@/utils/mapRadarAlarmLayers'
 import { addSatelliteTiles } from '@/utils/mapSatelliteTiles'
@@ -19,7 +19,7 @@ interface CountyBoundaryMapProps {
   alertPoints?: AlertMapPoint[]
   /** 雷达突发告警点（hbdp/leida/alarmPoint，常显） */
   radarAlarmPoints?: RadarAlarmPoint[]
-  onAirPointClick?: (point: AirQualityPoint) => void
+  onAirPointClick?: (point: AirQualityPoint, pos?: AirPointClickPos) => void
 }
 
 interface GeoFeature {
@@ -180,7 +180,7 @@ export default function CountyBoundaryMap({
           scene,
           airPointsRef.current,
           MARKER_TOP,
-          point => onAirPointClickRef.current?.(point),
+          (point, pos) => onAirPointClickRef.current?.(point, pos),
         )
         // 预警点位标记（alertEvent/list 经纬度，warn-l1~l3 图标，与空气质量打点切换显示）
         alertLayersRef.current = await createAlertLayers(scene, alertPointsRef.current, MARKER_TOP)

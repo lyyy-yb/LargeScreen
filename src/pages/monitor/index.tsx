@@ -1,7 +1,8 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Modal, Select, Table } from 'antd'
+import { Modal, Select, Spin, Table } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
+import { Chart } from '@antv/g2'
 import dayjs from 'dayjs'
 import CityDistrictMap from '@/components/CityDistrictMap'
 import CountyBoundaryMap from '@/components/CountyBoundaryMap'
@@ -17,7 +18,8 @@ import { alertEventApi, dataSourceApi } from '@/servers/business'
 import type { AlertDashboardItem, AlertDashboardVO, DataSourceQuery } from '@/types/business'
 import type { MapDevicePoint } from '@/types/mapDevice'
 import type { RadarAlarmPoint } from '@/utils/mapRadarAlarmLayers'
-import type { AirDataLatestVO, AirQualityPoint, StationAirRange } from '@/types/airData'
+import type { AirDataLatestVO, AirQualityPoint, AirTrendItem, StationAirRange } from '@/types/airData'
+import type { AirPointClickPos } from '@/utils/mapAirLayers'
 import { flattenDepts, findCityDeptId, findDistrictDeptId } from '@/utils/airQuality'
 import droneSpinGif from '@/assets/images/drone-spin.gif'
 import radarSpinGif from '@/assets/images/radar-spin.gif'
@@ -323,21 +325,234 @@ function StationDataModal({ stationType, onClose }: { stationType: 'fixed' | 'mo
     </Modal>
   )
 }
-/** 点击打点详情弹窗展示的污染物分指数 IAQI 字段 */
-const IAQI_DETAIL_FIELDS: { key: string; label: string }[] = [
-  { key: 'pm25Iaqi', label: 'PM2.5' },
-  { key: 'pm10Iaqi', label: 'PM10' },
-  { key: 'so2Iaqi', label: 'SO₂' },
-  { key: 'no2Iaqi', label: 'NO₂' },
-  { key: 'coIaqi', label: 'CO' },
-  { key: 'o3Iaqi', label: 'O₃' },
+/** 打点详情弹窗字段：IAQI 卡片与趋势图字段合一（可勾选，color 为趋势线颜色） */
+const AIR_DETAIL_FIELDS: { iaqiKey: string; trendKey: string; label: string; color: string }[] = [
+  { iaqiKey: 'pm25Iaqi', trendKey: 'pm25', label: 'PM2.5', color: '#00ddfa' },
+  { iaqiKey: 'pm10Iaqi', trendKey: 'pm10', label: 'PM10', color: '#f8973c' },
+  { iaqiKey: 'so2Iaqi', trendKey: 'so2', label: 'SO₂', color: '#7ed957' },
+  { iaqiKey: 'no2Iaqi', trendKey: 'no2', label: 'NO₂', color: '#fad93e' },
+  { iaqiKey: 'coIaqi', trendKey: 'co', label: 'CO', color: '#c17cff' },
+  { iaqiKey: 'o3Iaqi', trendKey: 'o3', label: 'O₃', color: '#ff6b81' },
 ]
 
 interface AirPointDetail {
+  /** 数据源 ID（用于查询 aqiDetail 近 12 小时趋势） */
+  id?: number
   name: string
   aqi: number | null
   aqiLevel: string
   values: Record<string, number | null>
+  /** 点击时的屏幕像素坐标（弹窗锚定位置，缺失时居中） */
+  pos?: AirPointClickPos
+}
+
+/** 从 aqiDetail 返回中提取趋势数组（兼容直接返回数组或包一层对象的结构） */
+function extractTrendRows(value: unknown): AirTrendItem[] {
+  let rows: UnknownRecord[] = []
+  if (Array.isArray(value)) {
+    rows = value.filter(item => !!item && typeof item === 'object') as UnknownRecord[]
+  } else if (value && typeof value === 'object') {
+    const record = value as UnknownRecord
+    for (const key of ['trendList', 'trend', 'list', 'rows', 'data', 'hours']) {
+      const nested = record[key]
+      if (Array.isArray(nested)) {
+        rows = nested.filter(item => !!item && typeof item === 'object') as UnknownRecord[]
+        break
+      }
+    }
+  }
+  return rows
+    .map((row): AirTrendItem | null => {
+      const hourText = firstText(row, ['hour', 'time', 'dataTime'])
+      if (!hourText) return null
+      const numVal = (key: string) => {
+        const raw = row[key]
+        const num = Number(raw)
+        return raw != null && Number.isFinite(num) ? num : null
+      }
+      return {
+        hour: hourText,
+        pm25: numVal('pm25'),
+        pm10: numVal('pm10'),
+        so2: numVal('so2'),
+        no2: numVal('no2'),
+        co: numVal('co'),
+        o3: numVal('o3'),
+      }
+    })
+    .filter((item): item is AirTrendItem => !!item)
+}
+
+/** 生成近 12 小时小时级趋势 mock（接口不可用时兜底）：以各污染物当前 IAQI 为基准随机波动，按站点名稳定 */
+function buildMockTrend(detail: AirPointDetail): AirTrendItem[] {
+  let seed = [...detail.name].reduce((acc, ch) => acc + ch.charCodeAt(0), 7)
+  const random = () => {
+    seed = (seed * 9301 + 49297) % 233280
+    return seed / 233280
+  }
+  const items: AirTrendItem[] = []
+  for (let i = 11; i >= 0; i -= 1) {
+    const item: AirTrendItem = { hour: dayjs().subtract(i, 'hour').format('HH:00') }
+    AIR_DETAIL_FIELDS.forEach(({ iaqiKey, trendKey }) => {
+      const base = Number(detail.values[iaqiKey])
+      const ref = Number.isFinite(base) && base > 0 ? base : 50
+      ;(item as unknown as Record<string, unknown>)[trendKey] = Math.round(ref * (0.7 + random() * 0.6) * 10) / 10
+    })
+    items.push(item)
+  }
+  return items
+}
+
+/** 弹窗固定宽高（定位计算与内容布局均基于此尺寸，避免加载前后尺寸抖动） */
+const AIR_POPUP_WIDTH = 400
+const AIR_POPUP_HEIGHT = 350
+/** 弹窗与点击位置的间距 */
+const AIR_POPUP_GAP = 14
+
+/** 空气质量站监测详情弹窗：6 项污染物可勾选（默认勾选第一项，至少保留一项），底部近 12 小时趋势图 */
+function AirStationDetailPopup({ detail, onClose }: { detail: AirPointDetail; onClose: () => void }) {
+  // 勾选项默认第一项（PM2.5），trendKey 即趋势数据字段
+  const [checkedKeys, setCheckedKeys] = useState<string[]>([AIR_DETAIL_FIELDS[0].trendKey])
+  const [trend, setTrend] = useState<AirTrendItem[]>([])
+  const [isMock, setIsMock] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const chartBoxRef = useRef<HTMLDivElement>(null)
+
+  // 弹窗立即展示（卡片数据随点击已返回），趋势接口异步加载并带 loading（初始 true，按站点 key 重挂载时重置）
+  useEffect(() => {
+    let cancelled = false
+    const fallback = () => {
+      if (cancelled) return
+      setTrend(buildMockTrend(detail))
+      setIsMock(true)
+      setLoading(false)
+    }
+    if (detail.id == null) {
+      fallback()
+      return
+    }
+    dataSourceApi.aqiDetail(detail.id)
+      .then(res => {
+        if (cancelled) return
+        const rows = extractTrendRows(res.data)
+        if (rows.length) {
+          setTrend(rows)
+          setIsMock(false)
+        } else {
+          fallback()
+          return
+        }
+        setLoading(false)
+      })
+      .catch(fallback)
+    return () => { cancelled = true }
+  }, [detail])
+
+  // 勾选切换：允许多选；仅剩一项勾选时不允许取消
+  const toggleField = (trendKey: string) => {
+    setCheckedKeys(prev => {
+      if (prev.includes(trendKey)) return prev.length > 1 ? prev.filter(key => key !== trendKey) : prev
+      return [...prev, trendKey]
+    })
+  }
+
+  // 趋势图：按勾选项重绘（勾选卡片即图例，隐藏 G2 自带图例）
+  useEffect(() => {
+    const container = chartBoxRef.current
+    if (!container || !trend.length) return undefined
+    const checkedFields = AIR_DETAIL_FIELDS.filter(field => checkedKeys.includes(field.trendKey))
+    const longData = trend.flatMap(row => checkedFields.map(field => ({
+      hour: row.hour,
+      label: field.label,
+      value: row[field.trendKey as keyof AirTrendItem] ?? null,
+    })))
+    const chart = new Chart({ container, autoFit: true })
+    chart.theme({ type: 'classicDark' })
+    chart.line()
+      .data(longData)
+      .encode('x', 'hour')
+      .encode('y', 'value')
+      .encode('color', 'label')
+      .style({ lineWidth: 2 })
+    chart.scale({ color: { range: checkedFields.map(field => field.color) } })
+    chart.axis({
+      x: { title: false, labelFontSize: 9, labelFill: '#5ca2d9', line: true, lineStroke: '#16436e' },
+      y: { title: false, labelFontSize: 9, labelFill: '#5ca2d9', grid: true, gridStroke: '#123252' },
+    })
+    chart.legend(false)
+    chart.render()
+    return () => { chart.destroy() }
+  }, [trend, checkedKeys])
+
+  // 弹窗固定宽高，优先展示在点击位置上方，上方放不下时翻转到下方；无坐标时居中
+  const pos = detail.pos
+  const showAbove = pos != null && pos.y >= AIR_POPUP_HEIGHT + AIR_POPUP_GAP
+  const anchorStyle: CSSProperties = pos
+    ? {
+        left: `min(max(${AIR_POPUP_WIDTH / 2 + 8}px, ${pos.x}px), calc(100% - ${AIR_POPUP_WIDTH / 2 + 8}px))`,
+        top: showAbove ? pos.y - AIR_POPUP_GAP : pos.y + AIR_POPUP_GAP,
+        transform: `translate(-50%, ${showAbove ? '-100%' : '0'})`,
+      }
+    : { left: '50%', top: '50%', transform: 'translate(-50%, -50%)' }
+
+  return (
+    <div
+      className="absolute z-30 p-3 rounded-8px border border-[#00d4ff]/45 bg-[rgba(4,22,52,0.94)] shadow-[0_8px_28px_rgba(0,10,35,0.55)] flex flex-col box-border"
+      style={{ ...anchorStyle, width: AIR_POPUP_WIDTH, height: AIR_POPUP_HEIGHT }}
+    >
+      <div className="flex items-center justify-between mb-2 shrink-0">
+        <span className="text-[#00f0ff] text-13px font-bold truncate">{detail.name} 监测详情</span>
+        <button
+          type="button"
+          className="text-[#7088a8] hover:text-white text-13px leading-none px-1 cursor-pointer"
+          onClick={onClose}
+        >
+          ✕
+        </button>
+      </div>
+      <div className="flex items-center gap-2 mb-2 pb-2 border-b border-[#00d4ff]/20 shrink-0">
+        <span className="text-[#5ca2d9] text-11px">综合 AQI</span>
+        <span className="text-[#00ffff] font-mono font-bold text-18px">{detail.aqi != null ? detail.aqi : '--'}</span>
+        {detail.aqiLevel && (
+          <span className="text-10px px-1.5 py-0.5 rounded bg-[#0a3a6b] text-[#7bd7ff] border border-[#00d4ff]/30">{detail.aqiLevel}</span>
+        )}
+      </div>
+      {/* 六项污染物卡片：点击切换勾选，联动下方趋势图 */}
+      <div className="grid grid-cols-3 gap-1.5 shrink-0">
+        {AIR_DETAIL_FIELDS.map(({ iaqiKey, trendKey, label, color }) => {
+          const checked = checkedKeys.includes(trendKey)
+          return (
+            <button
+              key={trendKey}
+              type="button"
+              onClick={() => toggleField(trendKey)}
+              className={`relative text-center rounded-6px border px-1 py-1.5 cursor-pointer transition-all bg-[rgba(8,40,84,0.55)] ${checked ? 'border-[#00d4ff]/80 shadow-[0_0_8px_rgba(0,212,255,0.3)]' : 'border-[#00d4ff]/15 opacity-70'}`}
+            >
+              {checked && <span className="absolute top-0.5 right-1 text-9px font-bold" style={{ color }}>✓</span>}
+              <div className="font-mono font-bold text-14px" style={{ color: checked ? color : '#8ca3bd' }}>{formatAirValue(detail.values[iaqiKey])}</div>
+              <div className="text-[#5ca2d9] text-10px mt-0.5">{label}</div>
+            </button>
+          )
+        })}
+      </div>
+      {/* 近 12 小时趋势图（趋势接口异步加载，加载中显示 loading） */}
+      <div className="mt-2 pt-2 border-t border-[#00d4ff]/20 flex-1 min-h-0 flex flex-col">
+        <div className="flex items-center justify-between text-10px mb-1 shrink-0">
+          <span className="text-[#5ca2d9]">近12小时趋势图</span>
+          {isMock && !loading && <span className="text-[#7088a8]">示例数据</span>}
+        </div>
+        <div className="relative flex-1 min-h-0">
+          {loading && (
+            <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-1.5 text-[#5ca2d9] text-11px">
+              <Spin size="small" />
+              <span>趋势数据加载中…</span>
+            </div>
+          )}
+          <div ref={chartBoxRef} className={`w-full h-full ${loading ? 'invisible' : ''}`} />
+        </div>
+      </div>
+    </div>
+  )
 }
 
 export default function Monitor() {
@@ -521,6 +736,7 @@ export default function Monitor() {
         const airStations: AirQualityPoint[] = records
           .filter(item => item.dataType === 'air_quality_station' && item.aqiLevel != null)
           .map(item => ({
+            id: Number(item.id) || undefined,
             name: item.deviceName,
             lng: item.lng as number,
             lat: item.lat as number,
@@ -560,9 +776,10 @@ export default function Monitor() {
     return () => { cancelled = true }
   }, [allDepts, selection])
 
-  // 点击地图空气质量打点：直接展示该站点综合 AQI 与各污染物分指数 IAQI（数据已随列表返回）
-  const handleAirPointClick = (point: AirQualityPoint) => {
+  // 点击地图空气质量打点：弹窗锚定在点击位置，展示综合 AQI 与各污染物分指数 IAQI（数据已随列表返回）
+  const handleAirPointClick = (point: AirQualityPoint, pos?: AirPointClickPos) => {
     setAirDetail({
+      id: point.id,
       name: point.name,
       aqi: point.value,
       aqiLevel: point.aqiLevel ?? '',
@@ -574,6 +791,7 @@ export default function Monitor() {
         coIaqi: point.coIaqi ?? null,
         o3Iaqi: point.o3Iaqi ?? null,
       },
+      pos,
     })
   }
 
@@ -843,35 +1061,13 @@ export default function Monitor() {
           </div>
         )}
 
-        {/* 空气质量打点详情弹窗 */}
+        {/* 空气质量打点详情弹窗（唯一弹窗，锚定在图标点击位置；key 按站点切换重置勾选状态） */}
         {airDetail && (
-          <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 z-30 w-290px p-3 rounded-8px border border-[#00d4ff]/45 bg-[rgba(4,22,52,0.94)] shadow-[0_8px_28px_rgba(0,10,35,0.55)]">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-[#00f0ff] text-13px font-bold truncate">{airDetail.name} 监测详情</span>
-              <button
-                type="button"
-                className="text-[#7088a8] hover:text-white text-13px leading-none px-1 cursor-pointer"
-                onClick={() => setAirDetail(null)}
-              >
-                ✕
-              </button>
-            </div>
-            <div className="flex items-center gap-2 mb-2 pb-2 border-b border-[#00d4ff]/20">
-              <span className="text-[#5ca2d9] text-11px">综合 AQI</span>
-              <span className="text-[#00ffff] font-mono font-bold text-18px">{airDetail.aqi != null ? airDetail.aqi : '--'}</span>
-              {airDetail.aqiLevel && (
-                <span className="text-10px px-1.5 py-0.5 rounded bg-[#0a3a6b] text-[#7bd7ff] border border-[#00d4ff]/30">{airDetail.aqiLevel}</span>
-              )}
-            </div>
-            <div className="grid grid-cols-3 gap-1.5 text-center">
-              {IAQI_DETAIL_FIELDS.map(({ key, label }) => (
-                <div key={key}>
-                  <div className="text-[#00ffff] font-mono font-bold text-13px">{formatAirValue(airDetail.values[key])}</div>
-                  <div className="text-[#5ca2d9] text-10px mt-0.5">{label}</div>
-                </div>
-              ))}
-            </div>
-          </div>
+          <AirStationDetailPopup
+            key={airDetail.id ?? airDetail.name}
+            detail={airDetail}
+            onClose={() => setAirDetail(null)}
+          />
         )}
 
         {/* 左下浮层：数据源概况 */}
