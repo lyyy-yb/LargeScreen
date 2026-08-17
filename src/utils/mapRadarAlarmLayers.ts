@@ -1,4 +1,5 @@
 import { PointLayer, type ILayer, type Scene } from '@antv/l7'
+import { bindZoomNameLayer, RADAR_NAME_MIN_ZOOM } from './mapZoomName'
 
 /**
  * 雷达突发告警点（/dpSys/hbdp/leida/alarmPoint）：
@@ -15,6 +16,8 @@ export interface RadarAlarmPoint {
 export interface RadarAlarmLayers {
   layer: ILayer
   setData: (points: RadarAlarmPoint[]) => void
+  /** 页面级显隐开关接入名称文字层（实际可见性还受缩放阈值控制） */
+  setNameVisible: (visible: boolean) => void
   destroy: () => void
 }
 
@@ -43,13 +46,44 @@ export async function createRadarAlarmLayers(
     .style({ raisingHeight, heightfixed: true, depth: false, stroke: '#ffffff', strokeWidth: 1, opacity: 0.95 })
   scene.addLayer(layer)
 
+  // 突发点位名称文字层：地图放大到 RADAR_NAME_MIN_ZOOM 后自动显示（仅有名称的点位）
+  const nameLayer = new PointLayer({
+    zIndex: 31,
+    name: 'radar-alarm-name-layer',
+    enablePicking: false,
+  })
+    .source(decorate(points).filter(point => point.name), { parser: { type: 'json', x: 'lng', y: 'lat' } })
+    .shape('name', 'text')
+    .size(9)
+    .color('#ffe9e8')
+    .style({
+      textAnchor: 'top',
+      textOffset: [0, -20],
+      spacing: 2,
+      padding: [2, 2],
+      stroke: '#3a0a0a',
+      strokeWidth: 2,
+      raisingHeight,
+      heightfixed: true,
+      textAllowOverlap: true,
+      depth: false,
+    })
+  scene.addLayer(nameLayer)
+  const nameControl = bindZoomNameLayer(scene, nameLayer, RADAR_NAME_MIN_ZOOM)
+
   return {
     layer,
     setData(nextPoints) {
-      layer.setData(decorate(nextPoints), { parser: { type: 'json', x: 'lng', y: 'lat' } })
+      const nextData = decorate(nextPoints)
+      layer.setData(nextData, { parser: { type: 'json', x: 'lng', y: 'lat' } })
+      nameLayer.setData(nextData.filter(point => point.name), { parser: { type: 'json', x: 'lng', y: 'lat' } })
+    },
+    setNameVisible(visible) {
+      nameControl.setBaseVisible(visible)
     },
     destroy() {
       scene.removeLayer(layer)
+      scene.removeLayer(nameLayer)
     },
   }
 }

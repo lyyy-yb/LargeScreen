@@ -35,7 +35,7 @@ export default function AuthGuard({ children }: AuthGuardProps) {
         if (!active) return
         logout()
         resetRegionContext()
-        message.error(error instanceof Error ? error.message : '用户信息初始化失败，请重新登录')
+        message.error(error instanceof Error ? error.message : '用户信息过期，需要重新登录')
       })
 
     return () => {

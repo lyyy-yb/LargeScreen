@@ -21,78 +21,12 @@ const typeOptions = [
   { value: 'manual_import', label: '人工采集导入' },
 ]
 
-const generateMinuteData = (): DataRecord[] => {
-  const records: DataRecord[] = []
-  const base = new Date('2023-12-01T00:00:00')
-  for (let i = 0; i < 30; i++) {
-    const t = new Date(base.getTime() + i * 60000)
-    const mt = t.toISOString().replace('T', ' ').slice(0, 19)
-    records.push({ id: `R${String(i + 1).padStart(3, '0')}`, name: `监测数据-${mt}`, deviceId: 'AQ001', location: '杭州市西湖区', accessTime: mt, status: '正常', airQualityData: { id: `AQ${i}`, monitorTime: mt, pm25: Math.floor(Math.random() * 10) + 1, o3: Math.floor(Math.random() * 20) + 30, temperature: Math.floor(Math.random() * 5) + 5, pressure: 103, humidity: Math.floor(Math.random() * 10) + 30, windSpeed: parseFloat((Math.random() * 2 + 0.3).toFixed(1)), windDirection: ['北风', '西风', '西北风'][Math.floor(Math.random() * 3)], rainfall: 0, dataLevel: 'minute' } })
-  }
-  return records
-}
-
-const generateHourData = (): DataRecord[] => {
-  const records: DataRecord[] = []
-  const base = new Date('2023-12-01T00:00:00')
-  for (let i = 0; i < 12; i++) {
-    const t = new Date(base.getTime() + i * 3600000)
-    const mt = t.toISOString().replace('T', ' ').slice(0, 13) + ':00:00'
-    records.push({ id: `RH${String(i + 1).padStart(3, '0')}`, name: `小时汇总-${mt}`, deviceId: 'AQ001', location: '杭州市西湖区', accessTime: mt, status: '已汇总', airQualityData: { id: `AQH${i}`, monitorTime: mt, pm25: Math.floor(Math.random() * 8) + 2, o3: Math.floor(Math.random() * 15) + 35, temperature: Math.floor(Math.random() * 4) + 6, pressure: 103, humidity: Math.floor(Math.random() * 8) + 32, windSpeed: parseFloat((Math.random() * 1.5 + 0.5).toFixed(1)), windDirection: ['北风', '西风'][Math.floor(Math.random() * 2)], rainfall: 0, dataLevel: 'hour' } })
-  }
-  return records
-}
-
-const generateMobileCarData = (): DataRecord[] => {
-  const records: DataRecord[] = []
-  const base = new Date('2026-04-08T10:54:10')
-  for (let i = 0; i < 30; i++) {
-    const t = new Date(base.getTime() - i * 3000)
-    const mt = t.toISOString().replace('T', ' ').slice(0, 19)
-    records.push({ id: `MC${String(i + 1).padStart(3, '0')}`, name: `走航数据-${mt}`, deviceId: 'HYD1009', location: '杭州市余杭区', accessTime: mt, status: '正常', lat: 30.03, lng: 120.84, mobileCarData: { id: `MCR${i}`, monitorTime: mt, totalSuspendedParticulates: parseFloat((Math.random() * 30 + 25).toFixed(2)), fineParticulates: parseFloat((Math.random() * 15 + 10).toFixed(2)), latitude: parseFloat((30.03 + Math.random() * 0.01).toFixed(4)), longitude: parseFloat((120.84 + Math.random() * 0.01).toFixed(4)), roadDustLoad: parseFloat((Math.random() * 0.8 + 0.01).toFixed(2)) } })
-  }
-  return records
-}
-
-const generateMSData = (): DataRecord[] => {
-  const records: DataRecord[] = []
-  const base = new Date('2023-03-03T07:48:58')
-  for (let i = 0; i < 33; i++) {
-    const t = new Date(base.getTime() + i * 1000)
-    const mt = t.toISOString().replace('T', ' ').slice(0, 19)
-    records.push({ id: `MS${String(i + 1).padStart(3, '0')}`, name: `MS数据-${mt}`, deviceId: 'MS001', location: '杭州市', accessTime: mt, status: '正常', lat: 30.4123, lng: 120.2669, customCollectData: { id: `MSR${i}`, monitorTime: mt, longitude: parseFloat((120.2669 + Math.random() * 0.0001).toFixed(6)), latitude: parseFloat((30.4123 + Math.random() * 0.0001).toFixed(6)), tvocs: parseFloat((Math.random() * 5 + 30).toFixed(6)) } })
-  }
-  return records
-}
-
-const generateNOXData = (): DataRecord[] => {
-  const records: DataRecord[] = []
-  const base = new Date('2023-03-03T07:48:58')
-  for (let i = 0; i < 33; i++) {
-    const t = new Date(base.getTime() + i * 1000)
-    const mt = t.toISOString().replace('T', ' ').slice(0, 19)
-    records.push({ id: `NX${String(i + 1).padStart(3, '0')}`, name: `NOX数据-${mt}`, deviceId: 'NOX001', location: '杭州市', accessTime: mt, status: '正常', lat: 30.4123, lng: 120.2669, noxCollectData: { id: `NXR${i}`, monitorTime: mt, longitude: parseFloat((120.2669 + Math.random() * 0.0001).toFixed(6)), latitude: parseFloat((30.4123 + Math.random() * 0.0001).toFixed(6)), nox: parseFloat((Math.random() * 50 + 150).toFixed(6)), no2: parseFloat((Math.random() * 30 + 80).toFixed(6)), no: parseFloat((Math.random() * 30 + 40).toFixed(6)) } })
-  }
-  return records
-}
-
-const mockDataSources: DataSource[] = [
-  { id: 'DS001', name: '杭州市环境监测站-1', type: 'air_quality_station', typeLabel: '空气质量检测站', protocol: 'http', protocolLabel: 'HTTP/HTTPS', connectionStatus: 'online', createdAt: '2025-11-01 10:00:00', description: '实时监测PM2.5、PM10等污染物浓度', records: [...generateMinuteData(), ...generateHourData()] },
-  { id: 'DS002', name: '走航车-HYD1009', type: 'mobile_monitor_car', typeLabel: '走航车', protocol: 'mqtt', protocolLabel: 'MQTT', connectionStatus: 'online', createdAt: '2025-11-02 14:30:00', description: '杭州区域走航监测', records: generateMobileCarData() },
-  { id: 'DS003', name: '无人机机场-临平', type: 'drone_sensor', typeLabel: '无人机传感器', protocol: 'websocket', protocolLabel: 'WebSocket', connectionStatus: 'online', createdAt: '2025-11-03 09:15:00', description: '无人机传感器数据接入', records: [{ id: 'R006', name: '无人机-001 飞行数据', deviceId: 'DRONE001', location: '杭州市临平区', accessTime: '2025-11-24 14:15:00', status: '飞行中', lat: 30.319126, lng: 120.141503 }, { id: 'R007', name: '无人机-002 飞行数据', deviceId: 'DRONE002', location: '杭州市上城区', accessTime: '2025-11-24 13:30:00', status: '已完成', lat: 30.275550, lng: 120.152300 }] },
-  { id: 'DS004', name: '工厂用电监控-萧山', type: 'power_monitor', typeLabel: '用电监控', protocol: 'mqtt', protocolLabel: 'MQTT', connectionStatus: 'offline', createdAt: '2025-11-04 16:45:00', description: '工业用电数据监测', records: [{ id: 'R008', name: '萧山工厂-1号 小时数据', deviceId: 'PWR001', location: '杭州市萧山区', accessTime: '2025-11-24 14:10:00', status: '离线' }] },
-  { id: 'DS005', name: '光量子雷达-西湖', type: 'radar_station', typeLabel: '雷达站', protocol: 'http', protocolLabel: 'HTTP/HTTPS', connectionStatus: 'online', createdAt: '2025-11-05 11:20:00', description: '污染物报警点位监测', records: [{ id: 'R009', name: '西湖区域扫描数据', deviceId: 'RADAR001', location: '杭州市西湖区', accessTime: '2025-11-24 14:05:00', status: '正常' }, { id: 'R010', name: '拱墅区扫描数据', deviceId: 'RADAR001', location: '杭州市拱墅区', accessTime: '2025-11-24 13:45:00', status: '正常' }] },
-  { id: 'DS006', name: '自定义采集-MS', type: 'manual_import', typeLabel: '人工采集导入', protocol: '', protocolLabel: '', connectionStatus: 'online', createdAt: '2025-11-07 09:00:00', description: 'TVOCs人工采集数据', records: generateMSData() },
-  { id: 'DS007', name: '自定义采集-NOX', type: 'manual_import', typeLabel: '人工采集导入', protocol: '', protocolLabel: '', connectionStatus: 'online', createdAt: '2025-11-08 10:00:00', description: '氮氧化物人工采集数据', records: generateNOXData() },
-  { id: 'DS008', name: '无人机视频采集', type: 'drone_video', typeLabel: '无人机视频', protocol: 'websocket', protocolLabel: 'WebSocket', connectionStatus: 'online', createdAt: '2025-11-07 10:30:00', description: '无人机航拍视频数据', records: [{ id: 'R012', name: '无人机视频-20251124', deviceId: 'VIDEO001', location: '杭州市拱墅区', accessTime: '2025-11-24 09:30:00', status: '已上传', lat: 30.319126, lng: 120.141503, duration: '15:32', fileSize: '2.3GB', resolution: '4K' }, { id: 'R013', name: '无人机视频-20251123', deviceId: 'VIDEO001', location: '杭州市西湖区', accessTime: '2025-11-23 14:00:00', status: '已上传', lat: 30.275550, lng: 120.152300, duration: '12:18', fileSize: '1.8GB', resolution: '4K' }] },
-]
-
 export default function DataManage() {
   const navigate = useNavigate()
   const roleKey = useAppStore(state => state.regionContext?.roleKey)
   // 乡镇业务人员无监控大屏权限，不显示返回按钮
   const showBackToMonitor = roleKey !== 'town_business'
-  const [dataSources] = useState<DataSource[]>(mockDataSources)
+  const [dataSources] = useState<DataSource[]>([])
   const [selectedType, setSelectedType] = useState('')
   const [selectedStatus, setSelectedStatus] = useState('')
   const [searchText, setSearchText] = useState('')

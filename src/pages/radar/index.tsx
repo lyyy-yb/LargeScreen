@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef, type CSSProperties } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Button, Select, Modal, Popover, QRCode, Spin, Form, Input, message } from 'antd'
+import { Button, Select, Modal, Popover, QRCode, Spin, Form, Input, message, Tag } from 'antd'
 import { ArrowLeftOutlined, EnvironmentOutlined, ExclamationCircleOutlined, InboxOutlined, SendOutlined, WarningFilled } from '@ant-design/icons'
 import L7MapView from '@/components/L7MapView'
 import FlyListModel from '@/components/MapBox/FlyListModel'
@@ -13,6 +13,7 @@ import { toRegionQuery, isBusinessRole } from '@/utils/region'
 import { getPerspectiveIcon } from '@/utils/iconPerspective'
 import { createRadarScanOverlay, type RadarScanOverlay } from '@/utils/radarScanOverlay'
 import { PointLayer, type ILayer, type Scene } from '@antv/l7'
+import { isDockDispatchable, normalizeDock, getDockModeColor, type NormalizedDock } from '@/utils/dock'
 
 interface AlarmItem { dapLat: number; dapLng: number; times: number; address: string; type: number }
 interface PollutionItem { name: string; weizhi: string; leixing: string; hangye: string; xianzhuang: string; lng: number; lat: number; city?: string; quxian?: string }
@@ -207,11 +208,6 @@ function CreatePollutionModal({ open, initial, leixingOptions, cityItems, distri
   )
 }
 
-const mockDocks = [
-  { dockName: '临平交通-塘栖机场', dockCode: 'DOCK001' },
-  { dockName: '良渚街道综合信息指挥室', dockCode: 'DOCK002' },
-]
-
 interface AlarmPointPanelProps {
   title: string
   subtitle: string
@@ -304,51 +300,44 @@ export default function Radar() {
   const [alarmLoading, setAlarmLoading] = useState(false)
   const [pollutionList, setPollutionList] = useState<PollutionItem[]>([])
   const [pollutionLoading, setPollutionLoading] = useState(false)
-  // 污染源类型筛选（与原项目一致：options4leixing 接口动态获取）
   const [leixingFilters, setLeixingFilters] = useState<{ value: string; label: string }[]>([{ value: '', label: '全部' }])
-  const [docks, setDocks] = useState(mockDocks)
-  // 雷达列表与当前选中雷达（借鉴原项目：进页查雷达列表并自动飞到雷达位置）
+  const [docks, setDocks] = useState<NormalizedDock[]>([])
   const [radarList, setRadarList] = useState<RadarStation[]>([])
   const [radarLoading, setRadarLoading] = useState(false)
   const [selectedBsiId, setSelectedBsiId] = useState('')
   const [sceneReady, setSceneReady] = useState(false)
   const sceneRef = useRef<Scene | null>(null)
   const radarLayersRef = useRef<{ scan: RadarScanOverlay | null; icon: ILayer | null }>({ scan: null, icon: null })
-  // 定位高亮图层（借鉴原项目：点击列表点位后在该点绘制扩散动画圆）
   const highlightLayerRef = useRef<ILayer | null>(null)
 
-  // 派遣无人机巡逻（右键菜单）
   const [flyVisible, setFlyVisible] = useState(false)
   const [flyLngLat, setFlyLngLat] = useState<{ lng: number; lat: number }>({ lng: 0, lat: 0 })
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; lng: number; lat: number } | null>(null)
-  // 告警点位点击弹窗 / 地图空白点击派遣弹窗 / 新建污染源弹窗（对齐 antd-demo mapBox popup 链路）
   const [alarmPopup, setAlarmPopup] = useState<{ item: AlarmItem; x: number; y: number } | null>(null)
   const [dispatchPopup, setDispatchPopup] = useState<{ x: number; y: number; lng: number; lat: number } | null>(null)
   const [createVisible, setCreateVisible] = useState(false)
   const [createInitial, setCreateInitial] = useState<{ weizhi?: string; lng?: number; lat?: number; city?: string; quxian?: string } | null>(null)
-  // 新增污染源成功后触发附近污染源列表重查
   const [pollutionVersion, setPollutionVersion] = useState(0)
-  // 图层点击与场景点击的时序去重（点击告警点时不再弹派遣入口）
   const lastMarkerClickRef = useRef(0)
 
-  // 加载无人机场数据（突发/常规点位由选中雷达的 alarmPoint 查询驱动，见下方 useEffect）
   useEffect(() => {
     const loadData = async () => {
       if (!querySelection) return
       const params = toRegionQuery(querySelection)
       const isHangzhouScope = !querySelection.cityName || querySelection.cityName === '杭州市'
-      setDocks(isHangzhouScope && !querySelection.countyName ? mockDocks : [])
+      let list: NormalizedDock[] = []
       try {
         const dockRes = await dockList(params)
         if (dockRes?.resultCode === 0 && Array.isArray(dockRes.data) && dockRes.data.length) {
-          setDocks(dockRes.data)
+          list = dockRes.data.map((item: Record<string, unknown>) => normalizeDock(item))
         }
-      } catch (e) { console.warn('无人机API不可用，使用mock', e) }
+        // 接口返回空或异常：保持空列表，不兜底 mock
+      } catch (e) { console.warn('无人机机场列表加载失败', e) }
+      setDocks(list)
     }
     loadData()
   }, [querySelection])
 
-  // 污染源类型选项（原项目 rightBar：options4leixing({type:'0'}) 前置“全部”）
   useEffect(() => {
     options4leixing({ type: '0' })
       .then(res => {
@@ -356,11 +345,9 @@ export default function Radar() {
           setLeixingFilters([{ value: '', label: '全部' }, ...res.data.map((v: string) => ({ value: v, label: v }))])
         }
       })
-      .catch(() => { /* 类型接口不可用时保留默认“全部” */ })
+      .catch(() => {})
   }, [])
 
-  // 污染源列表（原项目：按选中雷达经纬度查附近污染源 wuranListByLngLat；新版本权限改造：
-  // 附带当前角色区域参数限制可见范围，并在前端按 querySelection 兼容过滤，切换雷达/区域/类型时重查）
   useEffect(() => {
     const radar = radarList.find(item => String(item.bsiId) === String(selectedBsiId))
     if (!radar || !Number.isFinite(radar.bsiLng) || !Number.isFinite(radar.bsiLat)) return
@@ -530,7 +517,7 @@ export default function Radar() {
       return
     }
     scene.setZoomAndCenter(14, [obj.dapLng, obj.dapLat])
-    const rColor = tfList.some(i => i.address === obj.address && i.dapLng === obj.dapLng) ? '#FFB024' : '#FF3936'
+    const rColor = tfList.some(i => i.address === obj.address && i.dapLng === obj.dapLng) ? '#FF3936' : '#FFB024'
     ensureHighlightLayer(scene).setData([{ ...obj, rColor }], { parser: { type: 'json', x: 'dapLng', y: 'dapLat' } })
     message.info(`定位到: ${obj.address}`)
   }
@@ -544,13 +531,60 @@ export default function Radar() {
   }
   const showTitle = (title: string) => <span className="text-[#A8D6FF]">{title}</span>
   const showContent = (obj: AlarmItem) => (
-    <div className="flex-col w-260px text-[#A8D6FF]">
-      {docks.length ? docks.map(item => (
-        <div key={item.dockCode} className="flex items-center justify-between py-1">
-          <span className="text-sm">{item.dockName}</span>
-          <Button size="small" className="!text-[#01C2FF] !border-[#6788AF] !bg-[rgba(255,255,255,0.1)] !rounded-full" onClick={() => showConfirm(item.dockName, item.dockCode, obj)}>选择</Button>
-        </div>
-      )) : (
+    <div className="flex flex-col w-290px text-[#A8D6FF] gap-1">
+      {docks.length ? docks.map(item => {
+        const dispatchable = isDockDispatchable(item)
+        return (
+          <div key={item.dockCode} className="flex items-center justify-between py-1.5 border-b border-[rgba(255,255,255,0.08)] last:border-b-0">
+            <div className="flex items-center gap-1.5 min-w-0 pr-2">
+              <span className="text-sm text-[#A8D6FF] truncate">{item.dockName}</span>
+
+              {/* 在线/离线 status Tag：与列表样式保持一致 */}
+              <span
+                className="text-10px font-medium px-1.5 py-0.2 rounded-full inline-flex items-center gap-1 border shrink-0"
+                style={
+                  item.online
+                    ? {
+                        color: '#00ff88',
+                        backgroundColor: 'rgba(0, 255, 136, 0.15)',
+                        borderColor: 'rgba(0, 255, 136, 0.4)',
+                      }
+                    : {
+                        color: '#94a3b8',
+                        backgroundColor: 'rgba(148, 163, 184, 0.15)',
+                        borderColor: 'rgba(148, 163, 184, 0.3)',
+                      }
+                }
+              >
+                <span className={`w-1.2 h-1.2 rounded-full ${item.online ? 'bg-[#00ff88] shadow-[0_0_5px_#00ff88]' : 'bg-[#94a3b8]'}`} />
+                {item.statusText}
+              </span>
+
+              {/* modeCode 模式 */}
+              <span
+                className="text-10px font-medium px-1 py-0.2 rounded border shrink-0"
+                style={{
+                  color: getDockModeColor(item.modeCode),
+                  borderColor: `${getDockModeColor(item.modeCode)}55`,
+                  backgroundColor: `${getDockModeColor(item.modeCode)}20`,
+                }}
+              >
+                {item.modeLabel}
+              </span>
+            </div>
+
+            {/* 选择按钮：非在线且空闲时 disabled 禁用 */}
+            <Button
+              size="small"
+              disabled={!dispatchable}
+              className="!text-[#01C2FF] !border-[#6788AF] !bg-[rgba(255,255,255,0.1)] !rounded-full shrink-0 disabled:!text-[rgba(255,255,255,0.3)] disabled:!border-[rgba(255,255,255,0.15)] disabled:!bg-[rgba(255,255,255,0.05)] disabled:!cursor-not-allowed"
+              onClick={() => showConfirm(item.dockName, item.dockCode, obj)}
+            >
+              选择
+            </Button>
+          </div>
+        )
+      }) : (
         <div className="py-3 flex flex-col items-center gap-1">
           <InboxOutlined className="text-24px text-[#A8D6FF]/45" />
           <span className="text-12px text-[#A8D6FF]/60">当前区域暂无可用无人机机场</span>
@@ -645,8 +679,8 @@ export default function Radar() {
   }
 
   const markers = [
-    ...tfList.map(i => ({ lng: i.dapLng, lat: i.dapLat, name: i.address, color: '#FFB024', size: 14, times: i.times, alarmType: i.type })),
-    ...cgList.map(i => ({ lng: i.dapLng, lat: i.dapLat, name: i.address, color: '#FF3936', size: 10, times: i.times, alarmType: i.type })),
+    ...tfList.map(i => ({ lng: i.dapLng, lat: i.dapLat, name: i.address, color: '#FF3936', size: 11, times: i.times, alarmType: i.type })),
+    ...cgList.map(i => ({ lng: i.dapLng, lat: i.dapLat, name: i.address, color: '#FFB024', size: 10, times: i.times, alarmType: i.type })),
   ]
   const mapCounty = districts.find(item => String(item.adcode) === mapSelection?.countyCode)
   const mapCity = cities.find(item => item.adcode === mapSelection?.cityCode)

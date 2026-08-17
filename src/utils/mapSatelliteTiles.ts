@@ -6,7 +6,7 @@ export const SATELLITE_TILE_URL = '/offMap/api/tilesets/zjw/{z}/{x}/{y}.jpg'
 export interface SatelliteTilesOptions {
   /** 图层层级，默认 1（垫底） */
   zIndex?: number
-  /** 底图不透明度 0~1，默认 0.6。值越小底图越淡、数据越突出 */
+  /** 底图不透明度 0~1，默认 0.95。值越小底图越淡、数据越突出 */
   opacity?: number
   /** 低于该缩放级别不请求/不显示卫星瓦片（节省带宽） */
   minZoom?: number

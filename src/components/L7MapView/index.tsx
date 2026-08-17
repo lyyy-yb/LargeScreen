@@ -78,7 +78,7 @@ export default function L7MapView({
         .size(11)
         .style({
           textAnchor: 'top',
-          textOffset: [0, 16],
+          textOffset: [0, -25],
           stroke: '#003366',
           strokeWidth: 1.5,
         })
@@ -105,8 +105,8 @@ export default function L7MapView({
       .color('#A8D6FF')
       .size(11)
       .style({
-        textAnchor: 'bottom',
-        textOffset: [0, -8],
+        textAnchor: 'top',
+        textOffset: [0, -20],
         stroke: '#003366',
         strokeWidth: 1.5,
       })

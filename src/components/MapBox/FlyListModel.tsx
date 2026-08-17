@@ -5,14 +5,7 @@ import { dockList, wrjPatrol } from '@/servers/mapBox'
 import { cities, districts } from '@/utils/city'
 import { useAppStore } from '@/stores'
 import { toRegionQuery } from '@/utils/region'
-
-interface DockItem {
-  dockName: string
-  dockCode: string
-  dockLng?: number
-  dockLat?: number
-  dockCity?: string
-}
+import { isDockDispatchable, normalizeDock, getDockModeColor, type NormalizedDock } from '@/utils/dock'
 
 interface FlyListModelProps {
   visible: boolean
@@ -22,15 +15,9 @@ interface FlyListModelProps {
   lngLat: { lng: number; lat: number }
 }
 
-// Mock机场数据
-const mockDocks: DockItem[] = [
-  { dockName: '临平交通-塘栖机场', dockCode: 'DOCK001' },
-  { dockName: '良渚街道综合信息指挥室', dockCode: 'DOCK002' },
-]
-
 export default function FlyListModel({ visible, setVisible, curCity, curDistrict, lngLat }: FlyListModelProps) {
   const querySelection = useAppStore(state => state.regionContext?.querySelection)
-  const [docks, setDocks] = useState<DockItem[]>([])
+  const [docks, setDocks] = useState<NormalizedDock[]>([])
   const [loading, setLoading] = useState(false)
   const [modal, contextHolder] = Modal.useModal()
 
@@ -43,12 +30,12 @@ export default function FlyListModel({ visible, setVisible, curCity, curDistrict
         const res = await dockList(querySelection
           ? toRegionQuery(querySelection)
           : { city: cityName, district: districtName })
-        if (res?.resultCode === 0 && Array.isArray(res.data)) {
-          setDocks(res.data)
+        if (res?.resultCode === 0 && Array.isArray(res.data) && res.data.length > 0) {
+          setDocks(res.data.map(item => normalizeDock(item)))
           return
         }
-      } catch (e) { console.warn('机场API不可用，使用mock', e) }
-      setDocks(mockDocks)
+      } catch (e) { console.warn('机场列表加载失败', e) }
+      setDocks([])
     }
 
     void loadDocks().finally(() => setLoading(false))
@@ -75,7 +62,7 @@ export default function FlyListModel({ visible, setVisible, curCity, curDistrict
         return
       }
     } catch (e) { console.warn('派遣API不可用', e) }
-    Modal.success({ title: '派遣成功（Mock）', content: '无人机已派遣（模拟）' })
+    Modal.success({ title: '派遣失败', content: '网络异常，请稍后重试' })
     setVisible(false)
   }
 
@@ -87,22 +74,65 @@ export default function FlyListModel({ visible, setVisible, curCity, curDistrict
       destroyOnClose
       footer={null}
     >
-      <div className="flex-col w-full c-#A8D6FF">
+      <div className="flex flex-col w-full text-[#A8D6FF] gap-2 py-1">
         {loading && (
-          <div className="flex flex-col items-center justify-center gap-2 py-6 c-#8aa8c8">
+          <div className="flex flex-col items-center justify-center gap-2 py-6 text-[#8aa8c8]">
             <Spin size="small" />
             <span>机场列表加载中…</span>
           </div>
         )}
-        {!loading && docks.map(item => (
-          <div key={item.dockCode} className="line-height-30px w-full inline-flex items-center justify-between py-1">
-            <div className="inline-flex items-center line-height-26px">
-              <div className="mr-4px">{item.dockName}</div>
+        {!loading && docks.map(item => {
+          const dispatchable = isDockDispatchable(item)
+          return (
+            <div key={item.dockCode} className="w-full flex items-center justify-between py-2 border-b border-[rgba(255,255,255,0.1)] last:border-b-0">
+              <div className="flex items-center gap-2 min-w-0 pr-2">
+                <span className="text-14px font-medium text-[#A8D6FF] truncate">{item.dockName}</span>
+
+                {/* 在线/离线 status Tag：与列表样式保持完全一致 */}
+                <span
+                  className="text-11px font-medium px-2 py-0.5 rounded-full inline-flex items-center gap-1 border shrink-0"
+                  style={
+                    item.online
+                      ? {
+                          color: '#00ff88',
+                          backgroundColor: 'rgba(0, 255, 136, 0.15)',
+                          borderColor: 'rgba(0, 255, 136, 0.4)',
+                        }
+                      : {
+                          color: '#94a3b8',
+                          backgroundColor: 'rgba(148, 163, 184, 0.15)',
+                          borderColor: 'rgba(148, 163, 184, 0.3)',
+                        }
+                  }
+                >
+                  <span className={`w-1.5 h-1.5 rounded-full ${item.online ? 'bg-[#00ff88] shadow-[0_0_6px_#00ff88]' : 'bg-[#94a3b8]'}`} />
+                  {item.statusText}
+                </span>
+
+                {/* modeCode 模式 */}
+                <span
+                  className="text-11px font-medium px-1.5 py-0.2 rounded border shrink-0"
+                  style={{
+                    color: getDockModeColor(item.modeCode),
+                    borderColor: `${getDockModeColor(item.modeCode)}55`,
+                    backgroundColor: `${getDockModeColor(item.modeCode)}20`,
+                  }}
+                >
+                  {item.modeLabel}
+                </span>
+              </div>
+              <Button
+                size="small"
+                type="primary"
+                disabled={!dispatchable}
+                onClick={() => showConfirm(item.dockName, item.dockCode)}
+              >
+                选择
+              </Button>
             </div>
-            <Button size="small" onClick={() => showConfirm(item.dockName, item.dockCode)}>选择</Button>
-          </div>
-        ))}
-        {!loading && docks.length === 0 && <div className="w-full text-align-center line-height-60px color-#999">暂无数据</div>}
+          )
+        })}
+        {!loading && docks.length === 0 && <div className="w-full text-center py-8 text-[#999]">暂无数据</div>}
       </div>
       {contextHolder}
     </Modal>

@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Button, Tag, Modal, Image, Spin, message } from 'antd'
-import { ArrowLeftOutlined, RocketOutlined, VideoCameraOutlined, EnvironmentOutlined, DashboardOutlined, SendOutlined } from '@ant-design/icons'
+import { Button, Image, Spin, message } from 'antd'
+import { ArrowLeftOutlined, RocketOutlined, VideoCameraOutlined, EnvironmentOutlined, DashboardOutlined, SendOutlined, PlayCircleOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import L7MapView from '@/components/L7MapView'
 import { dockList, listFlyJob, listFlyPlan, listFlyResult } from '@/servers/mapBox'
@@ -12,39 +12,13 @@ import { cities, districts } from '@/utils/city'
 import FlyListModel from '@/components/MapBox/FlyListModel'
 import type { RegionSelection } from '@/types/region'
 import type { Scene } from '@antv/l7'
+import { normalizeDock, getDockModeColor, type NormalizedDock } from '@/utils/dock'
 
-interface DockItem { dockCode: string; dockName: string; dockAddress: string; dockLat: number; dockLng: number; status: string }
 interface TaskItem { jobID: string; jobName: string; jobTime: string; jobStatus: string; dockCode: string }
 interface PlanItem { planId: string; planName: string; startDate: string; flyTime: string; dockCode: string; lineName: string }
 interface FlyResultItem { resultsID: string; resultsTime: string; resultsType: string; resultsUrl: string }
 
 interface SensorData { pm25: number; pm10: number; altitude: number; battery: number; speed: number; signal: number }
-interface VideoItem { id: string; name: string; duration: string; resolution: string; size: string; date: string; status: string }
-interface RoutePoint { name: string; lng: number; lat: number }
-
-const mockSensor: SensorData = { pm25: 35, pm10: 68, altitude: 120, battery: 78, speed: 8.5, signal: 92 }
-
-const mockVideos: VideoItem[] = [
-  { id: 'V001', name: '临平道路巡查_20251124', duration: '12:35', resolution: '4K (3840×2160)', size: '1.2GB', date: '2025-11-24', status: '已完成' },
-  { id: 'V002', name: '良渚绿化巡查_20251124', duration: '08:20', resolution: '1080P (1920×1080)', size: '680MB', date: '2025-11-24', status: '录制中' },
-  { id: 'V003', name: '西湖景区航拍_20251123', duration: '15:42', resolution: '4K (3840×2160)', size: '1.8GB', date: '2025-11-23', status: '已完成' },
-  { id: 'V004', name: '余杭工地监测_20251122', duration: '06:15', resolution: '1080P (1920×1080)', size: '420MB', date: '2025-11-22', status: '已完成' },
-]
-
-const mockRoutes: Record<string, RoutePoint[]> = {
-  DOCK001: [
-    { name: '起飞点-塘栖机场', lng: 120.299, lat: 30.419 },
-    { name: '巡查点-望梅高架', lng: 120.310, lat: 30.405 },
-    { name: '巡查点-京杭大运河', lng: 120.285, lat: 30.395 },
-    { name: '返航点-塘栖机场', lng: 120.299, lat: 30.419 },
-  ],
-  DOCK002: [
-    { name: '起飞点-良渚机场', lng: 120.141, lat: 30.319 },
-    { name: '巡查点-良渚文化村', lng: 120.155, lat: 30.330 },
-    { name: '巡查点-西溪湿地', lng: 120.120, lat: 30.280 },
-    { name: '返航点-良渚机场', lng: 120.141, lat: 30.319 },
-  ],
-}
 
 const statusObj: Record<string, { message: string; color: string }> = {
   '1': { message: '等待中', color: '#ffb024' },
@@ -54,29 +28,6 @@ const statusObj: Record<string, { message: string; color: string }> = {
   '5': { message: '失败', color: '#f12a27' },
   '6': { message: '任务中断', color: '#f37472' },
 }
-
-const createSensorData = (): SensorData => ({
-  pm25: 25 + Math.round(Math.random() * 30),
-  pm10: 50 + Math.round(Math.random() * 40),
-  altitude: 80 + Math.round(Math.random() * 80),
-  battery: 60 + Math.round(Math.random() * 35),
-  speed: +(5 + Math.random() * 8).toFixed(1),
-  signal: 75 + Math.round(Math.random() * 20),
-})
-
-const mockTasks: TaskItem[] = [
-  { jobID: 'JOB001', jobName: '临平区道路巡查任务', jobTime: '2025-11-24 09:15', jobStatus: '3', dockCode: 'DOCK001' },
-  { jobID: 'JOB002', jobName: '良渚街道绿化巡查', jobTime: '2025-11-24 14:30', jobStatus: '2', dockCode: 'DOCK002' },
-  { jobID: 'JOB003', jobName: '西湖景区航拍任务', jobTime: '2025-11-23 10:00', jobStatus: '5', dockCode: 'DOCK002' },
-  { jobID: 'JOB004', jobName: '余杭区工地监测', jobTime: '2025-11-22 15:45', jobStatus: '3', dockCode: 'DOCK001' },
-]
-
-const mockPlans: PlanItem[] = [
-  { planId: 'PLAN005', planName: '绿化养护-望梅高架', startDate: '2025-11-25', flyTime: '09:00', dockCode: 'DOCK001', lineName: '绿化养护-望梅高架' },
-  { planId: 'PLAN006', planName: '河道巡查-京杭大运河', startDate: '2025-11-26', flyTime: '14:00', dockCode: 'DOCK001', lineName: '河道巡查-京杭大运河' },
-  { planId: 'PLAN007', planName: '工业园区监测-萧山', startDate: '2025-11-27', flyTime: '10:30', dockCode: 'DOCK002', lineName: '工业园区监测-萧山' },
-  { planId: 'PLAN008', planName: '景区巡查-西溪湿地', startDate: '2025-11-28', flyTime: '08:00', dockCode: 'DOCK002', lineName: '景区巡查-西溪湿地' },
-]
 
 const ZHEJIANG_CENTER: [number, number] = [120.582886, 29.991549]
 
@@ -103,11 +54,9 @@ function getRegionCamera(selection?: RegionSelection) {
 
 export default function Drone() {
   const navigate = useNavigate()
-  const [docks, setDocks] = useState<DockItem[]>([])
+  const [docks, setDocks] = useState<NormalizedDock[]>([])
   const [dockCode, setDockCode] = useState<string | null>(null)
-  const [sensorData, setSensorData] = useState<SensorData>(mockSensor)
-  const [showVideos, setShowVideos] = useState(false)
-  const [showRoute, setShowRoute] = useState(false)
+  const [sensorData, setSensorData] = useState<SensorData | null>(null)
   const regionContext = useAppStore(state => state.regionContext)
   const querySelection = regionContext?.querySelection
   const mapSelection = regionContext?.mapSelection
@@ -119,8 +68,7 @@ export default function Drone() {
   const [docksLoading, setDocksLoading] = useState(true)
   const [jobsLoading, setJobsLoading] = useState(false)
   const [plansLoading, setPlansLoading] = useState(false)
-  // 任务结果弹窗（原项目 ResModal：listFlyResult 查图片/视频结果）
-  const [resVisible, setResVisible] = useState(false)
+  // 当前选中的飞行任务，用于在视频采集面板展示 listFlyResult 图片/视频结果
   const [curJobID, setCurJobID] = useState('')
   const [jobResults, setJobResults] = useState<FlyResultItem[]>([])
   const [resultsLoading, setResultsLoading] = useState(false)
@@ -151,20 +99,18 @@ export default function Drone() {
     const loadDroneData = async () => {
       if (!querySelection) return
       const params = toRegionQuery(querySelection)
-      let loadedDocks: DockItem[] = []
+      let loadedDocks: NormalizedDock[] = []
       setDocksLoading(true)
       try {
         const res = await dockList(params)
-        if (res?.resultCode === 0 && Array.isArray(res.data)) {
-          loadedDocks = (res.data as DockItem[]).map((item) => ({
-            ...item,
-            dockLng: Number(item.dockLng),
-            dockLat: Number(item.dockLat),
-            status: ((item as { status?: string }).status) || '未知',
-          }))
+        if (res?.resultCode === 0 && Array.isArray(res.data) && res.data.length > 0) {
+          loadedDocks = (res.data as Record<string, unknown>[]).map(item => normalizeDock(item))
         }
+        // 接口正常返回空数组（data=[] 或 resultCode 非 0）：保持空列表，
+        // 由 UI 展示"暂无无人机机场"。不允许用 mock 假数据兜底。
       } catch (e) {
         console.warn('无人机机场列表加载失败', e)
+        // 接口异常/失败：保持空列表，不兜底 mock
       }
 
       if (cancelled) return
@@ -184,7 +130,7 @@ export default function Drone() {
     return () => { cancelled = true }
   }, [moveMapTo, querySelection])
 
-  // 选中机场变化 → 查询该机场飞行任务/待执飞计划（默认年初至今天，与原项目 rightBar 一致；接口不可用时降级 mock）
+  // 选中机场变化 → 查询该机场飞行任务/待执飞计划（默认年初至今天，与原项目 rightBar 一致）
   useEffect(() => {
     if (!dockCode) return
     let cancelled = false
@@ -196,24 +142,27 @@ export default function Drone() {
     listFlyJob(param)
       .then(res => {
         if (cancelled) return
-        setJobs(res?.resultCode === 0 && Array.isArray(res.data) ? res.data : mockTasks.filter(i => i.dockCode === dockCode))
+        setJobs(res?.resultCode === 0 && Array.isArray(res.data) ? res.data : [])
       })
-      .catch(() => { if (!cancelled) setJobs(mockTasks.filter(i => i.dockCode === dockCode)) })
+      .catch(() => { if (!cancelled) setJobs([]) })
       .finally(() => { if (!cancelled) setJobsLoading(false) })
     listFlyPlan(param)
       .then(res => {
         if (cancelled) return
-        setPlans(res?.resultCode === 0 && Array.isArray(res.data) ? res.data : mockPlans.filter(i => i.dockCode === dockCode))
+        setPlans(res?.resultCode === 0 && Array.isArray(res.data) ? res.data : [])
       })
-      .catch(() => { if (!cancelled) setPlans(mockPlans.filter(i => i.dockCode === dockCode)) })
+      .catch(() => { if (!cancelled) setPlans([]) })
       .finally(() => { if (!cancelled) setPlansLoading(false) })
     return () => { cancelled = true }
   }, [dockCode])
 
-  // 点击飞行任务 → 查询任务结果（listFlyResult）并在弹窗呈现图片/视频
-  const showJobResult = (jobID: string) => {
+  // 点击飞行任务 → 选中该任务，视频采集面板自动加载其 listFlyResult 图片/视频
+  const selectJob = (jobID: string) => {
     setCurJobID(jobID)
-    setResVisible(true)
+  }
+  const openExternalUrl = (url: string) => {
+    if (!url) return
+    window.open(url, '_blank', 'noopener,noreferrer')
   }
   useEffect(() => {
     if (!curJobID) return
@@ -230,36 +179,28 @@ export default function Drone() {
     return () => { cancelled = true }
   }, [curJobID])
 
-  // 模拟传感器实时数据
+  // 传感器数据来自真实接口（无对应接口前保持空），不使用任何模拟数据
+
+  // 机场切换/首次加载后，自动选中最新一条飞行任务，让视频采集面板直接有数据
   useEffect(() => {
-    if (!dockCode) return
-    const timer = setInterval(() => {
-      setSensorData(prev => ({
-        pm25: Math.max(5, prev.pm25 + Math.round((Math.random() - 0.5) * 6)),
-        pm10: Math.max(10, prev.pm10 + Math.round((Math.random() - 0.5) * 8)),
-        altitude: Math.max(50, Math.min(200, prev.altitude + Math.round((Math.random() - 0.5) * 10))),
-        battery: Math.max(10, prev.battery - (Math.random() > 0.7 ? 1 : 0)),
-        speed: Math.max(0, +(prev.speed + (Math.random() - 0.5) * 2).toFixed(1)),
-        signal: Math.max(60, Math.min(100, prev.signal + Math.round((Math.random() - 0.5) * 4))),
-      }))
-    }, 3000)
-    return () => clearInterval(timer)
-  }, [dockCode])
+    if (jobs.length > 0 && !curJobID) {
+      setCurJobID(jobs[0].jobID)
+    }
+  }, [jobs, curJobID])
 
   const handleRefresh = (code: string) => {
     setRefreshStatus(code)
     setTimeout(() => {
-      setDocks(prev => prev.map(i => i.dockCode === code ? { ...i, status: Math.random() > 0.5 ? '在线' : '离线' } : i))
+      setDocks(prev => prev.map(i => i.dockCode === code ? normalizeDock({ ...i, status: Math.random() > 0.5 }) : i))
       setRefreshStatus(null)
     }, 1000)
   }
-  const flyTo = (item: DockItem) => {
+  const flyTo = (item: NormalizedDock) => {
     if (dockCode !== item.dockCode) {
       setJobs([])
       setPlans([])
     }
     setDockCode(item.dockCode)
-    setSensorData(createSensorData())
     if (isValidCoordinate(item.dockLng, item.dockLat)) {
       moveMapTo([item.dockLng, item.dockLat], 13)
     }
@@ -269,7 +210,7 @@ export default function Drone() {
   const markers = useMemo(
     () => docks
       .filter(item => isValidCoordinate(item.dockLng, item.dockLat))
-      .map(d => ({ lng: d.dockLng, lat: d.dockLat, name: d.dockName, color: d.status === '在线' ? '#22C55E' : '#EF4444', size: 14 })),
+      .map(d => ({ lng: d.dockLng, lat: d.dockLat, name: d.dockName, color: d.online ? '#22C55E' : '#EF4444', size: 14 })),
     [docks],
   )
   const regionCamera = getRegionCamera(mapSelection ?? querySelection)
@@ -336,17 +277,64 @@ export default function Drone() {
             <div className="text-[rgba(168,214,255,0.4)] text-11px py-2 text-center">暂无无人机机场</div>
           )}
           {docks.map(item => (
-            <div key={item.dockCode} className={`relative mb-3 rounded-xl border p-3 cursor-pointer transition-all ${dockCode === item.dockCode ? 'border-[#01C2FF] bg-[rgba(1,194,255,0.15)]' : 'border-[rgba(255,255,255,0.2)] bg-[rgba(0,0,0,0.2)] hover:bg-[rgba(255,255,255,0.05)]'}`} onClick={() => flyTo(item)}>
-              <div className="flex items-center justify-between mb-1">
-                <span className="text-[#A8D6FF] text-14px font-medium flex items-center gap-1"><RocketOutlined className="text-[#01C2FF]" />{item.dockName}</span>
-                <Tag color={item.status === '在线' ? 'success' : item.status === '离线' ? 'error' : 'default'}>{item.status}</Tag>
+            <div
+              key={item.dockCode}
+              className={`relative mb-3 rounded-xl border p-3 cursor-pointer transition-all ${
+                dockCode === item.dockCode
+                  ? 'border-[#01C2FF] bg-[rgba(1,194,255,0.15)] shadow-[0_0_12px_rgba(1,194,255,0.2)]'
+                  : 'border-[rgba(255,255,255,0.2)] bg-[rgba(0,0,0,0.2)] hover:bg-[rgba(255,255,255,0.05)]'
+              }`}
+              onClick={() => flyTo(item)}
+            >
+              {/* 最右上角 status 状态标签（进一步向上、向右对齐） */}
+              <div className="absolute top-1.5 right-2 z-10">
+                <span
+                  className="text-11px font-medium px-2 py-0.5 rounded-full inline-flex items-center gap-1 border"
+                  style={
+                    item.online
+                      ? {
+                          color: '#00ff88',
+                          backgroundColor: 'rgba(0, 255, 136, 0.15)',
+                          borderColor: 'rgba(0, 255, 136, 0.4)',
+                        }
+                      : {
+                          color: '#94a3b8',
+                          backgroundColor: 'rgba(148, 163, 184, 0.15)',
+                          borderColor: 'rgba(148, 163, 184, 0.3)',
+                        }
+                  }
+                >
+                  <span className={`w-1.5 h-1.5 rounded-full ${item.online ? 'bg-[#00ff88] shadow-[0_0_6px_#00ff88]' : 'bg-[#94a3b8]'}`} />
+                  {item.statusText}
+                </span>
               </div>
-              <div className="text-[rgba(168,214,255,0.6)] text-12px">{item.dockAddress}</div>
-              {item.status === '未知' && (
-                <button className="text-[#01C2FF] text-12px mt-1 hover:underline" onClick={(e) => { e.stopPropagation(); handleRefresh(item.dockCode) }}>
-                  {refreshStatus === item.dockCode ? '刷新中...' : '刷新状态'}
-                </button>
-              )}
+
+              {/* 名称 (第一行) */}
+              <div className="mb-2 pr-18">
+                <span className="text-[#A8D6FF] text-16px font-bold flex items-center gap-1.5 min-w-0 truncate">
+                  <RocketOutlined className="text-[#01C2FF] shrink-0" />
+                  <span className="truncate" title={item.dockName}>{item.dockName}</span>
+                </span>
+              </div>
+
+              {/* 地址与 modeCode 同行 (modeCode 占右侧一列，与右上角 status 对齐) */}
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex-1 text-[rgba(168,214,255,0.6)] text-12px line-clamp-2 min-h-[2.6em] leading-relaxed">
+                  {item.dockAddress}
+                </div>
+                <div className="shrink-0 pt-0.5">
+                  <span
+                    className="text-11px font-medium px-2 py-0.5 rounded border inline-block text-center"
+                    style={{
+                      color: getDockModeColor(item.modeCode),
+                      borderColor: `${getDockModeColor(item.modeCode)}55`,
+                      backgroundColor: `${getDockModeColor(item.modeCode)}20`,
+                    }}
+                  >
+                    {item.modeLabel}
+                  </span>
+                </div>
+              </div>
             </div>
           ))}
         </div>
@@ -357,29 +345,33 @@ export default function Drone() {
           <div className="bg-[rgba(0,56,129,0.9)] rounded-20px border border-[rgba(255,255,255,0.3)] px-5 py-3">
             <div className="flex items-center justify-between mb-2">
               <span className="text-[#A0C7FF] text-14px font-bold flex items-center gap-1"><DashboardOutlined className="text-[#01C2FF]" />无人机传感器数据</span>
-              <span className="text-[rgba(168,214,255,0.5)] text-11px">实时更新中</span>
+              <span className="text-[rgba(168,214,255,0.5)] text-11px">{sensorData ? '实时更新中' : '暂无数据'}</span>
             </div>
-            <div className="grid grid-cols-6 gap-3">
-              {[
-                { label: 'PM2.5', value: sensorData.pm25, unit: 'μg/m³', color: sensorData.pm25 > 75 ? '#FF4D4F' : sensorData.pm25 > 35 ? '#FAAD14' : '#52C41A' },
-                { label: 'PM10', value: sensorData.pm10, unit: 'μg/m³', color: sensorData.pm10 > 150 ? '#FF4D4F' : sensorData.pm10 > 75 ? '#FAAD14' : '#52C41A' },
-                { label: '高度', value: sensorData.altitude, unit: 'm', color: '#01C2FF' },
-                { label: '电量', value: sensorData.battery, unit: '%', color: sensorData.battery < 20 ? '#FF4D4F' : sensorData.battery < 50 ? '#FAAD14' : '#52C41A' },
-                { label: '速度', value: sensorData.speed, unit: 'm/s', color: '#01C2FF' },
-                { label: '信号', value: sensorData.signal, unit: '%', color: sensorData.signal < 70 ? '#FAAD14' : '#52C41A' },
-              ].map(item => (
-                <div key={item.label} className="text-center">
-                  <div className="text-18px font-bold" style={{ color: item.color }}>{item.value}</div>
-                  <div className="text-[rgba(168,214,255,0.5)] text-10px">{item.unit}</div>
-                  <div className="text-[#A8D6FF] text-11px mt-0.5">{item.label}</div>
-                </div>
-              ))}
-            </div>
+            {sensorData ? (
+              <div className="grid grid-cols-6 gap-3">
+                {[
+                  { label: 'PM2.5', value: sensorData.pm25, unit: 'μg/m³', color: sensorData.pm25 > 75 ? '#FF4D4F' : sensorData.pm25 > 35 ? '#FAAD14' : '#52C41A' },
+                  { label: 'PM10', value: sensorData.pm10, unit: 'μg/m³', color: sensorData.pm10 > 150 ? '#FF4D4F' : sensorData.pm10 > 75 ? '#FAAD14' : '#52C41A' },
+                  { label: '高度', value: sensorData.altitude, unit: 'm', color: '#01C2FF' },
+                  { label: '电量', value: sensorData.battery, unit: '%', color: sensorData.battery < 20 ? '#FF4D4F' : sensorData.battery < 50 ? '#FAAD14' : '#52C41A' },
+                  { label: '速度', value: sensorData.speed, unit: 'm/s', color: '#01C2FF' },
+                  { label: '信号', value: sensorData.signal, unit: '%', color: sensorData.signal < 70 ? '#FAAD14' : '#52C41A' },
+                ].map(item => (
+                  <div key={item.label} className="text-center">
+                    <div className="text-18px font-bold" style={{ color: item.color }}>{item.value}</div>
+                    <div className="text-[rgba(168,214,255,0.5)] text-10px">{item.unit}</div>
+                    <div className="text-[#A8D6FF] text-11px mt-0.5">{item.label}</div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-[rgba(168,214,255,0.4)] text-12px py-4 text-center">暂无传感器数据</div>
+            )}
           </div>
         </div>
       )}
       {/* 右侧 - 飞行任务 + 待执飞 */}
-      <div className="absolute right-20px top-70px bottom-20px z-50 w-340px flex flex-col gap-3 pointer-events-none">
+      <div className="absolute right-20px top-70px bottom-20px z-50 w-380px flex flex-col gap-3 pointer-events-none">
         <div className="bg-[rgba(0,56,129,0.85)] flex-1 rounded-20px px-3 py-2 flex flex-col overflow-hidden pointer-events-auto">
           <div className="text-[#A0C7FF] text-16px font-bold py-2">飞行任务</div>
           <div className="flex-1 overflow-y-auto space-y-2 py-1">
@@ -387,7 +379,15 @@ export default function Drone() {
             {dockCode && jobsLoading && <div className="flex items-center justify-center gap-2 py-2 text-[#A8D6FF] text-11px"><Spin size="small" />加载中…</div>}
             {dockCode && !jobsLoading && jobs.length === 0 && <div className="text-[rgba(168,214,255,0.4)] text-11px py-2 text-center">暂无飞行任务</div>}
             {dockCode && jobs.map(item => (
-              <div key={item.jobID} className="rounded-xl p-3 cursor-pointer transition-all bg-[rgba(0,0,0,0.2)] border border-[rgba(255,255,255,0.15)] hover:bg-[rgba(255,255,255,0.06)]" onClick={() => showJobResult(item.jobID)}>
+              <div
+                key={item.jobID}
+                className={`rounded-xl p-3 cursor-pointer transition-all border ${
+                  curJobID === item.jobID
+                    ? 'bg-[rgba(1,194,255,0.18)] border-[#01C2FF] shadow-[0_0_10px_rgba(1,194,255,0.18)]'
+                    : 'bg-[rgba(0,0,0,0.2)] border-[rgba(255,255,255,0.15)] hover:bg-[rgba(255,255,255,0.06)]'
+                }`}
+                onClick={() => selectJob(item.jobID)}
+              >
                 <div className="flex items-center justify-between mb-1">
                   <div className="text-[#A8D6FF] text-13px">{item.jobName}</div>
                   <span className="px-2 py-0.5 rounded text-12px text-white" style={{ backgroundColor: statusObj[item.jobStatus]?.color }}>{statusObj[item.jobStatus]?.message}</span>
@@ -419,49 +419,100 @@ export default function Drone() {
         </div>
       </div>
       {/* 右侧底部 - 视频采集 + 飞行路线 */}
-      <div className="absolute right-20px bottom-20px z-50 w-340px flex gap-2 pointer-events-none">
-        <div className="flex-1 pointer-events-auto">
-          <div className="bg-[rgba(0,56,129,0.85)] rounded-16px border border-[rgba(255,255,255,0.3)] px-3 py-2">
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-[#A0C7FF] text-13px font-bold flex items-center gap-1"><VideoCameraOutlined className="text-[#01C2FF]" />视频采集</span>
-              <button className="text-[#01C2FF] text-11px hover:underline" onClick={() => setShowVideos(!showVideos)}>{showVideos ? '收起' : '展开'}</button>
+      <div className="absolute right-20px bottom-20px z-50 w-380px flex gap-3 pointer-events-none">
+        {/* 视频采集：对接 listFlyResult，点击跳转外链 */}
+        <div className="flex-1 pointer-events-auto min-w-0">
+          <div className="bg-[rgba(0,56,129,0.85)] rounded-16px border border-[rgba(255,255,255,0.3)] px-3 py-2 h-full flex flex-col">
+            <div className="flex items-center justify-between mb-2 shrink-0">
+              <span className="text-[#A0C7FF] text-13px font-bold flex items-center gap-1.5">
+                <VideoCameraOutlined className="text-[#01C2FF]" />视频采集
+              </span>
+              <span className="text-[#01C2FF] text-11px px-1.5 py-0.5 rounded-full bg-[rgba(1,194,255,0.12)] border border-[rgba(1,194,255,0.25)]">
+                {jobResults.length}
+              </span>
             </div>
-            {showVideos && (
-              <div className="max-h-200px overflow-y-auto">
-                {mockVideos.map(v => (
-                  <div key={v.id} className="flex items-center justify-between py-2 border-b border-dashed border-[rgba(255,255,255,0.1)]">
-                    <div className="min-w-0 flex-1">
-                      <div className="text-[#A8D6FF] text-11px truncate">{v.name}</div>
-                      <div className="text-[rgba(168,214,255,0.4)] text-10px">{v.resolution} | {v.duration} | {v.size}</div>
-                    </div>
-                    <Tag color={v.status === '录制中' ? 'processing' : 'default'} className="!text-10px !m-0">{v.status}</Tag>
+            <div className="flex-1 overflow-y-auto max-h-210px min-h-80px space-y-2 pr-1">
+              {!dockCode && (
+                <div className="text-[rgba(168,214,255,0.5)] text-11px py-4 text-center">请先在左侧选择机场</div>
+              )}
+              {dockCode && resultsLoading && (
+                <div className="flex flex-col items-center justify-center gap-2 py-4 text-[#A8D6FF] text-11px">
+                  <Spin size="small" /><span>加载任务结果…</span>
+                </div>
+              )}
+              {dockCode && !resultsLoading && !curJobID && (
+                <div className="text-[rgba(168,214,255,0.5)] text-11px py-4 text-center">点击上方飞行任务查看采集结果</div>
+              )}
+              {dockCode && !resultsLoading && curJobID && jobResults.length === 0 && (
+                <div className="text-[rgba(168,214,255,0.5)] text-11px py-4 text-center">该任务暂无视频/图片</div>
+              )}
+              {dockCode && !resultsLoading && jobResults.map(item => (
+                <div
+                  key={item.resultsID}
+                  className="group rounded-lg overflow-hidden border border-[rgba(255,255,255,0.12)] bg-[rgba(0,0,0,0.25)] hover:border-[#01C2FF] hover:shadow-[0_0_8px_rgba(1,194,255,0.15)] transition-all cursor-pointer"
+                  onClick={() => openExternalUrl(item.resultsUrl)}
+                  title={item.resultsType === 'v' ? '点击播放视频' : '点击查看图片'}
+                >
+                  <div className="relative w-full h-86px overflow-hidden bg-[rgba(0,0,0,0.35)]">
+                    {item.resultsType === 'p' ? (
+                      <Image src={item.resultsUrl} preview={false} className="w-full h-full object-cover" fallback="" />
+                    ) : (
+                      <>
+                        <video src={item.resultsUrl} className="w-full h-full object-cover" preload="metadata" />
+                        <div className="absolute inset-0 flex items-center justify-center bg-[rgba(0,0,0,0.25)] group-hover:bg-[rgba(0,0,0,0.15)] transition-all">
+                          <PlayCircleOutlined className="text-28px text-white/90 drop-shadow-md" />
+                        </div>
+                      </>
+                    )}
                   </div>
-                ))}
-              </div>
-            )}
-            {!showVideos && <div className="text-[rgba(168,214,255,0.4)] text-11px py-1">{mockVideos.length} 个视频文件</div>}
+                  <div className="px-2 py-1.5 flex items-center justify-between">
+                    <span className="text-[#A8D6FF] text-11px truncate flex-1">{item.resultsType === 'v' ? '视频' : '图片'}</span>
+                    <span className="text-[rgba(168,214,255,0.5)] text-10px shrink-0">{item.resultsTime}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
-        <div className="flex-1 pointer-events-auto">
-          <div className="bg-[rgba(0,56,129,0.85)] rounded-16px border border-[rgba(255,255,255,0.3)] px-3 py-2">
-            <div className="flex items-center justify-between mb-1">
-              <span className="text-[#A0C7FF] text-13px font-bold flex items-center gap-1"><EnvironmentOutlined className="text-[#01C2FF]" />飞行路线</span>
-              <button className="text-[#01C2FF] text-11px hover:underline" onClick={() => setShowRoute(!showRoute)}>{showRoute ? '收起' : '展开'}</button>
+        {/* 飞行路线：用待执飞计划数据展示路线卡片 */}
+        <div className="flex-1 pointer-events-auto min-w-0">
+          <div className="bg-[rgba(0,56,129,0.85)] rounded-16px border border-[rgba(255,255,255,0.3)] px-3 py-2 h-full flex flex-col">
+            <div className="flex items-center justify-between mb-2 shrink-0">
+              <span className="text-[#A0C7FF] text-13px font-bold flex items-center gap-1.5">
+                <EnvironmentOutlined className="text-[#01C2FF]" />飞行路线
+              </span>
+              <span className="text-[#01C2FF] text-11px px-1.5 py-0.5 rounded-full bg-[rgba(1,194,255,0.12)] border border-[rgba(1,194,255,0.25)]">
+                {plans.length}
+              </span>
             </div>
-            {showRoute && dockCode && mockRoutes[dockCode] ? (
-              <div className="space-y-1">
-                {mockRoutes[dockCode].map((pt, i) => (
-                  <div key={i} className="flex items-center gap-2 py-1">
-                    <div className="w-5 h-5 rounded-full flex items-center justify-center text-10px text-white shrink-0" style={{ backgroundColor: i === 0 ? '#52C41A' : i === mockRoutes[dockCode!].length - 1 ? '#FF4D4F' : '#01C2FF' }}>{i + 1}</div>
-                    <span className="text-[#A8D6FF] text-11px">{pt.name}</span>
-                    <span className="text-[rgba(168,214,255,0.3)] text-10px ml-auto">{pt.lng.toFixed(3)},{pt.lat.toFixed(3)}</span>
+            <div className="flex-1 overflow-y-auto max-h-210px min-h-80px space-y-2 pr-1">
+              {!dockCode && (
+                <div className="text-[rgba(168,214,255,0.5)] text-11px py-4 text-center">请先在左侧选择机场</div>
+              )}
+              {dockCode && plansLoading && (
+                <div className="flex flex-col items-center justify-center gap-2 py-4 text-[#A8D6FF] text-11px">
+                  <Spin size="small" /><span>加载路线计划…</span>
+                </div>
+              )}
+              {dockCode && !plansLoading && plans.length === 0 && (
+                <div className="text-[rgba(168,214,255,0.5)] text-11px py-4 text-center">暂无飞行路线计划</div>
+              )}
+              {dockCode && !plansLoading && plans.map(item => (
+                <div
+                  key={item.planId}
+                  className="rounded-lg p-2.5 border border-[rgba(255,255,255,0.12)] bg-[rgba(0,0,0,0.2)] hover:bg-[rgba(255,255,255,0.06)] transition-colors"
+                >
+                  <div className="flex items-center gap-1.5 mb-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-[#01C2FF] shrink-0" />
+                    <span className="text-[#A8D6FF] text-12px font-medium truncate flex-1" title={item.lineName}>{item.lineName}</span>
                   </div>
-                ))}
-              </div>
-            ) : showRoute && (
-              <div className="text-[rgba(168,214,255,0.4)] text-11px py-1">请先选择机场查看路线</div>
-            )}
-            {!showRoute && <div className="text-[rgba(168,214,255,0.4)] text-11px py-1">{dockCode ? '已规划 ' + (mockRoutes[dockCode]?.length || 0) + ' 个航点' : '未选择机场'}</div>}
+                  <div className="text-[rgba(168,214,255,0.55)] text-10px leading-5">
+                    <div className="truncate">机场：{item.dockCode}</div>
+                    <div>时间：{item.flyTime || item.startDate}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       </div>
@@ -495,20 +546,7 @@ export default function Drone() {
           lngLat={flyLngLat}
         />
       )}
-      {/* 飞行任务结果弹窗（原项目 ResModal：listFlyResult 图片/视频结果） */}
-      <Modal open={resVisible} onCancel={() => setResVisible(false)} footer={null} width={620} loading={resultsLoading} title={<span className="text-[#A8D6FF]">任务结果</span>}>
-        <div className="max-h-68vh overflow-y-auto px-2 py-1">
-          {!resultsLoading && jobResults.length === 0 && <div className="py-8 text-center text-[rgba(0,0,0,0.45)]">暂无任务结果数据</div>}
-          {jobResults.map(item => (
-            <div key={item.resultsID} className="flex items-center justify-between py-2 border-b border-dashed border-[rgba(0,0,0,0.08)]">
-              {item.resultsType === 'p'
-                ? <Image src={item.resultsUrl} width={260} />
-                : <video src={item.resultsUrl} className="w-260px h-160px" controls />}
-              <div className="text-12px text-[rgba(0,0,0,0.6)]">{item.resultsTime}</div>
-            </div>
-          ))}
-        </div>
-      </Modal>
+      {/* 任务结果已内联到"视频采集"面板，不再使用弹窗 */}
     </div>
   )
 }

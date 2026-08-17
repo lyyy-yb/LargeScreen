@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Scene, PolygonLayer, LineLayer, PointLayer } from '@antv/l7'
 import { Mapbox } from '@antv/l7-maps'
 import type { MapDevicePoint } from '@/types/mapDevice'
@@ -7,7 +7,9 @@ import { createDeviceMapLayers, type DeviceMapLayers } from '@/utils/mapDeviceLa
 import { createAirQualityLayers, type AirMapLayers, type AirPointClickPos } from '@/utils/mapAirLayers'
 import { createAlertLayers, type AlertMapLayers, type AlertMapPoint } from '@/utils/mapAlertLayers'
 import { createRadarAlarmLayers, type RadarAlarmLayers, type RadarAlarmPoint } from '@/utils/mapRadarAlarmLayers'
+import { createEmissionOutletLayers, type EmissionOutletLayers, type EmissionOutletPoint, type OutletPointClickPos } from '@/utils/mapEmissionOutletLayers'
 import { addSatelliteTiles } from '@/utils/mapSatelliteTiles'
+import { useLayerVisibility } from '@/hooks/useLayerVisibility'
 
 interface ZJ3DMapProps {
   id?: string
@@ -20,14 +22,22 @@ interface ZJ3DMapProps {
   alertPoints?: AlertMapPoint[]
   /** 雷达突发告警点（hbdp/leida/alarmPoint，常显） */
   radarAlarmPoints?: RadarAlarmPoint[]
+  /** 企业排口打点（hbdp/emissionOutlet/list，灰点，zoom>=13 图标 / >=15 两行文字） */
+  emissionOutletPoints?: EmissionOutletPoint[]
+  /** 点击企业排口圆点，弹出详情弹窗 */
+  onOutletClick?: (point: EmissionOutletPoint, pos?: OutletPointClickPos) => void
   onAirPointClick?: (point: AirQualityPoint, pos?: AirPointClickPos) => void
+  /** 显示预警点位（与空气质量互斥，由页面按钮组保证同刻只显一类），默认 false */
+  showAlertPoints?: boolean
+  /** 显示空气质量检测站，默认 true（页面互斥按钮组初始态为空气） */
+  showAirPoints?: boolean
+  /** 显示无人机图标层，默认 true */
+  showDronePoints?: boolean
+  /** 显示雷达（扫描盘 + 突发告警点），默认 true */
+  showRadarPoints?: boolean
 }
 
-// 薄区块风格：区域面几乎透明直接透出卫星底图，边界亮线承担轮廓表达
-const BASE_TOP = 6000 // 区块厚度（薄块，仅承担点选交互与淡色区域衬托）
-const FLOAT_BASE = 4000 // 区块抬离地面高度
-const BLOCK_TOP = FLOAT_BASE + BASE_TOP // 区块顶面高度
-const TEXT_TOP = BLOCK_TOP + 30000 // 城市名标签高度（高于所有覆盖物，避免被遮挡）
+// 平面地图风格：区域不抬高、无拉伸/边墙，仅平面边界线勾勒轮廓，卫星底图直接透出
 
 export default function ZJ3DMap({
   id = 'zj3dmap',
@@ -38,10 +48,17 @@ export default function ZJ3DMap({
   airPoints = [],
   alertPoints = [],
   radarAlarmPoints = [],
+  emissionOutletPoints = [],
+  onOutletClick,
   onAirPointClick,
+  showAlertPoints = false,
+  showAirPoints = true,
+  showDronePoints = true,
+  showRadarPoints = true,
 }: ZJ3DMapProps) {
   const sceneRef = useRef<Scene | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
+  const [ready, setReady] = useState(false)
   const cityFeaturesRef = useRef<any[]>([])
   const selectedCityRef = useRef(selectedCity)
   const hoverNameRef = useRef<string | null>(null)
@@ -56,6 +73,8 @@ export default function ZJ3DMap({
   const alertLayersRef = useRef<AlertMapLayers | null>(null)
   const radarAlarmPointsRef = useRef(radarAlarmPoints)
   const radarAlarmLayersRef = useRef<RadarAlarmLayers | null>(null)
+  const emissionOutletPointsRef = useRef(emissionOutletPoints)
+  const emissionOutletLayersRef = useRef<EmissionOutletLayers | null>(null)
 
   // 高亮图层引用（L7 链式构建返回 ILayer，统一用 any 持有）
   const selectedOutlineRef = useRef<any>(null)
@@ -77,6 +96,11 @@ export default function ZJ3DMap({
     onAirPointClickRef.current = onAirPointClick
   }, [onAirPointClick])
 
+  const onOutletClickRef = useRef(onOutletClick)
+  useEffect(() => {
+    onOutletClickRef.current = onOutletClick
+  }, [onOutletClick])
+
   useEffect(() => {
     devicePointsRef.current = devicePoints
     deviceLayersRef.current?.setData(devicePoints)
@@ -96,6 +120,18 @@ export default function ZJ3DMap({
     radarAlarmPointsRef.current = radarAlarmPoints
     radarAlarmLayersRef.current?.setData(radarAlarmPoints)
   }, [radarAlarmPoints])
+
+  useEffect(() => {
+    emissionOutletPointsRef.current = emissionOutletPoints
+    emissionOutletLayersRef.current?.setData(emissionOutletPoints)
+  }, [emissionOutletPoints])
+
+  // 页面按钮组/Switch → 图层显隐（持久层 show/hide，不销毁重建）
+  useLayerVisibility(
+    { alertLayersRef, airLayersRef, deviceLayersRef, radarAlarmLayersRef },
+    { showAlertPoints, showAirPoints, showDronePoints, showRadarPoints },
+    ready,
+  )
 
   // 仅更新某一个高亮图层的数据（传入 null 则清空）
   const setHighlight = (layer: any, name: string | null) => {
@@ -123,6 +159,7 @@ export default function ZJ3DMap({
 
   useEffect(() => {
     if (!containerRef.current || sceneRef.current) return
+    setReady(false)
 
     const scene = new Scene({
       id: containerRef.current,
@@ -134,7 +171,7 @@ export default function ZJ3DMap({
         pitch: 45,
         rotation: -5,
         minZoom: 6.2,
-        maxZoom: 10,
+        maxZoom: 15,
       }),
     })
     scene.setBgColor('rgba(9, 54, 114, 0.5)')
@@ -178,47 +215,25 @@ export default function ZJ3DMap({
           .style({ opacity: 0.55 })
         scene.addLayer(maskLayer)
 
-        // 1. 省界边墙（淡蓝色实心光墙，无渐变；贴地而起，wall 形态在各环境均验证可渲染）
-        const wallLayer = new LineLayer({ zIndex: 2, enablePicking: false })
-          .source(wallRes)
-          .shape('wall')
-          .size(30000)
-          .style({
-            heightfixed: true,
-            opacity: 0.45,
-            sourceColor: '#3fc6ff',
-            targetColor: '#3fc6ff',
-          })
-        scene.addLayer(wallLayer)
-
-        // 1.5 省界亮轮廓（外侧边界：天蓝色实线，高度高于边墙避免角度遮挡）
+        // 1. 省界轮廓（平面边界：天蓝色实线，不再使用有高度的边墙）
         const provinceLine = new LineLayer({ zIndex: 6, enablePicking: false })
           .source(wallRes)
           .shape('line')
           .color('#3fc6ff')
           .size(2.2)
-          .style({ raisingHeight: 32000, heightfixed: true, opacity: 1, depth: false })
+          .style({ opacity: 1 })
         scene.addLayer(provinceLine)
 
-        // 2. 3D 拉伸地块 —— 顶面近全透明直接显示卫星底图，仅侧面留淡蓝薄边
+        // 2. 平面区域地块 —— 近全透明填充直接显示卫星底图，仅承担点选交互与淡色区域衬托
         const polygonLayer = new PolygonLayer({ zIndex: 2, autoFit: false })
           .source(citiesRes)
-          .shape('extrude')
-          .size(BASE_TOP)
+          .shape('fill')
           .color('name', [
             '#2b86d8', '#2f8cdd', '#318fe0', '#2c88da',
             '#3492e2', '#2d89db', '#3695e5', '#2e8bdc',
             '#338fe1', '#3090df', '#369aea',
           ])
-          .style({
-            heightfixed: true,
-            pickLight: true,
-            raisingHeight: FLOAT_BASE,
-            opacity: 0.06,
-            // 侧面统一淡蓝（与边界线 #3fc6ff 同色系），替代原深蓝渐变
-            sourceColor: '#8fdcff',
-            targetColor: '#3fc6ff',
-          })
+          .style({ opacity: 0.06 })
         scene.addLayer(polygonLayer)
 
         // 交互事件立即绑定：不依赖后续任何异步图层加载，保证点选/悬浮始终可用。
@@ -257,7 +272,7 @@ export default function ZJ3DMap({
             .shape('line')
             .color('#3fc6ff')
             .size(2)
-            .style({ raisingHeight: 32000, heightfixed: true, opacity: 1, depth: false })
+            .style({ opacity: 1 })
           scene.addLayer(cityLine)
         })
 
@@ -267,21 +282,16 @@ export default function ZJ3DMap({
           .shape('line')
           .color('#ffffff')
           .size(3.5)
-          .style({ raisingHeight: 36000, heightfixed: true, opacity: 1, depth: false })
+          .style({ opacity: 1 })
         scene.addLayer(hoverOutline)
         hoverOutlineRef.current = hoverOutline
 
         // 8. 选中效果 = 面色提亮 + 高亮描边 + 流动蚂蚁线（三层各司其职，禁拾取）
         const selectedFill = new PolygonLayer({ zIndex: 4, enablePicking: false })
           .source({ type: 'FeatureCollection', features: [] })
-          .shape('extrude')
-          .size(BASE_TOP + 800)
+          .shape('fill')
           .color('#2fb9f5')
-          .style({
-            heightfixed: true,
-            raisingHeight: FLOAT_BASE,
-            opacity: 0.35,
-          })
+          .style({ opacity: 0.35 })
         scene.addLayer(selectedFill)
         selectedFillRef.current = selectedFill
 
@@ -290,7 +300,7 @@ export default function ZJ3DMap({
           .shape('line')
           .color('#bffbff')
           .size(2.5)
-          .style({ raisingHeight: 36000, heightfixed: true, opacity: 1, depth: false })
+          .style({ opacity: 1 })
         scene.addLayer(selectedOutline)
         selectedOutlineRef.current = selectedOutline
 
@@ -300,7 +310,7 @@ export default function ZJ3DMap({
           .shape('line')
           .color('#3fe0ff')
           .size(6)
-          .style({ raisingHeight: 36000, heightfixed: true, opacity: 0.25, depth: false })
+          .style({ opacity: 0.25 })
         scene.addLayer(selectedGlow)
         selectedGlowRef.current = selectedGlow
 
@@ -309,7 +319,7 @@ export default function ZJ3DMap({
           .shape('line')
           .color('#7ff6ff')
           .size(1.2)
-          .style({ raisingHeight: 36000, heightfixed: true, opacity: 0.9, depth: false, dashArray: [4, 3] })
+          .style({ opacity: 0.9, dashArray: [4, 3] })
         selectedDash.animate(true)
         scene.addLayer(selectedDash)
         selectedDashRef.current = selectedDash
@@ -343,37 +353,47 @@ export default function ZJ3DMap({
             padding: [2, 2],
             stroke: '#021a3f',
             strokeWidth: 3,
-            raisingHeight: TEXT_TOP,
+            raisingHeight: 0,
             textAllowOverlap: true,
             heightFixed: true,
           })
         scene.addLayer(textLayer)
 
         // 11-12. 使用接口经纬度打印雷达扫描与无人机场图标（与老项目字段一致）
-        deviceLayersRef.current = await createDeviceMapLayers(scene, devicePointsRef.current, TEXT_TOP + 2000)
+        deviceLayersRef.current = await createDeviceMapLayers(scene, devicePointsRef.current, 0)
 
         // 空气质量六级图标打点（按 IAQI 显示在各市中心）
         airLayersRef.current = await createAirQualityLayers(
           scene,
           airPointsRef.current,
-          TEXT_TOP + 4000,
+          0,
           (point, pos) => onAirPointClickRef.current?.(point, pos),
         )
 
         // 13. 预警点位标记（alertEvent/list 经纬度，warn-l1~l3 图标）
-        alertLayersRef.current = await createAlertLayers(scene, alertPointsRef.current, TEXT_TOP + 4000)
+        alertLayersRef.current = await createAlertLayers(scene, alertPointsRef.current, 0)
 
         // 13.5 雷达突发告警点（hbdp/leida/alarmPoint，橙/红圆点常显）
-        radarAlarmLayersRef.current = await createRadarAlarmLayers(scene, radarAlarmPointsRef.current, TEXT_TOP + 6000)
+        radarAlarmLayersRef.current = await createRadarAlarmLayers(scene, radarAlarmPointsRef.current, 0)
+
+        // 14. 企业排口打点（hbdp/emissionOutlet/list，灰色圆点，zoom>=13 图标 / >=15 两行文字）
+        emissionOutletLayersRef.current = await createEmissionOutletLayers(
+          scene,
+          emissionOutletPointsRef.current,
+          0,
+          (point, pos) => onOutletClickRef.current?.(point, pos),
+        )
       } catch (err) {
         console.error('ZJ3DMap: 加载地图数据失败', err)
       }
+      setReady(true)
     })
 
     return () => {
       deviceLayersRef.current?.destroy()
       alertLayersRef.current?.destroy()
       radarAlarmLayersRef.current?.destroy()
+      emissionOutletLayersRef.current?.destroy()
       if (sceneRef.current) {
         sceneRef.current.destroy()
         sceneRef.current = null
@@ -387,6 +407,7 @@ export default function ZJ3DMap({
       airLayersRef.current = null
       alertLayersRef.current = null
       radarAlarmLayersRef.current = null
+      emissionOutletLayersRef.current = null
       cityFeaturesRef.current = []
     }
   }, [])

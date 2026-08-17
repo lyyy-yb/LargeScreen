@@ -204,6 +204,8 @@ export interface DataSourceDTO {
   id: number
   deviceId: string
   deviceName: string
+  /** 站点短名（用于地图标注与详情弹窗） */
+  shortName?: string
   dataType: string
   protocol: string
   /** 站点类型：fixed-固定站 mobile-移动站（仅空气质量监测站需要） */

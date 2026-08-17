@@ -69,7 +69,8 @@ export default defineConfig(({ mode }) => {
       minify: 'terser',
       terserOptions: {
         compress: {
-          drop_console: true,
+          // 仅剔除调试日志，保留 console.error/warn 供生产排障（错误边界/地图加载失败诊断）
+          pure_funcs: ['console.log', 'console.debug', 'console.info'],
           drop_debugger: true,
         },
       },
@@ -87,7 +88,11 @@ export default defineConfig(({ mode }) => {
                 return 'antd-vendor'
               }
               if (id.includes('@antv')) {
-                return 'antv-vendor'
+                // G2 仅 monitor 弹窗用，与 L7 地图引擎分 chunk，避免单包过大
+                if (id.includes('@antv/g2') || id.includes('node_modules/@antv/scale') || id.includes('@antv/coord')) {
+                  return 'antv-g2'
+                }
+                return 'antv-l7'
               }
               return 'vendor'
             }

@@ -64,6 +64,7 @@ function nameEquals(left: string, right: string) {
   const a = normalizeName(left)
   const b = normalizeName(right)
   if (a === b) return true
+  if (a.includes('智造新城') && b.includes('智造新城')) return true
   return a.replace(/[省市区县]$/, '') === b.replace(/[省市区县]$/, '')
 }
 
@@ -208,12 +209,20 @@ export function createRegionContext(
     mapSelection = defaultSelection
     if (usedFallback) fallbackMessage = '当前账号未配置有效的所在区县（部门），已默认定位到杭州市西湖区'
   } else {
-    usedFallback = !city || !county || !townDept
-    const base = withCounty(city && county && townDept ? city : FALLBACK_CITY, city && county && townDept ? county : FALLBACK_COUNTY)
+    const hasValidTown = !!(city && county && (townDept || county.name === '智造新城'))
+    usedFallback = !city || !county || !hasValidTown
+    const effectiveCity = city && county ? city : FALLBACK_CITY
+    const effectiveCounty = city && county ? county : FALLBACK_COUNTY
+    const base = withCounty(effectiveCity, effectiveCounty)
+    const effectiveTownName = usedFallback
+      ? FALLBACK_TOWN
+      : (townDept?.deptName || county?.name || FALLBACK_TOWN)
+    const rawDeptId = townDept?.deptId ?? user.deptId ?? user.dept?.deptId
+    const effectiveTownDeptId = typeof rawDeptId === 'number' ? rawDeptId : (rawDeptId ? Number(rawDeptId) || undefined : undefined)
     defaultSelection = {
       ...base,
-      townDeptId: usedFallback ? undefined : townDept?.deptId,
-      townName: usedFallback ? FALLBACK_TOWN : townDept?.deptName,
+      townDeptId: usedFallback ? undefined : effectiveTownDeptId,
+      townName: effectiveTownName,
     }
     mapSelection = base
     if (usedFallback) fallbackMessage = '当前账号未配置有效的所在乡镇街道（部门），已默认定位到西湖风景名胜区街道'

@@ -1,11 +1,10 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Button, Table, Modal, Form, Input, Select, Switch, App } from 'antd'
 import { PlusOutlined, EditOutlined, EyeOutlined, CheckCircleOutlined, AlertFilled, SearchOutlined, DeleteOutlined, ArrowLeftOutlined } from '@ant-design/icons'
 import { dataSourceApi } from '@/servers/business'
-import { deptList } from '@/servers/api'
 import { useAppStore, useAuthStore } from '@/stores'
-import { addOption, buildDeptRegionOptions, flattenDepartments, nameEquals } from '@/utils/deptRegion'
+import { addOption, buildDeptRegionOptions, nameEquals } from '@/utils/deptRegion'
 import type { DataSourceDTO } from '@/types/business'
 import type { DeptInfo } from '@/types/auth'
 
@@ -67,26 +66,18 @@ export default function DataSource() {
   const [filterStationType, setFilterStationType] = useState<string | undefined>(undefined)
   const [filterConnStatus, setFilterConnStatus] = useState<string | undefined>(undefined)
   const [filterEnabled, setFilterEnabled] = useState<0 | 1 | undefined>(undefined)
-  const [extraDepts, setExtraDepts] = useState<DeptInfo[]>([])
   const [submitting, setSubmitting] = useState(false)
   const [detailLoading, setDetailLoading] = useState(false)
-  const loadingDeptParentIds = useRef(new Set<number>())
-  const deptListLoaded = useRef(false)
   const [form] = Form.useForm()
 
   const allDepts = useMemo(() => {
-    const departments = flattenDepartments([
-      ...(regionContext?.departments ?? []),
-      ...extraDepts,
-    ])
+    const departments = [...(regionContext?.departments ?? [])]
     const currentDept = user?.dept
     if (currentDept && !departments.some(dept => Number(dept.deptId) === Number(currentDept.deptId))) {
-      flattenDepartments([currentDept]).forEach(dept => {
-        if (!departments.some(item => Number(item.deptId) === Number(dept.deptId))) departments.push(dept)
-      })
+      departments.push(currentDept)
     }
     return departments
-  }, [extraDepts, regionContext?.departments, user?.dept])
+  }, [regionContext?.departments, user?.dept])
   const deptRegionOptions = useMemo(() => buildDeptRegionOptions(allDepts), [allDepts])
   const selection = regionContext?.selection
   // 与预警规则一致：非 admin 角色锁定所属地市/区县
@@ -129,54 +120,8 @@ export default function DataSource() {
   )
   const townOptions = useMemo(() => deptRegionOptions.getTownOptions(watchedDistrictId), [deptRegionOptions, watchedDistrictId])
 
-  const loadDepartmentChildren = useCallback(async (parentId?: number) => {
-    const normalizedParentId = Number(parentId)
-    if (
-      !Number.isFinite(normalizedParentId)
-      || loadingDeptParentIds.current.has(normalizedParentId)
-    ) return
-    loadingDeptParentIds.current.add(normalizedParentId)
-    try {
-      const response = await deptList({ parentId: normalizedParentId })
-      if (response.code !== 200 || !Array.isArray(response.data)) return
-      const loaded = flattenDepartments(response.data)
-      setExtraDepts(previous => {
-        const knownIds = new Set(flattenDepartments(previous).map(dept => Number(dept.deptId)))
-        const additions = loaded.filter(dept => !knownIds.has(Number(dept.deptId)))
-        return additions.length ? [...previous, ...additions] : previous
-      })
-    } catch {
-      // 无下级部门时保持空选项
-    }
-  }, [])
-
-  // 页面初始进入时若无部门数据，先拉取根部门树
-  useEffect(() => {
-    if (deptListLoaded.current || allDepts.length) return
-    deptListLoaded.current = true
-    deptList().then(response => {
-      if (response.code !== 200 || !Array.isArray(response.data)) return
-      const loaded = flattenDepartments(response.data)
-      setExtraDepts(previous => {
-        const knownIds = new Set(flattenDepartments(previous).map(dept => Number(dept.deptId)))
-        const additions = loaded.filter(dept => !knownIds.has(Number(dept.deptId)))
-        return additions.length ? [...previous, ...additions] : previous
-      })
-    }).catch(() => { deptListLoaded.current = false })
-  }, [allDepts.length])
-
-  // 弹窗打开时按需懒加载区县/乡镇选项
-  useEffect(() => {
-    if (!isModalVisible) return
-    queueMicrotask(() => {
-      if (watchedCityId && !districtOptions.length) {
-        void loadDepartmentChildren(Number(watchedCityId))
-      }
-      if (watchedDistrictId && !townOptions.length) {
-        void loadDepartmentChildren(Number(watchedDistrictId))
-      }
-    })
-  }, [isModalVisible, watchedCityId, watchedDistrictId, districtOptions.length, townOptions.length, loadDepartmentChildren])
+  // 全量部门已在 session 初始化时加载（regionContext.departments 含市/区县/乡镇全层级），
+  // 级联选项直接由 regionContext 派生，无需再次按需请求，避免合并重复。
 
   const fetchData = useCallback(async () => {
     setLoading(true)
@@ -289,9 +234,7 @@ export default function DataSource() {
         setEditingItem(res.data)
       }
     } catch { /* 保留表格行数据 */ }
-    // 先加载区域选项，再回填区域值，避免 Select 显示原始 ID
-    if (detail.cityId) await loadDepartmentChildren(detail.cityId)
-    if (detail.districtId) await loadDepartmentChildren(detail.districtId)
+    // 全量部门已在初始化时加载，区域选项始终可用，直接回填
     form.setFieldsValue({
       deviceName: detail.deviceName,
       dataType: detail.dataType,

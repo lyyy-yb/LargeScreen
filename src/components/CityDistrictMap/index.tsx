@@ -8,8 +8,10 @@ import { createDeviceMapLayers, type DeviceMapLayers } from '@/utils/mapDeviceLa
 import { createAirQualityLayers, type AirMapLayers, type AirPointClickPos } from '@/utils/mapAirLayers'
 import { createAlertLayers, type AlertMapLayers, type AlertMapPoint } from '@/utils/mapAlertLayers'
 import { createRadarAlarmLayers, type RadarAlarmLayers, type RadarAlarmPoint } from '@/utils/mapRadarAlarmLayers'
+import { createEmissionOutletLayers, type EmissionOutletLayers, type EmissionOutletPoint, type OutletPointClickPos } from '@/utils/mapEmissionOutletLayers'
 import { addSatelliteTiles } from '@/utils/mapSatelliteTiles'
 import { addRegionMask, setRegionBounds } from '@/utils/mapRegionMask'
+import { useLayerVisibility } from '@/hooks/useLayerVisibility'
 
 interface CityDistrictMapProps {
   city: CityItem
@@ -23,14 +25,22 @@ interface CityDistrictMapProps {
   alertPoints?: AlertMapPoint[]
   /** 雷达突发告警点（hbdp/leida/alarmPoint，常显） */
   radarAlarmPoints?: RadarAlarmPoint[]
+  /** 企业排口打点（hbdp/emissionOutlet/list，灰点，zoom>=13 图标 / >=15 两行文字） */
+  emissionOutletPoints?: EmissionOutletPoint[]
+  /** 点击企业排口圆点，弹出详情弹窗 */
+  onOutletClick?: (point: EmissionOutletPoint, pos?: OutletPointClickPos) => void
   onAirPointClick?: (point: AirQualityPoint, pos?: AirPointClickPos) => void
+  /** 显示预警点位（与空气质量互斥，由页面按钮组保证同刻只显一类），默认 false */
+  showAlertPoints?: boolean
+  /** 显示空气质量检测站，默认 true（页面互斥按钮组初始态为空气） */
+  showAirPoints?: boolean
+  /** 显示无人机图标层，默认 true */
+  showDronePoints?: boolean
+  /** 显示雷达（扫描盘 + 突发告警点），默认 true */
+  showRadarPoints?: boolean
 }
 
-// 漂浮地图风格（L7 floatmap 示例）：区块抬离地面 + 光幕接地 + 块底/块顶双细线
-const BASE_TOP = 3000 // 区块厚度（降低厚度避免纹理面盖住边界/打点）
-const FLOAT_BASE = 3000 // 区块抬离地面高度（缩小与底图间距）
-const BLOCK_TOP = FLOAT_BASE + BASE_TOP // 区块顶面高度
-const TEXT_TOP = BLOCK_TOP + 6000
+// 平面地图风格：区域不抬高、无拉伸/边墙，仅平面边界线勾勒轮廓，卫星底图直接透出
 
 export default function CityDistrictMap({
   city,
@@ -41,7 +51,13 @@ export default function CityDistrictMap({
   airPoints = [],
   alertPoints = [],
   radarAlarmPoints = [],
+  emissionOutletPoints = [],
+  onOutletClick,
   onAirPointClick,
+  showAlertPoints = false,
+  showAirPoints = true,
+  showDronePoints = true,
+  showRadarPoints = true,
 }: CityDistrictMapProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const sceneRef = useRef<Scene | null>(null)
@@ -54,6 +70,8 @@ export default function CityDistrictMap({
   const alertPointsRef = useRef(alertPoints)
   const radarAlarmLayersRef = useRef<RadarAlarmLayers | null>(null)
   const radarAlarmPointsRef = useRef(radarAlarmPoints)
+  const emissionOutletPointsRef = useRef(emissionOutletPoints)
+  const emissionOutletLayersRef = useRef<EmissionOutletLayers | null>(null)
   const selectedDistrictRef = useRef(selectedDistrict)
   const hoverNameRef = useRef<string | null>(null)
   const onClickRef = useRef(onDistrictClick)
@@ -80,6 +98,11 @@ export default function CityDistrictMap({
     onAirPointClickRef.current = onAirPointClick
   }, [onAirPointClick])
 
+  const onOutletClickRef = useRef(onOutletClick)
+  useEffect(() => {
+    onOutletClickRef.current = onOutletClick
+  }, [onOutletClick])
+
   useEffect(() => {
     devicePointsRef.current = devicePoints
     deviceLayersRef.current?.setData(devicePoints)
@@ -99,6 +122,18 @@ export default function CityDistrictMap({
     radarAlarmPointsRef.current = radarAlarmPoints
     radarAlarmLayersRef.current?.setData(radarAlarmPoints)
   }, [radarAlarmPoints])
+
+  useEffect(() => {
+    emissionOutletPointsRef.current = emissionOutletPoints
+    emissionOutletLayersRef.current?.setData(emissionOutletPoints)
+  }, [emissionOutletPoints])
+
+  // 页面按钮组/Switch → 图层显隐（持久层 show/hide，不销毁重建）
+  useLayerVisibility(
+    { alertLayersRef, airLayersRef, deviceLayersRef, radarAlarmLayersRef },
+    { showAlertPoints, showAirPoints, showDronePoints, showRadarPoints },
+    ready,
+  )
 
   // 仅更新某一个高亮图层的数据（传入 null 则清空）
   const setHighlight = (layer: any, name: string | null) => {
@@ -138,7 +173,7 @@ export default function CityDistrictMap({
         pitch: 45,
         rotation: 0,
         minZoom: 7.6,
-        maxZoom: 14,
+        maxZoom: 17,
       }),
     })
     scene.setBgColor('rgba(9, 54, 114, 0.5)')
@@ -168,47 +203,25 @@ export default function CityDistrictMap({
         addRegionMask(scene, cityBoundRes)
         setRegionBounds(scene, cityBoundRes)
 
-        // 1. 市界边墙（淡蓝色实心光墙，与省级地图同方案）
-        const wallLayer = new LineLayer({ zIndex: 1, enablePicking: false })
-          .source(cityBoundRes)
-          .shape('wall')
-          .size(9000)
-          .style({
-            heightfixed: true,
-            opacity: 0.45,
-            sourceColor: '#3fc6ff',
-            targetColor: '#3fc6ff',
-          })
-        scene.addLayer(wallLayer)
-
-        // 1.5 市界亮轮廓（外侧边界：天蓝实线，高度高于边墙避免角度遮挡）
+        // 1. 市界轮廓（平面边界：天蓝实线，不再使用有高度的边墙）
         const cityBoundLine = new LineLayer({ zIndex: 6, enablePicking: false })
           .source(cityBoundRes)
           .shape('line')
           .color('#3fc6ff')
           .size(2.2)
-          .style({ raisingHeight: 11000, heightfixed: true, opacity: 1, depth: false })
+          .style({ opacity: 1 })
         scene.addLayer(cityBoundLine)
 
-        // 2. 3D 拉伸地块 —— 与省级对齐：顶面近全透明直接显示卫星底图，仅侧面留淡蓝薄边
+        // 2. 平面区域地块 —— 近全透明填充直接显示卫星底图，仅承担点选交互与淡色区域衬托
         const polygonLayer = new PolygonLayer({ zIndex: 2, autoFit: false })
           .source(districtsRes)
-          .shape('extrude')
-          .size(BASE_TOP)
+          .shape('fill')
           .color('name', [
             '#2b86d8', '#2f8cdd', '#318fe0', '#2c88da',
             '#3492e2', '#2d89db', '#3695e5', '#2e8bdc',
             '#338fe1', '#3090df', '#369aea',
           ])
-          .style({
-            heightfixed: true,
-            pickLight: true,
-            raisingHeight: FLOAT_BASE,
-            opacity: 0.06,
-            // 侧面统一淡蓝（与边界线 #3fc6ff 同色系），替代原深蓝渐变
-            sourceColor: '#8fdcff',
-            targetColor: '#3fc6ff',
-          })
+          .style({ opacity: 0.06 })
         scene.addLayer(polygonLayer)
 
         // 交互事件立即绑定：不依赖后续任何异步图层加载，保证点选/悬浮始终可用。
@@ -237,107 +250,19 @@ export default function CityDistrictMap({
           if (name) onClickRef.current?.(name, Number(adcode))
         })
 
-        // 3. 区县界描边（内侧边界：天蓝）。与省级同方案：每区县一个单要素线图层
-        // （已验证可渲染模式），高度统一高于边墙，depth:false 按 zIndex 合成
+        // 3. 区县界描边（平面边界：天蓝）。与省级同方案：每区县一个单要素线图层
+        // （已验证可渲染模式），depth:false 按 zIndex 合成
         districtsRes.features.forEach((feature: any) => {
           const districtLine = new LineLayer({ zIndex: 5, enablePicking: false })
             .source({ type: 'FeatureCollection', features: [feature] })
             .shape('line')
             .color('#3fc6ff')
             .size(2)
-            .style({ raisingHeight: 11000, heightfixed: true, opacity: 1, depth: false })
+            .style({ opacity: 1 })
           scene.addLayer(districtLine)
         })
 
-        // 4.5 智造新城（仅衢州）：不叠加凸出填充面，仅描边 + 标签，并自动聚焦
-        if (city.adcode === '330800' || city.name.includes('衢州')) {
-          try {
-            const zhizaoRes = await fetch('/map/zhizao_newcity.json').then(r => r.json())
-            const ZZ_CENTER: [number, number] = [118.93118, 28.90954]
-            // 智造新城独立配色（琥珀金系，与全局天蓝体系区分）：半透明区域面 + 描边 + 蚂蚁线
-            const zzFill = new PolygonLayer({ zIndex: 7, enablePicking: false, autoFit: false })
-              .source(zhizaoRes)
-              .shape('extrude')
-              .size(300)
-              .color('#ff9f43')
-              .style({
-                heightfixed: true,
-                topsurface: true,
-                sidesurface: false,
-                raisingHeight: BLOCK_TOP + 300,
-                opacity: 0.25,
-              })
-            scene.addLayer(zzFill)
 
-            // 智造新城边墙（有高度的区域边：琥珀金光墙，与边界线 #ffd166 同色系；边界线 13000 高于墙顶避免遮挡）
-            const zzWall = new LineLayer({ zIndex: 7, enablePicking: false })
-              .source(zhizaoRes)
-              .shape('wall')
-              .size(3500)
-              .style({
-                heightfixed: true,
-                opacity: 0.45,
-                sourceColor: '#ffd166',
-                targetColor: '#ffd166',
-              })
-            scene.addLayer(zzWall)
-
-            const zzLine = new LineLayer({ zIndex: 8, enablePicking: false })
-              .source(zhizaoRes)
-              .shape('line')
-              .color('#ffd166')
-              // 边界再次加粗（6px），比区县边界（2px）明显更粗以突出智造新城
-              .size(6)
-              .style({ raisingHeight: 13000, heightfixed: true, opacity: 1, depth: false })
-            scene.addLayer(zzLine)
-
-            const zzDash = new LineLayer({ zIndex: 9, enablePicking: false })
-              .source(zhizaoRes)
-              .shape('line')
-              .color('#ffe9a8')
-              .size(1.2)
-              .style({ raisingHeight: 13000, heightfixed: true, opacity: 0.9, depth: false, dashArray: [4, 3] })
-            zzDash.animate(true)
-            scene.addLayer(zzDash)
-
-            // 中心呼吸光圈（扩散动画）
-            const zzRipple = new PointLayer({ zIndex: 11, enablePicking: false })
-              .source([{ lng: ZZ_CENTER[0], lat: ZZ_CENTER[1] }], { parser: { type: 'json', x: 'lng', y: 'lat' } })
-              .shape('circle')
-              .size(16)
-              .color('#ffc857')
-              .style({ raisingHeight: 13000, heightfixed: true, opacity: 0.8, depth: false })
-            zzRipple.animate(true)
-            scene.addLayer(zzRipple)
-
-            const zzCore = new PointLayer({ zIndex: 11, enablePicking: false })
-              .source([{ lng: ZZ_CENTER[0], lat: ZZ_CENTER[1] }], { parser: { type: 'json', x: 'lng', y: 'lat' } })
-              .shape('circle')
-              .size(4)
-              .color('#fff6dd')
-              .style({ raisingHeight: 13000, heightfixed: true, opacity: 1, depth: false })
-            scene.addLayer(zzCore)
-            // 名称标签（金色描边呼应独立配色）
-            const zzLabel = new PointLayer({ zIndex: 12, enablePicking: false })
-              .source([{ name: '智造新城', lng: ZZ_CENTER[0], lat: ZZ_CENTER[1] }], { parser: { type: 'json', x: 'lng', y: 'lat' } })
-              .shape('name', 'text')
-              .size(13)
-              .color('#ffe9a8')
-              .style({
-                textAnchor: 'center',
-                stroke: '#7a4a08',
-                strokeWidth: 3,
-                raisingHeight: BLOCK_TOP + 10000,
-                textAllowOverlap: true,
-                heightFixed: true,
-              })
-            scene.addLayer(zzLabel)
-            // 自动聚焦到智造新城（缩放适中，不怼太近）
-            scene.setZoomAndCenter(10.4, ZZ_CENTER)
-          } catch (err) {
-            console.warn('CityDistrictMap: 加载智造新城数据失败', err)
-          }
-        }
 
         // 5. 悬浮描边：亮白加粗，与常态天蓝边形成对比（同省级方案）
         const hoverOutline = new LineLayer({ zIndex: 8, enablePicking: false })
@@ -345,21 +270,16 @@ export default function CityDistrictMap({
           .shape('line')
           .color('#ffffff')
           .size(3.5)
-          .style({ raisingHeight: 13000, heightfixed: true, opacity: 1, depth: false })
+          .style({ opacity: 1 })
         scene.addLayer(hoverOutline)
         hoverOutlineRef.current = hoverOutline
 
         // 8. 选中效果 = 面色提亮 + 高亮描边 + 流动蚂蚁线（三层各司其职，禁拾取）
         const selectedFill = new PolygonLayer({ zIndex: 4, enablePicking: false })
           .source({ type: 'FeatureCollection', features: [] })
-          .shape('extrude')
-          .size(BASE_TOP + 800)
+          .shape('fill')
           .color('#2fb9f5')
-          .style({
-            heightfixed: true,
-            raisingHeight: FLOAT_BASE,
-            opacity: 0.35,
-          })
+          .style({ opacity: 0.35 })
         scene.addLayer(selectedFill)
         selectedFillRef.current = selectedFill
 
@@ -368,7 +288,7 @@ export default function CityDistrictMap({
           .shape('line')
           .color('#bffbff')
           .size(2.5)
-          .style({ raisingHeight: 13000, heightfixed: true, opacity: 1, depth: false })
+          .style({ opacity: 1 })
         scene.addLayer(selectedOutline)
         selectedOutlineRef.current = selectedOutline
 
@@ -378,7 +298,7 @@ export default function CityDistrictMap({
           .shape('line')
           .color('#3fe0ff')
           .size(6)
-          .style({ raisingHeight: 13000, heightfixed: true, opacity: 0.25, depth: false })
+          .style({ opacity: 0.25 })
         scene.addLayer(selectedGlow)
         selectedGlowRef.current = selectedGlow
 
@@ -387,7 +307,7 @@ export default function CityDistrictMap({
           .shape('line')
           .color('#7ff6ff')
           .size(1.2)
-          .style({ raisingHeight: 13000, heightfixed: true, opacity: 0.9, depth: false, dashArray: [4, 3] })
+          .style({ opacity: 0.9, dashArray: [4, 3] })
         selectedDash.animate(true)
         scene.addLayer(selectedDash)
         selectedDashRef.current = selectedDash
@@ -417,28 +337,36 @@ export default function CityDistrictMap({
             padding: [2, 2],
             stroke: '#021a3f',
             strokeWidth: 3,
-            raisingHeight: TEXT_TOP,
+            raisingHeight: 0,
             textAllowOverlap: true,
             heightFixed: true,
           })
         scene.addLayer(textLayer)
 
         // 11. 雷达扫描与无人机场图标
-        deviceLayersRef.current = await createDeviceMapLayers(scene, devicePointsRef.current, TEXT_TOP + 2000)
+        deviceLayersRef.current = await createDeviceMapLayers(scene, devicePointsRef.current, 0)
 
         // 空气质量六级图标打点（按 IAQI 显示在各区县中心）
         airLayersRef.current = await createAirQualityLayers(
           scene,
           airPointsRef.current,
-          TEXT_TOP + 4000,
+          0,
           (point, pos) => onAirPointClickRef.current?.(point, pos),
         )
 
         // 预警点位标记（alertEvent/list 经纬度，warn-l1~l3 图标，与空气质量打点切换显示）
-        alertLayersRef.current = await createAlertLayers(scene, alertPointsRef.current, TEXT_TOP + 4000)
+        alertLayersRef.current = await createAlertLayers(scene, alertPointsRef.current, 0)
 
         // 雷达突发告警点（hbdp/leida/alarmPoint，橙/红圆点常显）
-        radarAlarmLayersRef.current = await createRadarAlarmLayers(scene, radarAlarmPointsRef.current, TEXT_TOP + 6000)
+        radarAlarmLayersRef.current = await createRadarAlarmLayers(scene, radarAlarmPointsRef.current, 0)
+
+        // 企业排口打点（hbdp/emissionOutlet/list，灰色圆点，zoom>=13 图标 / >=15 两行文字）
+        emissionOutletLayersRef.current = await createEmissionOutletLayers(
+          scene,
+          emissionOutletPointsRef.current,
+          0,
+          (point, pos) => onOutletClickRef.current?.(point, pos),
+        )
 
         setReady(true)
       } catch (err) {
@@ -451,12 +379,14 @@ export default function CityDistrictMap({
       deviceLayersRef.current?.destroy()
       alertLayersRef.current?.destroy()
       radarAlarmLayersRef.current?.destroy()
+      emissionOutletLayersRef.current?.destroy()
       scene.destroy()
       sceneRef.current = null
       deviceLayersRef.current = null
       airLayersRef.current = null
       alertLayersRef.current = null
       radarAlarmLayersRef.current = null
+      emissionOutletLayersRef.current = null
       selectedOutlineRef.current = null
       selectedFillRef.current = null
       selectedGlowRef.current = null

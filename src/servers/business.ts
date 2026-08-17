@@ -117,7 +117,7 @@ export const dataSourceApi = {
     request.put(`${API_PREFIX}/dataSource/changeStatus`, { id, enabled }),
   remove: (ids: number | number[]) =>
     request.delete(`${API_PREFIX}/dataSource/${Array.isArray(ids) ? ids.join(',') : ids}`),
-  /** AQI 详情（当前 AQI + 近 12 小时各污染物小时均值趋势；后端异常时页面侧回退 mock） */
+  /** AQI 详情（当前 AQI + 近 12 小时各污染物小时均值趋势；后端异常时不兜底 mock，页面展示空态） */
   aqiDetail: (id: number) =>
     request.get<unknown>(`${API_PREFIX}/dataSource/${id}/aqiDetail`),
 }

@@ -66,7 +66,7 @@ export interface AirQualityPoint {
   o3Iaqi?: number | null
 }
 
-/** 近 12 小时污染物小时均值趋势单条（对应 dataSource/{id}/aqiDetail，异常时前端 mock 兜底） */
+/** 近 12 小时污染物小时均值趋势单条（对应 dataSource/{id}/aqiDetail；异常时不做 mock 兜底） */
 export interface AirTrendItem {
   /** 小时标签（如 08:00） */
   hour: string

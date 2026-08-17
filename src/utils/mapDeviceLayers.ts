@@ -2,11 +2,14 @@ import { PointLayer, type ILayer, type Scene } from '@antv/l7'
 import type { MapDevicePoint } from '@/types/mapDevice'
 import { getPerspectiveIcon } from './iconPerspective'
 import { createRadarScanOverlay, type RadarScanOverlay } from './radarScanOverlay'
+import { bindZoomNameLayer, RADAR_NAME_MIN_ZOOM } from './mapZoomName'
 
 export interface DeviceMapLayers {
   iconLayer: ILayer
   radarLayer: RadarScanOverlay
   setData: (points: MapDevicePoint[]) => void
+  /** 页面级显隐开关接入雷达常规点位名称文字层（实际可见性还受缩放阈值控制） */
+  setNameVisible: (visible: boolean) => void
   destroy: () => void
 }
 
@@ -63,6 +66,31 @@ export async function createDeviceMapLayers(
     .style({ raisingHeight, heightfixed: true })
   scene.addLayer(iconLayer)
 
+  // 雷达常规点位名称文字层：地图放大到 RADAR_NAME_MIN_ZOOM 后自动显示（与突发点位名称同阈值）
+  const radarNameLayer = new PointLayer({
+    zIndex: 31,
+    name: 'radar-station-name-layer',
+    enablePicking: false,
+  })
+    .source(radarPoints.filter(point => point.name), { parser: { type: 'json', x: 'lng', y: 'lat' } })
+    .shape('name', 'text')
+    .size(9)
+    .color('#eafcff')
+    .style({
+      textAnchor: 'top',
+      textOffset: [0, -25],
+      spacing: 2,
+      padding: [2, 2],
+      stroke: '#021a3f',
+      strokeWidth: 2,
+      raisingHeight,
+      heightfixed: true,
+      textAllowOverlap: true,
+      depth: false,
+    })
+  scene.addLayer(radarNameLayer)
+  const radarNameControl = bindZoomNameLayer(scene, radarNameLayer, RADAR_NAME_MIN_ZOOM)
+
   return {
     iconLayer,
     radarLayer,
@@ -73,10 +101,16 @@ export async function createDeviceMapLayers(
         return { ...point, iconName: `${prefix}-${suffix}` }
       })
       iconLayer.setData(nextWithIcons.filter(point => point.type === 'drone'), { parser: { type: 'json', x: 'lng', y: 'lat' } })
-      radarLayer.setData(nextWithIcons.filter(point => point.type === 'radar'))
+      const nextRadarPoints = nextWithIcons.filter(point => point.type === 'radar')
+      radarLayer.setData(nextRadarPoints)
+      radarNameLayer.setData(nextRadarPoints.filter(point => point.name), { parser: { type: 'json', x: 'lng', y: 'lat' } })
+    },
+    setNameVisible(visible) {
+      radarNameControl.setBaseVisible(visible)
     },
     destroy() {
       radarLayer.destroy()
+      scene.removeLayer(radarNameLayer)
     },
   }
 }

@@ -1,10 +1,13 @@
 import { PointLayer, type ILayer, type Scene } from '@antv/l7'
 import type { AirQualityPoint } from '@/types/airData'
 import { AQI_LEVEL_ICON, resolveAqiLevelKey } from './airQuality'
+import { AIR_NAME_MIN_ZOOM, bindZoomNameLayer } from './mapZoomName'
 
 export interface AirMapLayers {
   iconLayer: ILayer
   setData: (points: AirQualityPoint[]) => void
+  /** 页面级显隐开关接入站名文字层（实际可见性还受缩放阈值控制） */
+  setNameVisible: (visible: boolean) => void
 }
 
 /** 点击打点时的屏幕像素坐标（相对地图容器，供页面侧锚定详情弹窗） */
@@ -78,11 +81,40 @@ export async function createAirQualityLayers(
     onPointClick?.(props as AirQualityPoint, pos)
   })
 
+  // 站名文字层：地图放大到 AIR_NAME_MIN_ZOOM 后自动显示，禁拾取避免盖住图标点击
+  const nameLayer = new PointLayer({
+    zIndex: 31,
+    name: 'air-quality-name-layer',
+    enablePicking: false,
+  })
+    .source(data, { parser: { type: 'json', x: 'lng', y: 'lat' } })
+    .shape('name', 'text')
+    .size(9)
+    .color('#eafcff')
+    .style({
+      textAnchor: 'top',
+      textOffset: [0, -25],
+      spacing: 2,
+      padding: [2, 2],
+      stroke: '#021a3f',
+      strokeWidth: 2,
+      raisingHeight,
+      heightfixed: true,
+      textAllowOverlap: true,
+      depth: false,
+    })
+  scene.addLayer(nameLayer)
+  const nameControl = bindZoomNameLayer(scene, nameLayer, AIR_NAME_MIN_ZOOM)
+
   return {
     iconLayer,
     setData(nextPoints) {
       const nextData = decorate(nextPoints)
       iconLayer.setData(nextData, { parser: { type: 'json', x: 'lng', y: 'lat' } })
+      nameLayer.setData(nextData, { parser: { type: 'json', x: 'lng', y: 'lat' } })
+    },
+    setNameVisible(visible) {
+      nameControl.setBaseVisible(visible)
     },
   }
 }

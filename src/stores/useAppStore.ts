@@ -1,6 +1,5 @@
 import { create } from 'zustand'
 import { devtools } from 'zustand/middleware'
-import type { Scene } from '@antv/l7'
 import { getLocalInfo, setLocalInfo } from '@/utils/storage'
 import type { RegionContext, RegionSelection } from '@/types/region'
 
@@ -19,10 +18,6 @@ export type CfjType = {
 }
 
 interface AppState {
-  // 地图实例
-  mapInstance: Scene | null
-  setMapInstance: (instance: Scene | null) => void
-
   // 当前区域
   currentProvince: string
   currentCity: string
@@ -57,18 +52,11 @@ interface AppState {
   setRegionContext: (context: RegionContext) => void
   setRegionSelection: (selection: RegionSelection) => void
   resetRegionContext: () => void
-
-  // 左侧加载状态
-  leftLoading: boolean
-  setLeftLoading: (v: boolean) => void
 }
 
 export const useAppStore = create<AppState>()(
   devtools(
     (set) => ({
-      mapInstance: null,
-      setMapInstance: (mapInstance) => set({ mapInstance }),
-
       currentProvince: '330000',
       currentCity: '',
       currentDistrict: '',
@@ -155,10 +143,7 @@ export const useAppStore = create<AppState>()(
         accessibleCity: 'all',
         accessibleDistrict: 'all',
       }),
-
-      leftLoading: false,
-      setLeftLoading: (leftLoading) => set({ leftLoading }),
     }),
-    { enabled: true, name: 'appStore' }
+    { enabled: import.meta.env.DEV, name: 'appStore' }
   )
 )

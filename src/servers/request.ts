@@ -121,7 +121,7 @@ class AxiosRequest {
 function createRequest(url: string, tokenKey: string) {
   return new AxiosRequest({
     baseURL: url,
-    timeout: 360 * 1000,
+    timeout: 5 * 60 * 1000,
     interceptors: {
       requestInterceptors(res) {
         const tokenLocal = getLocalInfo<string>(tokenKey) || ''
@@ -171,7 +171,7 @@ export function isLoginExpiredError(error: unknown): boolean {
 
 /** 登录过期统一处理：提示并清除本地信息后跳转登录页 */
 export function redirectToLoginOnExpired() {
-  message.warning('信息过期正在跳转登录页')
+  message.warning('用户信息过期，需要重新登录')
   clearLocalInfo()
   window.location.href = '/login'
 }

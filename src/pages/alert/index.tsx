@@ -5,14 +5,14 @@ import { PlusOutlined, EditOutlined, EyeOutlined, AlertFilled, ArrowLeftOutlined
 import RegionSelector from '@/components/RegionSelector'
 import './index.less'
 import { useAppStore, useAuthStore } from '@/stores'
-import { addOption, buildDeptRegionOptions, flattenDepartments, nameEquals } from '@/utils/deptRegion'
+import { addOption, buildDeptRegionOptions, nameEquals } from '@/utils/deptRegion'
 import { getVisibleAlertTabs, type AlertTab } from '@/utils/region'
 import dayjs from 'dayjs'
 import type { Dayjs } from 'dayjs'
 import { alertEventApi, disposalTaskApi, warningRuleApi } from '@/servers/business'
 import type { AlertEventDTO, DisposalTaskDTO, WarningRuleDTO, WarningRuleExportQuery } from '@/types/business'
 import type { DeptInfo } from '@/types/auth'
-import { deptList, userList } from '@/servers/api'
+import { userList } from '@/servers/api'
 
 const { Option } = Select
 
@@ -204,24 +204,17 @@ export default function AlertPage() {
   const [taskFilterDataType, setTaskFilterDataType] = useState<string | undefined>(undefined)
   const [taskFilterType, setTaskFilterType] = useState<string | undefined>(undefined)
   const [taskFilterStatus, setTaskFilterStatus] = useState<string | undefined>(undefined)
-  const [extraDepts, setExtraDepts] = useState<DeptInfo[]>([])
-  const loadingDeptParentIds = useRef(new Set<number>())
   // 预警规则导入：隐藏的文件选择框与导入中状态
   const ruleImportInputRef = useRef<HTMLInputElement>(null)
   const [ruleImporting, setRuleImporting] = useState(false)
   const allDepts = useMemo(() => {
-    const departments = flattenDepartments([
-      ...(regionContext?.departments ?? []),
-      ...extraDepts,
-    ])
+    const departments = [...(regionContext?.departments ?? [])]
     const currentDept = user?.dept
     if (currentDept && !departments.some(dept => Number(dept.deptId) === Number(currentDept.deptId))) {
-      flattenDepartments([currentDept]).forEach(dept => {
-        if (!departments.some(item => Number(item.deptId) === Number(dept.deptId))) departments.push(dept)
-      })
+      departments.push(currentDept)
     }
     return departments
-  }, [extraDepts, regionContext?.departments, user?.dept])
+  }, [regionContext?.departments, user?.dept])
   /** 区域部门 ID 反查名称（后端不再返回城市/区县/乡镇名称字段） */
   const deptNameOf = useCallback((deptId?: number) => {
     if (deptId == null) return undefined
@@ -290,50 +283,12 @@ export default function AlertPage() {
     },
     [deptRegionOptions, targetDistrictId],
   )
-  const loadDepartmentChildren = useCallback(async (parentId?: number) => {
-    const normalizedParentId = Number(parentId)
-    if (
-      !Number.isFinite(normalizedParentId)
-      || loadingDeptParentIds.current.has(normalizedParentId)
-    ) return
-    loadingDeptParentIds.current.add(normalizedParentId)
-    try {
-      const response = await deptList({ parentId: normalizedParentId })
-      if (response.code !== 200 || !Array.isArray(response.data)) return
-      const loaded = flattenDepartments(response.data)
-      setExtraDepts(previous => {
-        const knownIds = new Set(flattenDepartments(previous).map(dept => Number(dept.deptId)))
-        const additions = loaded.filter(dept => !knownIds.has(Number(dept.deptId)))
-        return additions.length ? [...previous, ...additions] : previous
-      })
-    } catch {
-      // 权限范围内无下级部门时保持空选项，不影响已锁定区域。
-    }
-  }, [])
+  // 全量部门已在 session 初始化时加载（regionContext.departments 含市/区县/乡镇全层级），
+  // 级联选项直接由 regionContext 派生，无需再次按需请求，避免合并重复。
   const canSelectRegion = regionContext?.roleLevel === 'admin'
   const roleLevel = regionContext?.roleLevel ?? 'town'
   const isTown = roleLevel === 'town'
   const canEditRule = !isTown
-
-  useEffect(() => {
-    if (!isRuleModalVisible) return
-    queueMicrotask(() => {
-      if (targetCityId && !districtOptions.length && roleLevel !== 'county' && roleLevel !== 'town') {
-        void loadDepartmentChildren(Number(targetCityId))
-      }
-      if (targetDistrictId && !targetTownOptions.length && roleLevel !== 'town') {
-        void loadDepartmentChildren(Number(targetDistrictId))
-      }
-    })
-  }, [
-    districtOptions.length,
-    isRuleModalVisible,
-    loadDepartmentChildren,
-    roleLevel,
-    targetCityId,
-    targetDistrictId,
-    targetTownOptions.length,
-  ])
 
   useEffect(() => {
     if (!isRuleModalVisible) return
@@ -487,16 +442,8 @@ export default function AlertPage() {
 
   useEffect(() => {
     if (!isDispatchModalVisible) return
-    const cityValue = dispatchForm.getFieldValue('cityId')
-    const districtValue = dispatchForm.getFieldValue('districtId')
     const townValue = dispatchForm.getFieldValue('townId')
     queueMicrotask(() => {
-      if (cityValue && !deptRegionOptions.getDistrictOptions(cityValue).length) {
-        void loadDepartmentChildren(Number(cityValue))
-      }
-      if (districtValue && !deptRegionOptions.getTownOptions(districtValue).length) {
-        void loadDepartmentChildren(Number(districtValue))
-      }
       if (townValue) void loadTownUsers(townValue)
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -613,15 +560,7 @@ export default function AlertPage() {
       hide()
     }
 
-    // 确保区域选项加载完成后再设置区域字段
-    const cityId = finalRule.targetCityId
-    if (cityId && roleLevel !== 'county' && roleLevel !== 'town') {
-      await loadDepartmentChildren(Number(cityId))
-    }
-    const districtId = finalRule.targetDistrictId
-    if (districtId && districtId !== 'all' && roleLevel !== 'town') {
-      await loadDepartmentChildren(Number(districtId))
-    }
+    // 全量部门已在初始化时加载，区域选项始终可用，直接回填
     // 延迟一帧让 React 更新 options 后再设置区域值
     requestAnimationFrame(() => {
       const regionValues = buildFormValues(finalRule)

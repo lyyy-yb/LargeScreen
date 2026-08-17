@@ -29,30 +29,11 @@ export function roleList(params?: object) {
   return request.get('/dpSys/system/role/list', { params }) as unknown as Promise<RoleListResponse>
 }
 
-// 部署总数
-export function deployNum() {
-  return request.get('/dpSys/hbdp/main/deployNum')
-}
-
 // 雷达报警统计
 export function leiDaBaojingTongji(params?: object) {
-  return request.get('/dpSys/hbdp/main/leiDaBaojingTongji', { params })
+  return request.get('/dpSys/hbdp/leida/alarmStats', { params })
 }
 
-// 雷达部署情况
-export function leiDaDeploySituation(params?: object) {
-  return request.get('/dpSys/hbdp/main/leiDaDeploySituation', { params })
-}
-
-// 无人机部署情况
-export function wuRenJiDeploySituation(params?: object) {
-  return request.get('/dpSys/hbdp/main/wuRenJiDeploySituation', { params })
-}
-
-// 走航车部署情况
-export function zouHangCheDeploySituation(params?: object) {
-  return request.get('/dpSys/hbdp/main/zouHangCheDeploySituation', { params })
-}
 
 // 因子指标查询
 export function getFactorIndex() {

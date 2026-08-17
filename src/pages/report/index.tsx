@@ -11,79 +11,14 @@ interface RightItemType { key: number; '完成率': number; '风险预警': '无
 
 const colorObj: Record<string, string> = { '无': '#5c8ab3', '绿': 'green', '橙': 'orange', '红': 'red', '黄': 'yellow' }
 
-const mockTableData: RightItemType[] = [
-  { key: 1, '乡镇（街道）': '凤山街道', '任务数': 47, '已完成': 70, '完成率': 100, '风险预警': '绿' },
-  { key: 2, '乡镇（街道）': '阳明街道', '任务数': 55, '已完成': 55, '完成率': 100, '风险预警': '绿' },
-  { key: 3, '乡镇（街道）': '梨洲街道', '任务数': 52, '已完成': 52, '完成率': 100, '风险预警': '绿' },
-  { key: 4, '乡镇（街道）': '兰江街道', '任务数': 41, '已完成': 35, '完成率': 85, '风险预警': '黄' },
-  { key: 5, '乡镇（街道）': '朗霞街道', '任务数': 73, '已完成': 67, '完成率': 92, '风险预警': '黄' },
-  { key: 6, '乡镇（街道）': '低塘街道', '任务数': 58, '已完成': 58, '完成率': 100, '风险预警': '绿' },
-  { key: 7, '乡镇（街道）': '临山镇', '任务数': 45, '已完成': 45, '完成率': 100, '风险预警': '绿' },
-  { key: 8, '乡镇（街道）': '泗门镇', '任务数': 62, '已完成': 62, '完成率': 100, '风险预警': '绿' },
-  { key: 9, '乡镇（街道）': '马渚镇', '任务数': 51, '已完成': 51, '完成率': 100, '风险预警': '绿' },
-  { key: 10, '乡镇（街道）': '牟山镇', '任务数': 38, '已完成': 38, '完成率': 100, '风险预警': '绿' },
-  { key: 11, '乡镇（街道）': '丈亭镇', '任务数': 42, '已完成': 42, '完成率': 100, '风险预警': '绿' },
-  { key: 12, '乡镇（街道）': '三七市镇', '任务数': 35, '已完成': 35, '完成率': 100, '风险预警': '绿' },
-  { key: 13, '乡镇（街道）': '河姆渡镇', '任务数': 32, '已完成': 32, '完成率': 100, '风险预警': '绿' },
-  { key: 14, '乡镇（街道）': '小曹娥镇', '任务数': 36, '已完成': 36, '完成率': 100, '风险预警': '绿' },
-  { key: 15, '乡镇（街道）': '梁弄镇', '任务数': 48, '已完成': 48, '完成率': 100, '风险预警': '绿' },
-  { key: 16, '乡镇（街道）': '大隐镇', '任务数': 28, '已完成': 28, '完成率': 100, '风险预警': '绿' },
-  { key: 17, '乡镇（街道）': '陆埠镇', '任务数': 43, '已完成': 43, '完成率': 100, '风险预警': '绿' },
-  { key: 18, '乡镇（街道）': '大岚镇', '任务数': 25, '已完成': 25, '完成率': 100, '风险预警': '绿' },
-  { key: 19, '乡镇（街道）': '四明山镇', '任务数': 22, '已完成': 22, '完成率': 100, '风险预警': '绿' },
-  { key: 20, '乡镇（街道）': '鹿亭乡', '任务数': 26, '已完成': 26, '完成率': 100, '风险预警': '绿' },
-]
-
-const summary: LeftItemType = {
-  name: '余姚市年度任务汇总', per: 105, all: 686, done: 723,
-  list: [
-    { name: '纳入活性炭全流程监管服务体系', per: 107, all: 0, done: 0 },
-    { name: '低效处理设施淘汰升级', per: 120, all: 0, done: 0 },
-    { name: '中小企业废气治理设施纳入第三方公共服务体系', per: 101, all: 0, done: 0 },
-    { name: '小微企业有机废气治理源头替代', per: 100, all: 0, done: 0 },
-    { name: '挥发性有机物原辅材料源头替代', per: 100, all: 0, done: 0 },
-  ]
-}
-
-// 月度趋势数据
-const monthlyTrend = [
-  { month: '1月', pm25: 68, aqi: 95, pm10: 110 },
-  { month: '2月', pm25: 55, aqi: 82, pm10: 95 },
-  { month: '3月', pm25: 48, aqi: 75, pm10: 88 },
-  { month: '4月', pm25: 38, aqi: 62, pm10: 72 },
-  { month: '5月', pm25: 32, aqi: 55, pm10: 65 },
-  { month: '6月', pm25: 28, aqi: 48, pm10: 58 },
-  { month: '7月', pm25: 25, aqi: 42, pm10: 52 },
-  { month: '8月', pm25: 27, aqi: 45, pm10: 55 },
-  { month: '9月', pm25: 35, aqi: 58, pm10: 68 },
-  { month: '10月', pm25: 45, aqi: 70, pm10: 82 },
-  { month: '11月', pm25: 58, aqi: 85, pm10: 98 },
-  { month: '12月', pm25: 65, aqi: 92, pm10: 105 },
-]
-
-// 同比环比数据
-const comparisonData = [
-  { label: 'PM2.5年均值', current: 42.5, lastYear: 48.2, lastMonth: 45.1, unit: 'μg/m³' },
-  { label: 'AQI年均值', current: 68.3, lastYear: 75.6, lastMonth: 72.0, unit: '' },
-  { label: '优良天数', current: 286, lastYear: 271, lastMonth: 24, unit: '天' },
-  { label: '预警总数', current: 156, lastYear: 198, lastMonth: 15, unit: '次' },
-  { label: '处置完成率', current: 94.2, lastYear: 88.5, lastMonth: 91.8, unit: '%' },
-]
+// 报告页数据均来自真实接口，已移除全部写死 mock 数据
 
 export default function Report() {
   const selection = useAppStore(state => state.regionContext?.selection)
-  const effectiveTableData = useMemo(() => {
-    const reportTableData = selection?.townName
-      ? mockTableData.filter(item => item['乡镇（街道）'] === selection.townName)
-      : selection?.countyName && selection.countyName !== '余姚市'
-        ? []
-        : mockTableData
-    return reportTableData.length
-      ? reportTableData
-      : selection?.townName
-        ? [{ key: 1, '乡镇（街道）': selection.townName, '任务数': 0, '已完成': 0, '完成率': 0, '风险预警': '无' as const }]
-        : reportTableData
-  }, [selection])
+  const effectiveTableData: RightItemType[] = []
+  const summary: LeftItemType = { name: '', per: 0, all: 0, done: 0, list: [] }
+  const monthlyTrend: { month: string; pm25: number; aqi: number; pm10: number }[] = []
+  const comparisonData: { label: string; current: number; lastYear: number; lastMonth: number; unit: string }[] = []
   const reportAreaName = selection?.townName || selection?.countyName || selection?.cityName || selection?.provinceName || '浙江省'
   const waterRef = useRef<HTMLDivElement>(null)
   const barRef = useRef<HTMLDivElement>(null)

@@ -106,3 +106,36 @@ export function wuranAdd(data: object) {
 export function getYearInfo(params?: object) {
   return request.get('/dpSys/ndzj/info', { params })
 }
+
+// ========== 企业排口 ==========
+/** 企业排口列表项（大屏打点用） */
+export interface HbdpEmissionOutlet {
+  id: number
+  seqNo?: number
+  /** 许可证编号 */
+  licenseNo?: string
+  /** 排污单位（企业）名称 */
+  companyName?: string
+  /** 许可证管理类别 */
+  manageCategory?: string
+  /** 废气排口数量 */
+  outletCount?: number
+  /** 在线监测排口数量 */
+  onlineMonitorInfo?: string
+  /** 废气排口名称 */
+  outletName?: string
+  /** 排口涉及的污染因子 */
+  pollutants?: string
+  /** 经度 */
+  longitude?: number
+  /** 纬度 */
+  latitude?: number
+  remarks?: string
+  /** 删除标志（0 存在 / 2 删除，后端已过滤不返回） */
+  delFlag?: string
+}
+
+/** 企业排口列表查询（大屏打点，已删除的不返回） */
+export function emissionOutletList(params?: { companyNameLike?: string }) {
+  return request.get<HbdpEmissionOutlet[]>('/dpSys/hbdp/emissionOutlet/list', { params })
+}

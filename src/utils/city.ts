@@ -661,6 +661,15 @@ export const districts = [
         parent: 330800
     },
     {
+        name: '智造新城',
+        level: 'district',
+        adcode: 330899,
+        lng: 118.93118,
+        lat: 28.90954,
+        childrenNum: 0,
+        parent: 330800
+    },
+    {
         name: '定海区',
         level: 'district',
         adcode: 330902,

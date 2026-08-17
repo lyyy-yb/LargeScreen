@@ -20,14 +20,7 @@ const factorOptions = [
   { value: 'a34004', label: 'TSP' }, { value: 'a34010', label: '尘负荷' },
 ]
 
-// 接口不可用时的降级车辆数据
-const mockCars: CarItem[] = [
-  { id: '1', mnCode: 'HYD1009', siteName: '浙江环境总公司', belongUnit: '浙江环境总公司', status: '在线' },
-  { id: '2', mnCode: 'HYD1010', siteName: '杭州走航车', belongUnit: '杭州市生态环境局', status: '离线' },
-  { id: '3', mnCode: 'HYD1011', siteName: '宁波走航车', belongUnit: '宁波市生态环境局', status: '在线' },
-  { id: '4', mnCode: 'HYD1012', siteName: '温州走航车', belongUnit: '温州市生态环境局', status: '离线' },
-]
-
+// 走航车辆数据来自真实接口，不使用 mock
 const colorLegend = [
   { color: '#b60c1f', range: '[150,250)' },
   { color: '#f0603a', range: '[100,150)' },
@@ -41,7 +34,7 @@ export default function Patrol() {
   const navigate = useNavigate()
   const regionContext = useAppStore(state => state.regionContext)
   const mapSelection = regionContext?.mapSelection
-  const [cars, setCars] = useState<CarItem[]>(mockCars)
+  const [cars, setCars] = useState<CarItem[]>([])
   const [curCarCode, setCurCarCode] = useState('')
   const [wakingCar, setWakingCar] = useState<string | null>(null)
   const [wageVal, setWageVal] = useState('a34001')
@@ -67,15 +60,12 @@ export default function Patrol() {
         if (res?.resultCode === 0 && Array.isArray(res.data) && res.data.length) {
           setCars(res.data)
           setCurCarCode(String(res.data[0].mnCode ?? ''))
-        } else {
-          setCars(mockCars)
-          setCurCarCode(mockCars[0].mnCode)
         }
+        // 接口返回空或异常：保持空列表，不兜底 mock
       })
       .catch(() => {
         if (cancelled) return
-        setCars(mockCars)
-        setCurCarCode(mockCars[0].mnCode)
+        // 接口异常：保持空列表，不兜底 mock
       })
       .finally(() => { if (!cancelled) setCarsLoading(false) })
     return () => { cancelled = true }

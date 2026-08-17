@@ -66,6 +66,6 @@ export const useAuthStore = create<AuthState>()(
         return !!get().token
       },
     }),
-    { enabled: true, name: 'authStore' }
+    { enabled: import.meta.env.DEV, name: 'authStore' }
   )
 )

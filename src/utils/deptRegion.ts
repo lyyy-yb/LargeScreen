@@ -8,9 +8,14 @@ export interface RegionOption {
 
 export function flattenDepartments(items: DeptInfo[]): DeptInfo[] {
   const result: DeptInfo[] = []
+  const seen = new Set<number | string>()
   const walk = (list: DeptInfo[]) => {
     list.forEach(item => {
-      result.push(item)
+      const id = item.deptId
+      if (!seen.has(id)) {
+        seen.add(id)
+        result.push(item)
+      }
       if (item.children?.length) walk(item.children)
     })
   }

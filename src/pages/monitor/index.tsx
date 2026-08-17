@@ -1,23 +1,26 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Modal, Select, Spin, Table } from 'antd'
+import { Modal, Select, Spin, Switch, Table } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { Chart } from '@antv/g2'
 import dayjs from 'dayjs'
 import CityDistrictMap from '@/components/CityDistrictMap'
 import CountyBoundaryMap from '@/components/CountyBoundaryMap'
 import ZJ3DMap from '@/components/ZJ3DMap'
-import { useAppStore, useAuthStore } from '@/stores'
+import { useAppStore } from '@/stores'
 import { cities, districts } from '@/utils/city'
 import type { RegionSelection } from '@/types/region'
 import { toRegionQuery } from '@/utils/region'
-import { dockList, leidaList, listFlyJob, alarmPointAll } from '@/servers/mapBox'
+import { dockList, leidaList, listFlyJob, alarmPointAll, emissionOutletList } from '@/servers/mapBox'
 import { leiDaBaojingTongji } from '@/servers/api'
+import { getDockModeLabel, getDockModeColor, getDockOnlineStatus, type DockItem } from '@/utils/dock'
 import { airDataLatest, airDataStationAirRange } from '@/servers/airData'
 import { alertEventApi, dataSourceApi } from '@/servers/business'
-import type { AlertDashboardItem, AlertDashboardVO, DataSourceQuery } from '@/types/business'
+import type { AlertDashboardItem, AlertDashboardVO, AlertEventQuery, DataSourceQuery } from '@/types/business'
 import type { MapDevicePoint } from '@/types/mapDevice'
 import type { RadarAlarmPoint } from '@/utils/mapRadarAlarmLayers'
+import type { EmissionOutletPoint, OutletPointClickPos } from '@/utils/mapEmissionOutletLayers'
+import { resolveAlertLevel, type AlertMapPoint } from '@/utils/mapAlertLayers'
 import type { AirDataLatestVO, AirQualityPoint, AirTrendItem, StationAirRange } from '@/types/airData'
 import type { AirPointClickPos } from '@/utils/mapAirLayers'
 import { flattenDepts, findCityDeptId, findDistrictDeptId } from '@/utils/airQuality'
@@ -32,6 +35,20 @@ interface MonitorStation {
   online: boolean
   lng?: number
   lat?: number
+  /** 无人机工作模式：0=空闲，1=调试，2=远程调试，3=升级，4=工作中 */
+  modeCode?: number
+  modeLabel?: string
+}
+
+
+/** 雷达告警统计时间窗口求和：regular + sudden，缺省默认 0 */
+function sumWindowStats(stats: UnknownRecord, key: string): number {
+  const windowStats = stats[key]
+  if (!windowStats || typeof windowStats !== 'object') return 0
+  const record = windowStats as UnknownRecord
+  const regular = Number(record.regular)
+  const sudden = Number(record.sudden)
+  return (Number.isFinite(regular) ? regular : 0) + (Number.isFinite(sudden) ? sudden : 0)
 }
 
 /** 格式化站点数值（保留一位小数，空值显示 --） */
@@ -71,7 +88,15 @@ function firstText(item: UnknownRecord, keys: string[], fallback = '') {
 }
 
 function stationOnline(item: UnknownRecord, kind: 'drone' | 'radar') {
-  const raw = firstText(item, ['online', 'onlineStatus', 'status', 'deviceStatus', 'dockStatus', 'bsiStatus']).toLowerCase()
+  if (kind === 'drone') {
+    return getDockOnlineStatus(item.status).online
+  }
+  if (kind === 'radar') {
+    if (item.bsTransStatus !== undefined && item.bsTransStatus !== null) {
+      return String(item.bsTransStatus) === '1' || String(item.bsTransStatus).toLowerCase() === 'true'
+    }
+  }
+  const raw = firstText(item, ['online', 'onlineStatus', 'status', 'deviceStatus', 'dockStatus', 'bsiStatus', 'bsTransStatus']).toLowerCase()
   // 如果API未返回状态字段，默认在线
   if (!raw) return true
   if (kind === 'radar') {
@@ -82,32 +107,48 @@ function stationOnline(item: UnknownRecord, kind: 'drone' | 'radar') {
 }
 
 function normalizeStations(value: unknown, kind: 'drone' | 'radar'): MonitorStation[] {
-  return extractRecords(value).map((item, index) => ({
-    id: firstText(item, ['id', 'dockId', 'dockCode', 'bsiId', 'stationId'], `${kind}-${index}`),
-    name: firstText(
-      item,
-      kind === 'drone'
-        ? ['dockName', 'name', 'stationName', 'deviceName']
-        : ['bsiName', 'stationName', 'name', 'deviceName'],
-      kind === 'drone' ? `无人机站 ${index + 1}` : `雷达站 ${index + 1}`,
-    ),
-    address: firstText(item, ['address', 'location', 'siteAddress', 'district', 'areaName'], '地址未维护'),
-    online: stationOnline(item, kind),
-    lng: Number(firstText(
-      item,
-      kind === 'drone'
-        ? ['dockLng', 'lng', 'longitude']
-        : ['bsiLng', 'lng', 'longitude'],
-      'NaN',
-    )),
-    lat: Number(firstText(
-      item,
-      kind === 'drone'
-        ? ['dockLat', 'lat', 'latitude']
-        : ['bsiLat', 'lat', 'latitude'],
-      'NaN',
-    )),
-  }))
+  return extractRecords(value).map((item, index) => {
+    const modeCode = kind === 'drone' ? Number(item.modeCode ?? NaN) : NaN
+    return {
+      id: firstText(item, ['id', 'bsId', 'bsiId', 'dockId', 'dockCode', 'stationId'], `${kind}-${index}`),
+      name: firstText(
+        item,
+        kind === 'drone'
+          ? ['dockName', 'name', 'stationName', 'deviceName']
+          : ['bsName', 'bsiName', 'stationName', 'name', 'deviceName', 'dockName'],
+        kind === 'drone' ? `无人机站 ${index + 1}` : `雷达站 ${index + 1}`,
+      ),
+      address: firstText(
+        item,
+        ['bsLocation', 'bsiLocation', 'location', 'address', 'siteAddress', 'bsDistrict', 'district', 'areaName'],
+        '地址未维护'
+      ),
+      online: stationOnline(item, kind),
+      lng: Number(firstText(
+        item,
+        kind === 'drone'
+          ? ['dockLng', 'lng', 'longitude']
+          : ['bsLng', 'bsiLng', 'lng', 'longitude'],
+        'NaN',
+      )),
+      lat: Number(firstText(
+        item,
+        kind === 'drone'
+          ? ['dockLat', 'lat', 'latitude']
+          : ['bsiLat', 'lat', 'latitude'],
+        'NaN',
+      )),
+      modeCode: Number.isFinite(modeCode) ? modeCode : undefined,
+      modeLabel: kind === 'drone' && Number.isFinite(modeCode) ? getDockModeLabel(modeCode) : undefined,
+    }
+  })
+}
+
+function getStationTooltip(station: MonitorStation) {
+  if (station.address && station.address !== '地址未维护' && station.address !== station.name) {
+    return `${station.name}\n地址：${station.address}`
+  }
+  return station.name
 }
 
 function DialGraphic({ gifSrc, alt }: { gifSrc: string; alt: string }) {
@@ -124,19 +165,33 @@ const sidePanelStyle = {
   boxShadow: '0 4px 24px rgba(0, 10, 35, 0.6), inset 0 0 15px rgba(0, 180, 255, 0.1)',
 }
 
-/** 近一小时区间展示的 8 种污染物字段（名称括号内为单位） */
-const AIR_RANGE_FIELDS: { key: string; label: string }[] = [
-  { key: 'pm25', label: 'PM2.5(μg/m³)' },
-  { key: 'pm10', label: 'PM10(μg/m³)' },
-  { key: 'so2', label: 'SO₂(μg/m³)' },
-  { key: 'no2', label: 'NO₂(μg/m³)' },
-  { key: 'co', label: 'CO(mg/m³)' },
-  { key: 'o3', label: 'O₃(μg/m³)' },
-  { key: 'vocs', label: 'VOCs(μg/m³)' },
-  { key: 'tsp', label: 'TSP(μg/m³)' },
+/** 近一小时区间展示的 8 种污染物字段（名称与单位分开处理，以便样式精细控制） */
+const AIR_RANGE_FIELDS: { key: string; name: string; unit: string }[] = [
+  { key: 'pm25', name: 'PM2.5', unit: '(μg/m³)' },
+  { key: 'pm10', name: 'PM10', unit: '(μg/m³)' },
+  { key: 'so2', name: 'SO₂', unit: '(μg/m³)' },
+  { key: 'no2', name: 'NO₂', unit: '(μg/m³)' },
+  { key: 'co', name: 'CO', unit: '(mg/m³)' },
+  { key: 'o3', name: 'O₃', unit: '(μg/m³)' },
+  { key: 'vocs', name: 'VOCs', unit: '(μg/m³)' },
+  { key: 'tsp', name: 'TSP', unit: '(μg/m³)' },
 ]
 /** 站点类型中文映射（stationAirRange 按站点类型分组返回） */
 const STATION_TYPE_LABEL: Record<string, string> = { fixed: '固定站', mobile: '移动站' }
+
+/** 提取标题中文与括号（括号及内部文字淡化/小号处理） */
+function renderTitleWithBracket(title: string) {
+  const match = title.match(/^(.*?)（(.*?)）$/)
+  if (match) {
+    return (
+      <span className="truncate flex items-baseline">
+        <span>{match[1]}</span>
+        <span className="text-11px text-[#9de2ff] font-normal ml-0.5">（{match[2]}）</span>
+      </span>
+    )
+  }
+  return <span className="truncate">{title}</span>
+}
 
 /** 空气质量站（固定站/移动站）区间卡片：统一青色（#18e8ff）数据点击后查看站点数据详情 */
 function AirStationRangeCard({ title, range, latestTime, onView }: {
@@ -150,7 +205,7 @@ function AirStationRangeCard({ title, range, latestTime, onView }: {
     <section className="status-card h-200px shrink-0 flex flex-col overflow-hidden" style={sidePanelStyle}>
       <div className="panel-title-divider flex items-center gap-1.5 text-[#7bd7ff] text-12px font-bold mb-2 pb-2">
         <span className="w-3px h-11px bg-[#00f0ff]" />
-        <span className="truncate">{title}</span>
+        {renderTitleWithBracket(title)}
         {latestTime && (
           <span className="ml-auto shrink-0 text-[#5c92c1] text-10px font-mono font-normal">
             {dayjs(latestTime).format('YYYY/MM/DD HH:mm')}
@@ -161,11 +216,14 @@ function AirStationRangeCard({ title, range, latestTime, onView }: {
       <div className="flex-1 min-h-0 grid grid-cols-2 content-start gap-2.5">
         {AIR_RANGE_FIELDS.map(field => (
           <div key={field.key} className="flex items-center justify-between rounded-4px border border-[#2f7fd6]/60 bg-[#1c64be]/55 px-2 py-1.5">
-            <span className="text-[#d6ecff] text-8px whitespace-nowrap">{field.label}</span>
+            <span className="text-10px whitespace-nowrap flex items-baseline">
+              <span className="text-[#edf6ff] font-semibold">{field.name}</span>
+              <span className="text-9px text-[#a3d4ff]/85 font-normal ml-0.5">{field.unit}</span>
+            </span>
             <button
               type="button"
               onClick={onView}
-              className="text-[#18e8ff] text-9px font-mono cursor-pointer bg-transparent border-none p-0 hover:text-white hover:underline"
+              className="text-[#18e8ff] text-11px font-mono cursor-pointer bg-transparent border-none p-0 hover:text-white hover:underline"
             >
               {range ? formatRange(values[`${field.key}Min`], values[`${field.key}Max`]) : '--'}
             </button>
@@ -174,24 +232,6 @@ function AirStationRangeCard({ title, range, latestTime, onView }: {
       </div>
     </section>
   )
-}
-
-/** 预警处置兜底 mock 数据（dashboard 接口异常时使用） */
-const MOCK_ALERT_DASHBOARD: AlertDashboardVO = {
-  effectiveCount: 6,
-  pendingCount: 3,
-  processingCount: 2,
-  completedCount: 1,
-  todayDispatchCount: 5,
-  todayClosedCount: 3,
-  latestAlerts: [
-    { ruleName: 'PM2.5 浓度超标预警', location: '智造新城东区监测点', alertTime: '2026-08-09 08:51' },
-    { ruleName: 'VOCs 浓度超标预警', location: '智造新城南区监测点', alertTime: '2026-08-09 08:12' },
-    { ruleName: 'TSP 浓度超标预警', location: '园区主干道走航段', alertTime: '2026-08-09 07:46' },
-    { ruleName: 'NO₂ 浓度超标预警', location: '智造新城北区监测点', alertTime: '2026-08-09 06:30' },
-    { ruleName: 'O₃ 浓度超标预警', location: '园区西侧边界走航段', alertTime: '2026-08-08 22:18' },
-    { ruleName: 'PM10 浓度超标预警', location: '智造新城西区监测点', alertTime: '2026-08-08 18:05' },
-  ],
 }
 
 /** 最新预警轮播参数：单条高度（含间距）与最大可视条数（实际条数按可用高度动态计算，避免列表被卡片裁切） */
@@ -370,6 +410,12 @@ interface AirPointDetail {
   pos?: AirPointClickPos
 }
 
+/** 企业排口详情弹窗数据（点击排口圆点时填充） */
+interface OutletPointDetail extends EmissionOutletPoint {
+  /** 点击时的屏幕像素坐标（弹窗锚定位置，缺失时居中） */
+  pos?: OutletPointClickPos
+}
+
 /** 从 aqiDetail 返回中提取趋势数组（兼容直接返回数组或包一层对象的结构） */
 function extractTrendRows(value: unknown): AirTrendItem[] {
   let rows: UnknownRecord[] = []
@@ -407,26 +453,6 @@ function extractTrendRows(value: unknown): AirTrendItem[] {
     .filter((item): item is AirTrendItem => !!item)
 }
 
-/** 生成近 12 小时小时级趋势 mock（接口不可用时兜底）：以各污染物当前 IAQI 为基准随机波动，按站点名稳定 */
-function buildMockTrend(detail: AirPointDetail): AirTrendItem[] {
-  let seed = [...detail.name].reduce((acc, ch) => acc + ch.charCodeAt(0), 7)
-  const random = () => {
-    seed = (seed * 9301 + 49297) % 233280
-    return seed / 233280
-  }
-  const items: AirTrendItem[] = []
-  for (let i = 11; i >= 0; i -= 1) {
-    const item: AirTrendItem = { hour: dayjs().subtract(i, 'hour').format('HH:00') }
-    AIR_DETAIL_FIELDS.forEach(({ iaqiKey, trendKey }) => {
-      const base = Number(detail.values[iaqiKey])
-      const ref = Number.isFinite(base) && base > 0 ? base : 50
-      ;(item as unknown as Record<string, unknown>)[trendKey] = Math.round(ref * (0.7 + random() * 0.6) * 10) / 10
-    })
-    items.push(item)
-  }
-  return items
-}
-
 /** 弹窗固定宽高（定位计算与内容布局均基于此尺寸，避免加载前后尺寸抖动） */
 const AIR_POPUP_WIDTH = 400
 const AIR_POPUP_HEIGHT = 350
@@ -438,37 +464,24 @@ function AirStationDetailPopup({ detail, onClose }: { detail: AirPointDetail; on
   // 勾选项默认第一项（PM2.5），trendKey 即趋势数据字段
   const [checkedKeys, setCheckedKeys] = useState<string[]>([AIR_DETAIL_FIELDS[0].trendKey])
   const [trend, setTrend] = useState<AirTrendItem[]>([])
-  const [isMock, setIsMock] = useState(false)
   const [loading, setLoading] = useState(true)
   const chartBoxRef = useRef<HTMLDivElement>(null)
 
   // 弹窗立即展示（卡片数据随点击已返回），趋势接口异步加载并带 loading（初始 true，按站点 key 重挂载时重置）
   useEffect(() => {
     let cancelled = false
-    const fallback = () => {
-      if (cancelled) return
-      setTrend(buildMockTrend(detail))
-      setIsMock(true)
-      setLoading(false)
-    }
     if (detail.id == null) {
-      fallback()
+      setLoading(false)
       return
     }
     dataSourceApi.aqiDetail(detail.id)
       .then(res => {
         if (cancelled) return
         const rows = extractTrendRows(res.data)
-        if (rows.length) {
-          setTrend(rows)
-          setIsMock(false)
-        } else {
-          fallback()
-          return
-        }
+        setTrend(rows)
         setLoading(false)
       })
-      .catch(fallback)
+      .catch(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
   }, [detail])
 
@@ -563,7 +576,6 @@ function AirStationDetailPopup({ detail, onClose }: { detail: AirPointDetail; on
       <div className="mt-2 pt-2 border-t border-[#00d4ff]/20 flex-1 min-h-0 flex flex-col">
         <div className="flex items-center justify-between text-10px mb-1 shrink-0">
           <span className="text-[#5ca2d9]">近12小时趋势图</span>
-          {isMock && !loading && <span className="text-[#7088a8]">示例数据</span>}
         </div>
         <div className="relative flex-1 min-h-0">
           {loading && (
@@ -579,6 +591,56 @@ function AirStationDetailPopup({ detail, onClose }: { detail: AirPointDetail; on
   )
 }
 
+/** 企业排口详情弹窗：展示排口名称、企业名称、许可证编号、管理类别、污染因子与经纬度 */
+const OUTLET_POPUP_WIDTH = 320
+const OUTLET_POPUP_GAP = 14
+
+function OutletDetailPopup({ detail, onClose }: { detail: OutletPointDetail; onClose: () => void }) {
+  // 优先展示在点击位置上方，上方放不下时翻转到下方；无坐标时居中
+  const pos = detail.pos
+  const anchorStyle: CSSProperties = pos
+    ? {
+        left: `min(max(${OUTLET_POPUP_WIDTH / 2 + 8}px, ${pos.x}px), calc(100% - ${OUTLET_POPUP_WIDTH / 2 + 8}px))`,
+        top: Math.max(pos.y - OUTLET_POPUP_GAP, 8),
+        transform: pos.y > 220 ? `translate(-50%, -100%)` : 'translate(-50%, 0)',
+      }
+    : { left: '50%', top: '50%', transform: 'translate(-50%, -50%)' }
+
+  const rows: { label: string; value: string }[] = [
+    { label: '企业名称', value: detail.companyName || '--' },
+    { label: '许可证编号', value: detail.licenseNo || '--' },
+    { label: '管理类别', value: detail.manageCategory || '--' },
+    { label: '污染因子', value: detail.pollutants || '--' },
+    { label: '经纬度', value: `${detail.lng.toFixed(6)}，${detail.lat.toFixed(6)}` },
+  ]
+
+  return (
+    <div
+      className="absolute z-30 p-3 rounded-8px border border-[#9aa7b4]/45 bg-[rgba(10,18,32,0.94)] shadow-[0_8px_28px_rgba(0,10,35,0.55)] box-border"
+      style={{ ...anchorStyle, width: OUTLET_POPUP_WIDTH }}
+    >
+      <div className="flex items-center justify-between mb-2 pb-2 border-b border-[#9aa7b4]/25">
+        <span className="text-[#d0d8e0] text-13px font-bold truncate">{detail.outletName || '企业排口'}</span>
+        <button
+          type="button"
+          className="text-[#7088a8] hover:text-white text-13px leading-none px-1 cursor-pointer"
+          onClick={onClose}
+        >
+          ✕
+        </button>
+      </div>
+      <div className="flex flex-col gap-1.5">
+        {rows.map(row => (
+          <div key={row.label} className="flex items-start gap-2 text-11px leading-1.6">
+            <span className="text-[#7088a8] shrink-0 w-56px">{row.label}</span>
+            <span className="text-[#d0d8e0] break-all">{row.value}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export default function Monitor() {
   const navigate = useNavigate()
   const {
@@ -587,19 +649,10 @@ export default function Monitor() {
   } = useAppStore()
   const roleLevel = regionContext?.roleLevel || 'town'
   const selection = regionContext?.selection
-  const username = useAuthStore(state => state.username)
-  // quzhou 账号特殊处理：地图锁定衢州市级视图（CityDistrictMap 会自动飞行聚焦智造新城），不进区县视图
-  const isQuzhouAccount = !!username && username.toLowerCase().includes('quzhou')
-  const quzhouMapSelection: RegionSelection = {
-    provinceCode: '330000',
-    provinceName: '浙江省',
-    cityCode: '330800',
-    cityName: '衢州市',
-  }
-  const mapSelection = isQuzhouAccount ? quzhouMapSelection : regionContext?.mapSelection
+  const mapSelection = regionContext?.mapSelection
   const isProvinceView = !mapSelection?.cityCode
   const activeCity = cities.find(city => city.adcode === mapSelection?.cityCode)
-  const activeCounty = isQuzhouAccount ? undefined : districts.find(item => String(item.adcode) === mapSelection?.countyCode)
+  const activeCounty = districts.find(item => String(item.adcode) === mapSelection?.countyCode)
   const [hoverRegion, setHoverRegion] = useState<string | null>(null)
   const [droneStations, setDroneStations] = useState<MonitorStation[]>([])
   const [radarStations, setRadarStations] = useState<MonitorStation[]>([])
@@ -614,9 +667,19 @@ export default function Monitor() {
   // 预警处置：dashboard 面板数据（统计 + 近一小时最新预警，接口异常时回退 mock）
   const [alertDashboard, setAlertDashboard] = useState<AlertDashboardVO | null>(null)
   const [airPoints, setAirPoints] = useState<AirQualityPoint[]>([])
+  // 预警点位打点（alertEvent/list 经纬度，同经纬度已聚合）
+  const [alertPoints, setAlertPoints] = useState<AlertMapPoint[]>([])
+  // 企业排口打点（hbdp/emissionOutlet/list，全量；zoom>=12 图标 / >=14 两行文字）
+  const [emissionOutletPoints, setEmissionOutletPoints] = useState<EmissionOutletPoint[]>([])
+  // 打点显隐控制：预警↔空气互斥（按钮组单选），无人机/雷达独立 Switch
+  const [pointMode, setPointMode] = useState<'alert' | 'air'>('air')
+  const [showDronePoints, setShowDronePoints] = useState(true)
+  const [showRadarPoints, setShowRadarPoints] = useState(true)
   // 数据源列表总数（左下“在线数据源”展示）
   const [sourceTotal, setSourceTotal] = useState(0)
   const [airDetail, setAirDetail] = useState<AirPointDetail | null>(null)
+  // 企业排口详情弹窗（点击排口圆点时填充，含锚定坐标）
+  const [outletDetail, setOutletDetail] = useState<OutletPointDetail | null>(null)
   // 扁平化部门树（用于按区域名匹配 deptId）
   const allDepts = useMemo(() => flattenDepts(regionContext?.departments ?? []), [regionContext?.departments])
 
@@ -629,7 +692,12 @@ export default function Monitor() {
       listFlyJob({ ...params, pageNum: 1, pageSize: 100 }),
       leiDaBaojingTongji(params),
     ]).then(([dockResult, radarResult, taskResult, alarmResult]) => {
-      if (dockResult.status === 'fulfilled') setDroneStations(normalizeStations(dockResult.value.data, 'drone'))
+      if (dockResult.status === 'fulfilled') {
+        const norm = normalizeStations(dockResult.value?.data, 'drone')
+        setDroneStations(norm)
+      } else {
+        setDroneStations([])
+      }
       if (radarResult.status === 'fulfilled') setRadarStations(normalizeStations(radarResult.value.data, 'radar'))
       if (taskResult.status === 'fulfilled') {
         const tasks = extractRecords(taskResult.value.data)
@@ -640,17 +708,16 @@ export default function Monitor() {
       }
       if (alarmResult.status === 'fulfilled' && alarmResult.value.data && typeof alarmResult.value.data === 'object') {
         const stats = alarmResult.value.data as UnknownRecord
-        const count = (keys: string[]) => Number(firstText(stats, keys, '0')) || 0
         setRadarAlarmStats({
-          oneHour: count(['oneHour', 'hour1', 'oneHourCount', 'oneCount']),
-          threeHours: count(['threeHours', 'hour3', 'threeHourCount', 'threeCount']),
-          day: count(['day', 'hour24', 'dayCount', 'todayCount']),
+          oneHour: sumWindowStats(stats, 'hour1'),
+          threeHours: sumWindowStats(stats, 'hour3'),
+          day: sumWindowStats(stats, 'hour24'),
         })
       }
       // 雷达突发告警点：按雷达逐一查询 alarmPoint（与 radar 页统一 hour=24），合并去重后地图常显，无数据则清空
       const radarBsiIds = radarResult.status === 'fulfilled'
         ? extractRecords(radarResult.value.data)
-          .map(item => firstText(item, ['bsiId', 'id']))
+          .map(item => firstText(item, ['bsiId', 'bsId', 'id']))
           .filter(Boolean)
         : []
       if (!radarBsiIds.length) {
@@ -725,16 +792,16 @@ export default function Monitor() {
     return () => { cancelled = true }
   }, [])
 
-  // 预警处置：dashboard 接口（统计 + 最新预警），1 分钟静默轮询
+  // 预警处置：dashboard 接口（统计 + 最新预警），5 分钟静默轮询
   useEffect(() => {
     let cancelled = false
     const load = () => {
       alertEventApi.dashboard()
-        .then(res => { if (!cancelled) setAlertDashboard(res.data ?? MOCK_ALERT_DASHBOARD) })
-        .catch(() => { if (!cancelled) setAlertDashboard(MOCK_ALERT_DASHBOARD) })
+        .then(res => { if (!cancelled) setAlertDashboard(res.data ?? null) })
+        .catch(() => { if (!cancelled) setAlertDashboard(null) })
     }
     load()
-    const timer = window.setInterval(load, 60000)
+    const timer = window.setInterval(load, 5 * 60 * 1000)
     return () => { cancelled = true; window.clearInterval(timer) }
   }, [])
 
@@ -759,12 +826,12 @@ export default function Monitor() {
         // 左下“在线数据源”展示列表总数
         setSourceTotal(Number(res.data?.total) || 0)
 
-        // 空气质量微站：按 aqiLevel 打六级图标，图标上方显示综合 AQI 值
+        // 空气质量微站：按 aqiLevel 打六级图标，无 aqiLevel 的微站由 mapAirLayers 用 aq-none.png 占位
         const airStations: AirQualityPoint[] = records
-          .filter(item => item.dataType === 'air_quality_station' && item.aqiLevel != null)
+          .filter(item => item.dataType === 'air_quality_station')
           .map(item => ({
             id: Number(item.id) || undefined,
-            name: item.deviceName,
+            name: item.shortName ?? item.deviceName,
             lng: item.lng as number,
             lat: item.lat as number,
             value: item.aqi ?? null,
@@ -788,8 +855,80 @@ export default function Monitor() {
     return () => { cancelled = true }
   }, [allDepts, selection])
 
+  // 预警点位打点（alertEvent/list）：按区域 deptId 过滤，同经纬度聚合计数；1 分钟静默轮询（与 dashboard 同节奏）
+  useEffect(() => {
+    const cityDeptId = findCityDeptId(allDepts, selection?.cityName)
+    const districtDeptId = selection?.countyName
+      ? findDistrictDeptId(allDepts, selection.countyName, selection.cityName)
+      : undefined
+    let cancelled = false
+    const load = () => {
+      const params: AlertEventQuery = { pageNum: 1, pageSize: 999 }
+      if (districtDeptId != null) params.districtId = Number(districtDeptId)
+      else if (cityDeptId != null) params.cityId = Number(cityDeptId)
+      alertEventApi.list(params)
+        .then(res => {
+          if (cancelled) return
+          const records = res.data?.records ?? []
+          // 同经纬度多条预警聚合为一个点，图标上方显示个数
+          const aggregated = new Map<string, AlertMapPoint>()
+          records.forEach(item => {
+            if (typeof item.lng !== 'number' || typeof item.lat !== 'number'
+              || !Number.isFinite(item.lng) || !Number.isFinite(item.lat)) return
+            const key = `${item.lng.toFixed(6)}-${item.lat.toFixed(6)}`
+            const existing = aggregated.get(key)
+            if (existing) {
+              existing.count = (existing.count ?? 1) + 1
+              return
+            }
+            aggregated.set(key, {
+              id: item.id,
+              name: item.deviceName || item.location || item.ruleName,
+              level: resolveAlertLevel(item.alertLevel),
+              lng: item.lng,
+              lat: item.lat,
+              count: 1,
+            })
+          })
+          setAlertPoints([...aggregated.values()])
+        })
+        .catch(() => { if (!cancelled) setAlertPoints([]) })
+    }
+    load()
+    const timer = window.setInterval(load, 5 * 60 * 1000)
+    return () => { cancelled = true; window.clearInterval(timer) }
+  }, [allDepts, selection])
+
+  // 企业排口打点（hbdp/emissionOutlet/list）：全量加载，不按区域过滤；zoom>=12 才显示图标、>=14 才显示两行文字
+  useEffect(() => {
+    let cancelled = false
+    emissionOutletList()
+      .then(res => {
+        if (cancelled) return
+        const list = res.data ?? []
+        const points: EmissionOutletPoint[] = list
+          .map(item => ({
+            id: item.id,
+            outletName: item.outletName,
+            companyName: item.companyName,
+            licenseNo: item.licenseNo,
+            manageCategory: item.manageCategory,
+            pollutants: item.pollutants,
+            outletCount: item.outletCount,
+            onlineMonitorInfo: item.onlineMonitorInfo,
+            lng: Number(item.longitude),
+            lat: Number(item.latitude),
+          }))
+          .filter(p => Number.isFinite(p.lng) && Number.isFinite(p.lat))
+        setEmissionOutletPoints(points)
+      })
+      .catch(() => { if (!cancelled) setEmissionOutletPoints([]) })
+    return () => { cancelled = true }
+  }, [])
+
   // 点击地图空气质量打点：弹窗锚定在点击位置，展示综合 AQI 与各污染物分指数 IAQI（数据已随列表返回）
   const handleAirPointClick = (point: AirQualityPoint, pos?: AirPointClickPos) => {
+    setOutletDetail(null)
     setAirDetail({
       id: point.id,
       name: point.name,
@@ -805,6 +944,12 @@ export default function Monitor() {
       },
       pos,
     })
+  }
+
+  // 点击地图企业排口圆点：弹窗锚定在点击位置，展示排口/企业/许可证等详情
+  const handleOutletClick = (point: EmissionOutletPoint, pos?: OutletPointClickPos) => {
+    setAirDetail(null)
+    setOutletDetail({ ...point, pos })
   }
 
   // 固定站/移动站区间数据（stationAirRange 按站点类型拆分）
@@ -943,13 +1088,33 @@ export default function Monitor() {
             selectedCity={selection?.cityName}
             devicePoints={legacyDevicePoints}
             airPoints={airPoints}
+            alertPoints={alertPoints}
             radarAlarmPoints={radarAlarmPoints}
+            emissionOutletPoints={emissionOutletPoints}
+            onOutletClick={handleOutletClick}
+            showAlertPoints={pointMode === 'alert'}
+            showAirPoints={pointMode === 'air'}
+            showDronePoints={showDronePoints}
+            showRadarPoints={showRadarPoints}
             onCityClick={handleCityClick}
             onCityHover={setHoverRegion}
             onAirPointClick={handleAirPointClick}
           />
         ) : activeCounty ? (
-          <CountyBoundaryMap county={activeCounty} devicePoints={legacyDevicePoints} airPoints={airPoints} radarAlarmPoints={radarAlarmPoints} onAirPointClick={handleAirPointClick} />
+          <CountyBoundaryMap
+            county={activeCounty}
+            devicePoints={legacyDevicePoints}
+            airPoints={airPoints}
+            alertPoints={alertPoints}
+            radarAlarmPoints={radarAlarmPoints}
+            emissionOutletPoints={emissionOutletPoints}
+            onOutletClick={handleOutletClick}
+            showAlertPoints={pointMode === 'alert'}
+            showAirPoints={pointMode === 'air'}
+            showDronePoints={showDronePoints}
+            showRadarPoints={showRadarPoints}
+            onAirPointClick={handleAirPointClick}
+          />
         ) : activeCity ? (
           <CityDistrictMap
             city={activeCity}
@@ -957,7 +1122,14 @@ export default function Monitor() {
             selectedDistrict={selection?.countyName}
             devicePoints={legacyDevicePoints}
             airPoints={airPoints}
+            alertPoints={alertPoints}
             radarAlarmPoints={radarAlarmPoints}
+            emissionOutletPoints={emissionOutletPoints}
+            onOutletClick={handleOutletClick}
+            showAlertPoints={pointMode === 'alert'}
+            showAirPoints={pointMode === 'air'}
+            showDronePoints={showDronePoints}
+            showRadarPoints={showRadarPoints}
             onDistrictClick={selectDistrict}
             onDistrictHover={setHoverRegion}
             onAirPointClick={handleAirPointClick}
@@ -996,6 +1168,39 @@ export default function Monitor() {
               <div className="flex items-center gap-1"><span className="w-10px h-2px bg-[#00d4ff]" /><span>飞行路线</span></div>
               <div className="flex items-center gap-1"><img src="/marker/drone-fly.png" className="w-14px h-14px" alt="" /><span>飞行中无人机</span></div>
             </div>
+          </div>
+        </div>
+
+        {/* 底部水平居中：打点显示控件条（预警↔空气互斥按钮组 + 无人机/雷达 Switch），位于底部导航条正上方不被遮挡 */}
+        <div className="point-display-bar absolute bottom-52px left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 rounded-8px bg-[rgba(4,22,52,0.85)] px-2 py-1.5 border border-[#00d4ff]/30 shadow-[0_4px_12px_rgba(0,0,0,0.3)]">
+          {/* 预警点位 ↔ 空气质量监测站：互斥单选（页面 state 保证同刻只显一类） */}
+          <button
+            type="button"
+            onClick={() => setPointMode('alert')}
+            className={`text-11px px-3 py-1 rounded-4px border cursor-pointer transition-all bg-transparent ${pointMode === 'alert'
+              ? 'border-[#00f0ff] text-white bg-[#1890ff]/35 shadow-[0_0_8px_rgba(0,240,255,0.35)]'
+              : 'border-[#2f9bff]/60 text-[#7bd7ff] hover:text-white hover:border-[#00f0ff]'}`}
+          >
+            预警点位
+          </button>
+          <button
+            type="button"
+            onClick={() => setPointMode('air')}
+            className={`text-11px px-3 py-1 rounded-4px border cursor-pointer transition-all bg-transparent ${pointMode === 'air'
+              ? 'border-[#00f0ff] text-white bg-[#1890ff]/35 shadow-[0_0_8px_rgba(0,240,255,0.35)]'
+              : 'border-[#2f9bff]/60 text-[#7bd7ff] hover:text-white hover:border-[#00f0ff]'}`}
+          >
+            空气质量监测站
+          </button>
+          <span className="w-1px h-16px bg-[#2f9bff]/40 mx-1" />
+          {/* 无人机 / 雷达：独立开关（图层 show/hide，不重建） */}
+          <div className="flex items-center gap-1.5 text-[#d2ecff] text-11px">
+            <span>无人机</span>
+            <Switch size="small" checked={showDronePoints} onChange={setShowDronePoints} />
+          </div>
+          <div className="flex items-center gap-1.5 text-[#d2ecff] text-11px">
+            <span>雷达</span>
+            <Switch size="small" checked={showRadarPoints} onChange={setShowRadarPoints} />
           </div>
         </div>
 
@@ -1082,6 +1287,15 @@ export default function Monitor() {
           />
         )}
 
+        {/* 企业排口详情弹窗（与空气质量弹窗互斥，锚定在圆点点击位置） */}
+        {outletDetail && (
+          <OutletDetailPopup
+            key={outletDetail.id ?? outletDetail.outletName}
+            detail={outletDetail}
+            onClose={() => setOutletDetail(null)}
+          />
+        )}
+
         {/* 左下浮层：数据源概况（在线数据源取 dataSource/list 的 total，其余暂无数据源先显示 0） */}
         <div className="source-summary absolute bottom-56px left-3 z-20 text-11px text-[#b2d9ff]/90 space-y-1 font-mono p-2.5 rounded-6px bg-[rgba(4,22,52,0.45)] border border-[#00d4ff]/25">
           <div>在线数据源：<span className="text-[#00ffff] font-bold">{sourceTotal}</span></div>
@@ -1137,8 +1351,40 @@ export default function Monitor() {
           <div className="mt-2 max-h-72px overflow-y-auto space-y-1">
             {droneStations.slice(0, 5).map(station => (
               <div key={station.id} className="flex items-center justify-between text-10px text-[#b2d9ff]">
-                <span className="truncate pr-2" title={`${station.name} · ${station.address}`}>{station.name}</span>
-                <span className={station.online ? 'text-[#22f0a2]' : 'text-[#8ca3bd]'}>{station.online ? '在线' : '离线'}</span>
+                <span className="truncate pr-2 cursor-pointer" title={getStationTooltip(station)}>{station.name}</span>
+                <span className="shrink-0 flex items-center gap-1.5">
+                  <span
+                    className="text-10px font-medium px-1.5 py-0.2 rounded-full inline-flex items-center gap-1 border shrink-0"
+                    style={
+                      station.online
+                        ? {
+                            color: '#00ff88',
+                            backgroundColor: 'rgba(0, 255, 136, 0.15)',
+                            borderColor: 'rgba(0, 255, 136, 0.4)',
+                          }
+                        : {
+                            color: '#94a3b8',
+                            backgroundColor: 'rgba(148, 163, 184, 0.15)',
+                            borderColor: 'rgba(148, 163, 184, 0.3)',
+                          }
+                    }
+                  >
+                    <span className={`w-1 h-1 rounded-full ${station.online ? 'bg-[#00ff88] shadow-[0_0_4px_#00ff88]' : 'bg-[#94a3b8]'}`} />
+                    {station.online ? '在线' : '离线'}
+                  </span>
+                  {station.modeLabel && (
+                    <span
+                      className="text-10px font-medium px-1 py-0.2 rounded border shrink-0"
+                      style={{
+                        color: getDockModeColor(station.modeCode),
+                        borderColor: `${getDockModeColor(station.modeCode)}55`,
+                        backgroundColor: `${getDockModeColor(station.modeCode)}20`,
+                      }}
+                    >
+                      {station.modeLabel}
+                    </span>
+                  )}
+                </span>
               </div>
             ))}
             {!droneStations.length && <div className="text-10px text-[#7088a8]">暂无站点数据</div>}
@@ -1190,11 +1436,11 @@ export default function Monitor() {
             </div>
           </div>
 
-          <div className="mt-2 max-h-72px overflow-y-auto space-y-1">
-            {radarStations.slice(0, 5).map(station => (
-              <div key={station.id} className="flex items-center justify-between text-10px text-[#b2d9ff]">
-                <span className="truncate pr-2" title={`${station.name} · ${station.address}`}>{station.name}</span>
-                <span className={station.online ? 'text-[#22f0a2]' : 'text-[#8ca3bd]'}>{station.online ? '在线' : '离线'}</span>
+          <div className="mt-2 max-h-120px overflow-y-auto space-y-1 pr-1">
+            {radarStations.map(station => (
+              <div key={station.id} className="flex items-center justify-between text-10px text-[#b2d9ff] hover:bg-white/5 px-1 py-0.5 rounded transition-colors">
+                <span className="truncate pr-2 cursor-pointer" title={getStationTooltip(station)}>{station.name}</span>
+                <span className={station.online ? 'text-[#22f0a2] shrink-0' : 'text-[#8ca3bd] shrink-0'}>{station.online ? '在线' : '离线'}</span>
               </div>
             ))}
             {!radarStations.length && <div className="text-10px text-[#7088a8]">暂无站点数据</div>}

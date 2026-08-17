@@ -23,16 +23,6 @@ interface PollutionItem {
 const leixingOptions = ['工业源', '交通源', '建筑施工', '餐饮']
 const cityOpts = cities.map(item => item.name)
 const levelObj: Record<string, string> = { '1': '红', '2': '黄', '3': '绿' }
-const mockData: PollutionItem[] = [
-  { id: '1', name: '浙江XX化工有限公司', city: '杭州', quxian: '萧山区', xiangzhen: '城厢街道', weizhi: '工业园区A区12号', leixing: '工业源', hangye: '化工', xianzhuang: '正常生产', lng: 120.264, lat: 30.264, beizhu: '', level: '1', createTime: '2025-11-20' },
-  { id: '2', name: '杭州XX建材厂', city: '杭州', quxian: '余杭区', xiangzhen: '良渚街道', weizhi: '工业区B路88号', leixing: '工业源', hangye: '建材', xianzhuang: '正常生产', lng: 119.978, lat: 30.273, beizhu: '', level: '2', createTime: '2025-11-18' },
-  { id: '3', name: 'XX物流中心仓库', city: '杭州', quxian: '萧山区', xiangzhen: '南阳街道', weizhi: '物流大道168号', leixing: '交通源', hangye: '物流', xianzhuang: '正常运营', lng: 120.264, lat: 30.184, beizhu: '', level: '2', createTime: '2025-11-15' },
-  { id: '4', name: '富阳XX印染厂', city: '杭州', quxian: '富阳区', xiangzhen: '富春街道', weizhi: '化工园区C区3号', leixing: '工业源', hangye: '印染', xianzhuang: '停产整改', lng: 119.960, lat: 30.048, beizhu: '废气治理中', level: '1', createTime: '2025-11-10' },
-  { id: '5', name: '杭州XX建筑工地', city: '杭州', quxian: '西湖区', xiangzhen: '转塘街道', weizhi: '文三路与学院路交叉口', leixing: '建筑施工', hangye: '建筑', xianzhuang: '施工中', lng: 120.130, lat: 30.259, beizhu: '扬尘管控中', level: '3', createTime: '2025-11-08' },
-  { id: '6', name: '西湖餐饮一条街', city: '杭州', quxian: '西湖区', xiangzhen: '湖滨街道', weizhi: '延安路200号', leixing: '餐饮', hangye: '餐饮', xianzhuang: '正常营业', lng: 120.165, lat: 30.245, beizhu: '', level: '3', createTime: '2025-11-05' },
-  { id: '7', name: '滨江XX电子厂', city: '杭州', quxian: '滨江区', xiangzhen: '西兴街道', weizhi: '科技路56号', leixing: '工业源', hangye: '电子', xianzhuang: '正常生产', lng: 120.210, lat: 30.208, beizhu: '', level: '2', createTime: '2025-11-01' },
-  { id: '8', name: '钱塘交通干道', city: '杭州', quxian: '钱塘区', xiangzhen: '白杨街道', weizhi: '德胜快速路', leixing: '交通源', hangye: '交通', xianzhuang: '正常', lng: 120.350, lat: 30.310, beizhu: '', level: '2', createTime: '2025-10-28' },
-]
 
 export default function Pollution() {
   const navigate = useNavigate()
@@ -54,17 +44,11 @@ export default function Pollution() {
         setData(d?.records ?? d ?? [])
         return
       }
-    } catch {
-      /* 接口异常时降级到本地 mock 数据 */
-    } finally {
-      setLoading(false)
-    }
-    const normalize = (value: string) => value.replace(/[市区县]$/, '')
-    setData(mockData.filter(item =>
-      (!querySelection.cityName || normalize(item.city) === normalize(querySelection.cityName)) &&
-      (!querySelection.countyName || normalize(item.quxian) === normalize(querySelection.countyName)) &&
-      (!querySelection.townName || normalize(item.xiangzhen) === normalize(querySelection.townName))
-    ))
+      } catch {
+        /* 接口异常：保持空列表，不兜底 mock */
+      } finally {
+        setLoading(false)
+      }
   }, [querySelection])
 
   useEffect(() => {

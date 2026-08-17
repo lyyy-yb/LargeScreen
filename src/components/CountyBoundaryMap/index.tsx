@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { LineLayer, PolygonLayer, Scene } from '@antv/l7'
+import { LineLayer, PointLayer, PolygonLayer, Scene } from '@antv/l7'
 import { Mapbox } from '@antv/l7-maps'
 import type { DistrictItem } from '@/utils/city'
 import type { MapDevicePoint } from '@/types/mapDevice'
@@ -8,8 +8,10 @@ import { createDeviceMapLayers, type DeviceMapLayers } from '@/utils/mapDeviceLa
 import { createAirQualityLayers, type AirMapLayers, type AirPointClickPos } from '@/utils/mapAirLayers'
 import { createAlertLayers, type AlertMapLayers, type AlertMapPoint } from '@/utils/mapAlertLayers'
 import { createRadarAlarmLayers, type RadarAlarmLayers, type RadarAlarmPoint } from '@/utils/mapRadarAlarmLayers'
+import { createEmissionOutletLayers, type EmissionOutletLayers, type EmissionOutletPoint, type OutletPointClickPos } from '@/utils/mapEmissionOutletLayers'
 import { addSatelliteTiles } from '@/utils/mapSatelliteTiles'
 import { addRegionMask, setRegionBounds } from '@/utils/mapRegionMask'
+import { useLayerVisibility } from '@/hooks/useLayerVisibility'
 
 interface CountyBoundaryMapProps {
   county: DistrictItem
@@ -19,7 +21,19 @@ interface CountyBoundaryMapProps {
   alertPoints?: AlertMapPoint[]
   /** 雷达突发告警点（hbdp/leida/alarmPoint，常显） */
   radarAlarmPoints?: RadarAlarmPoint[]
+  /** 企业排口打点（hbdp/emissionOutlet/list，灰点，zoom>=13 图标 / >=15 两行文字） */
+  emissionOutletPoints?: EmissionOutletPoint[]
+  /** 点击企业排口圆点，弹出详情弹窗 */
+  onOutletClick?: (point: EmissionOutletPoint, pos?: OutletPointClickPos) => void
   onAirPointClick?: (point: AirQualityPoint, pos?: AirPointClickPos) => void
+  /** 显示预警点位（与空气质量互斥，由页面按钮组保证同刻只显一类），默认 false */
+  showAlertPoints?: boolean
+  /** 显示空气质量检测站，默认 true（页面互斥按钮组初始态为空气） */
+  showAirPoints?: boolean
+  /** 显示无人机图标层，默认 true */
+  showDronePoints?: boolean
+  /** 显示雷达（扫描盘 + 突发告警点），默认 true */
+  showRadarPoints?: boolean
 }
 
 interface GeoFeature {
@@ -33,10 +47,7 @@ interface GeoCollection {
   features: GeoFeature[]
 }
 
-// 漂浮地图风格（L7 floatmap 示例）：区县近景使用轻量高度；城市级的数万米高度在 12+ 级缩放下会形成遮挡视野的高柱。
-const COUNTY_TOP = 450 // 区块厚度
-const FLOAT_BASE = 150 // 区块抬离地面高度（缩小与底图间距）
-const MARKER_TOP = 2400
+// 平面地图风格：区县不抬高、无拉伸/边墙，仅平面边界线勾勒轮廓，卫星底图直接透出
 
 function collection(features: GeoFeature[]): GeoCollection {
   return { type: 'FeatureCollection', features }
@@ -48,7 +59,13 @@ export default function CountyBoundaryMap({
   airPoints = [],
   alertPoints = [],
   radarAlarmPoints = [],
+  emissionOutletPoints = [],
+  onOutletClick,
   onAirPointClick,
+  showAlertPoints = false,
+  showAirPoints = true,
+  showDronePoints = true,
+  showRadarPoints = true,
 }: CountyBoundaryMapProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [ready, setReady] = useState(false)
@@ -61,11 +78,18 @@ export default function CountyBoundaryMap({
   const alertPointsRef = useRef(alertPoints)
   const radarAlarmLayersRef = useRef<RadarAlarmLayers | null>(null)
   const radarAlarmPointsRef = useRef(radarAlarmPoints)
+  const emissionOutletPointsRef = useRef(emissionOutletPoints)
+  const emissionOutletLayersRef = useRef<EmissionOutletLayers | null>(null)
   const onAirPointClickRef = useRef(onAirPointClick)
+  const onOutletClickRef = useRef(onOutletClick)
 
   useEffect(() => {
     onAirPointClickRef.current = onAirPointClick
   }, [onAirPointClick])
+
+  useEffect(() => {
+    onOutletClickRef.current = onOutletClick
+  }, [onOutletClick])
 
   useEffect(() => {
     devicePointsRef.current = devicePoints
@@ -88,6 +112,18 @@ export default function CountyBoundaryMap({
   }, [radarAlarmPoints])
 
   useEffect(() => {
+    emissionOutletPointsRef.current = emissionOutletPoints
+    emissionOutletLayersRef.current?.setData(emissionOutletPoints)
+  }, [emissionOutletPoints])
+
+  // 页面按钮组/Switch → 图层显隐（持久层 show/hide，不销毁重建）
+  useLayerVisibility(
+    { alertLayersRef, airLayersRef, deviceLayersRef, radarAlarmLayersRef },
+    { showAlertPoints, showAirPoints, showDronePoints, showRadarPoints },
+    ready,
+  )
+
+  useEffect(() => {
     if (!containerRef.current) return
     setReady(false)
     setLoadError('')
@@ -100,7 +136,7 @@ export default function CountyBoundaryMap({
         center: [county.lng, county.lat],
         zoom: 9.5,
         minZoom: 8.8,
-        maxZoom: 15,
+        maxZoom: 17,
         pitch: 42,
         rotation: 0,
       }),
@@ -119,74 +155,91 @@ export default function CountyBoundaryMap({
       addSatelliteTiles(scene)
 
       try {
-        const cityDistricts = await fetch(`/map/${county.parent}_full.json`).then(response => {
-          if (!response.ok) throw new Error(`区县边界加载失败 (${response.status})`)
-          return response.json() as Promise<GeoCollection>
-        })
+        let countyData: GeoCollection
+        if (county.name === '智造新城' || String(county.adcode) === '330899' || county.name.includes('智造新城')) {
+          countyData = await fetch('/map/zhizao_newcity.json').then(response => {
+            if (!response.ok) throw new Error(`智造新城边界加载失败 (${response.status})`)
+            return response.json() as Promise<GeoCollection>
+          })
+        } else {
+          const cityDistricts = await fetch(`/map/${county.parent}_full.json`).then(response => {
+            if (!response.ok) throw new Error(`区县边界加载失败 (${response.status})`)
+            return response.json() as Promise<GeoCollection>
+          })
 
-        const countyFeature = cityDistricts.features.find(
-          feature => String(feature.properties?.adcode) === String(county.adcode),
-        )
-        if (!countyFeature) throw new Error(`未找到 ${county.name} 的区县边界`)
+          const countyFeature = cityDistricts.features.find(
+            feature => String(feature.properties?.adcode) === String(county.adcode),
+          )
+          if (!countyFeature) throw new Error(`未找到 ${county.name} 的区县边界`)
 
-        const countyData = collection([countyFeature])
+          countyData = collection([countyFeature])
+        }
 
         // 区县级：仅显示区县边界
         // 区县外蒙层 + 限制拖拽范围（与省级同方案）
         addRegionMask(scene, countyData)
         setRegionBounds(scene, countyData)
 
+        // 平面区域底：近全透明填充直接透出卫星底图（仅承担区域衬托，不再拉伸抬高）
         const countyBase = new PolygonLayer({ zIndex: 1, autoFit: true })
           .source(countyData)
-          .shape('extrude')
-          .size(COUNTY_TOP)
+          .shape('fill')
           .color('#2f8cdd')
-          .style({
-            heightfixed: true,
-            pickLight: true,
-            raisingHeight: FLOAT_BASE,
-            opacity: 0.06,
-            // 侧面统一淡蓝（与边界线 #3fc6ff 同色系），替代原深蓝渐变
-            sourceColor: '#8fdcff',
-            targetColor: '#3fc6ff',
-          })
+          .style({ opacity: 0.06 })
         scene.addLayer(countyBase)
 
-        // 边墙（淡蓝实心光墙，与省/市级同方案）
-        const countyWall = new LineLayer({ zIndex: 2, enablePicking: false })
-          .source(countyData)
-          .shape('wall')
-          .size(2200)
-          .style({
-            heightfixed: true,
-            opacity: 0.45,
-            sourceColor: '#3fc6ff',
-            targetColor: '#3fc6ff',
-          })
-        scene.addLayer(countyWall)
-
-        // 顶面不铺纹理，直接使用纯色拉伸面（与省/市/区县统一）
-
-        // 区县界亮轮廓（外侧边界：天蓝实线，高度高于边墙避免角度遮挡）
+        // 区县界亮轮廓（平面边界：天蓝实线，不再使用有高度的边墙）
         const countyBoundLine = new LineLayer({ zIndex: 7, enablePicking: false })
           .source(countyData)
           .shape('line')
           .color('#3fc6ff')
           .size(2.2)
-          .style({ raisingHeight: 3500, heightfixed: true, opacity: 1, depth: false })
+          .style({ opacity: 1 })
         scene.addLayer(countyBoundLine)
 
-        deviceLayersRef.current = await createDeviceMapLayers(scene, devicePointsRef.current, MARKER_TOP)
+        // 区域名称文本标签
+        const featureProps = countyData.features[0]?.properties
+        const labelCenter: [number, number] =
+          (Array.isArray(featureProps?.center) && featureProps.center.length === 2 && (featureProps.center as [number, number])) ||
+          (Array.isArray(featureProps?.centroid) && featureProps.centroid.length === 2 && (featureProps.centroid as [number, number])) ||
+          [county.lng, county.lat]
+
+        const textLayer = new PointLayer({ zIndex: 12, enablePicking: false })
+          .source([{ name: county.name, lng: labelCenter[0], lat: labelCenter[1] }], {
+            parser: { type: 'json', x: 'lng', y: 'lat' },
+          })
+          .shape('name', 'text')
+          .size(15)
+          .color('#dffbff')
+          .style({
+            textAnchor: 'center',
+            stroke: '#082548',
+            strokeWidth: 3.5,
+            raisingHeight: 0,
+            textAllowOverlap: true,
+            heightFixed: true,
+          })
+        scene.addLayer(textLayer)
+
+        deviceLayersRef.current = await createDeviceMapLayers(scene, devicePointsRef.current, 0)
         airLayersRef.current = await createAirQualityLayers(
           scene,
           airPointsRef.current,
-          MARKER_TOP,
+          0,
           (point, pos) => onAirPointClickRef.current?.(point, pos),
         )
         // 预警点位标记（alertEvent/list 经纬度，warn-l1~l3 图标，与空气质量打点切换显示）
-        alertLayersRef.current = await createAlertLayers(scene, alertPointsRef.current, MARKER_TOP)
+        alertLayersRef.current = await createAlertLayers(scene, alertPointsRef.current, 0)
         // 雷达突发告警点（hbdp/leida/alarmPoint，橙/红圆点常显）
-        radarAlarmLayersRef.current = await createRadarAlarmLayers(scene, radarAlarmPointsRef.current, MARKER_TOP + 1200)
+        radarAlarmLayersRef.current = await createRadarAlarmLayers(scene, radarAlarmPointsRef.current, 0)
+
+        // 企业排口打点（hbdp/emissionOutlet/list，灰色圆点，zoom>=13 图标 / >=15 两行文字）
+        emissionOutletLayersRef.current = await createEmissionOutletLayers(
+          scene,
+          emissionOutletPointsRef.current,
+          0,
+          (point, pos) => onOutletClickRef.current?.(point, pos),
+        )
         setReady(true)
       } catch (error) {
         console.error('CountyBoundaryMap: 加载本地区县图层失败', error)
@@ -198,10 +251,12 @@ export default function CountyBoundaryMap({
       deviceLayersRef.current?.destroy()
       alertLayersRef.current?.destroy()
       radarAlarmLayersRef.current?.destroy()
+      emissionOutletLayersRef.current?.destroy()
       deviceLayersRef.current = null
       airLayersRef.current = null
       alertLayersRef.current = null
       radarAlarmLayersRef.current = null
+      emissionOutletLayersRef.current = null
       scene.destroy()
     }
   }, [county])
