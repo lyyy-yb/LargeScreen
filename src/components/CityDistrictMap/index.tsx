@@ -12,6 +12,8 @@ import { createEmissionOutletLayers, type EmissionOutletLayers, type EmissionOut
 import { addSatelliteTiles } from '@/utils/mapSatelliteTiles'
 import { addRegionMask, setRegionBounds } from '@/utils/mapRegionMask'
 import { useLayerVisibility } from '@/hooks/useLayerVisibility'
+import { useMapFocus } from '@/hooks/useMapFocus'
+import type { MapFocusTarget } from '@/types/mapFocus'
 
 interface CityDistrictMapProps {
   city: CityItem
@@ -23,7 +25,7 @@ interface CityDistrictMapProps {
   airPoints?: AirQualityPoint[]
   /** 预警点位（alertEvent/list 经纬度），与 airPoints 由页面按钮组切换显示 */
   alertPoints?: AlertMapPoint[]
-  /** 雷达突发告警点（hbdp/leida/alarmPoint，常显） */
+  /** monitor 雷达常规/突发点（hbdp/leida/alarmPointTop5） */
   radarAlarmPoints?: RadarAlarmPoint[]
   /** 企业排口打点（hbdp/emissionOutlet/list，灰点，zoom>=13 图标 / >=15 两行文字） */
   emissionOutletPoints?: EmissionOutletPoint[]
@@ -38,6 +40,10 @@ interface CityDistrictMapProps {
   showDronePoints?: boolean
   /** 显示雷达（扫描盘 + 突发告警点），默认 true */
   showRadarPoints?: boolean
+  /** 显示企业排口打点（图标 + 两行文字），默认 true */
+  showEmissionOutletPoints?: boolean
+  /** 全局搜索选中后的定位目标 */
+  focusTarget?: MapFocusTarget | null
 }
 
 // 平面地图风格：区域不抬高、无拉伸/边墙，仅平面边界线勾勒轮廓，卫星底图直接透出
@@ -58,6 +64,8 @@ export default function CityDistrictMap({
   showAirPoints = true,
   showDronePoints = true,
   showRadarPoints = true,
+  showEmissionOutletPoints = true,
+  focusTarget,
 }: CityDistrictMapProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const sceneRef = useRef<Scene | null>(null)
@@ -130,10 +138,12 @@ export default function CityDistrictMap({
 
   // 页面按钮组/Switch → 图层显隐（持久层 show/hide，不销毁重建）
   useLayerVisibility(
-    { alertLayersRef, airLayersRef, deviceLayersRef, radarAlarmLayersRef },
-    { showAlertPoints, showAirPoints, showDronePoints, showRadarPoints },
+    { alertLayersRef, airLayersRef, deviceLayersRef, radarAlarmLayersRef, emissionOutletLayersRef },
+    { showAlertPoints, showAirPoints, showDronePoints, showRadarPoints, showEmissionOutletPoints },
     ready,
   )
+
+  useMapFocus(sceneRef, ready, focusTarget)
 
   // 仅更新某一个高亮图层的数据（传入 null 则清空）
   const setHighlight = (layer: any, name: string | null) => {
@@ -357,7 +367,7 @@ export default function CityDistrictMap({
         // 预警点位标记（alertEvent/list 经纬度，warn-l1~l3 图标，与空气质量打点切换显示）
         alertLayersRef.current = await createAlertLayers(scene, alertPointsRef.current, 0)
 
-        // 雷达突发告警点（hbdp/leida/alarmPoint，橙/红圆点常显）
+        // monitor 雷达常规/突发点（hbdp/leida/alarmPointTop5，橙/红圆点）
         radarAlarmLayersRef.current = await createRadarAlarmLayers(scene, radarAlarmPointsRef.current, 0)
 
         // 企业排口打点（hbdp/emissionOutlet/list，灰色圆点，zoom>=13 图标 / >=15 两行文字）

@@ -2,13 +2,13 @@ import { PointLayer, type ILayer, type Scene } from '@antv/l7'
 import { bindZoomNameLayer, RADAR_NAME_MIN_ZOOM } from './mapZoomName'
 
 /**
- * 雷达突发告警点（/dpSys/hbdp/leida/alarmPoint）：
- * type 1 = 超限（橙 #FFB024），type 2 = 突高（红 #FF3936），与老项目 MapBox 配色一致。
+ * monitor 雷达异常点（/dpSys/hbdp/leida/alarmPointTop5）：
+ * type 1 = 常规（橙 #FFB024），type 2 = 突发（红 #FF3936）。
  */
 export interface RadarAlarmPoint {
   lng: number
   lat: number
-  /** 1=超限 2=突高 */
+  /** 1=常规 2=突发 */
   type: 1 | 2
   name?: string
 }

@@ -12,6 +12,8 @@ import { createEmissionOutletLayers, type EmissionOutletLayers, type EmissionOut
 import { addSatelliteTiles } from '@/utils/mapSatelliteTiles'
 import { addRegionMask, setRegionBounds } from '@/utils/mapRegionMask'
 import { useLayerVisibility } from '@/hooks/useLayerVisibility'
+import { useMapFocus } from '@/hooks/useMapFocus'
+import type { MapFocusTarget } from '@/types/mapFocus'
 
 interface CountyBoundaryMapProps {
   county: DistrictItem
@@ -19,7 +21,7 @@ interface CountyBoundaryMapProps {
   airPoints?: AirQualityPoint[]
   /** 预警点位（alertEvent/list 经纬度），与 airPoints 由页面按钮组切换显示 */
   alertPoints?: AlertMapPoint[]
-  /** 雷达突发告警点（hbdp/leida/alarmPoint，常显） */
+  /** monitor 雷达常规/突发点（hbdp/leida/alarmPointTop5） */
   radarAlarmPoints?: RadarAlarmPoint[]
   /** 企业排口打点（hbdp/emissionOutlet/list，灰点，zoom>=13 图标 / >=15 两行文字） */
   emissionOutletPoints?: EmissionOutletPoint[]
@@ -34,6 +36,10 @@ interface CountyBoundaryMapProps {
   showDronePoints?: boolean
   /** 显示雷达（扫描盘 + 突发告警点），默认 true */
   showRadarPoints?: boolean
+  /** 显示企业排口打点（图标 + 两行文字），默认 true */
+  showEmissionOutletPoints?: boolean
+  /** 全局搜索选中后的定位目标 */
+  focusTarget?: MapFocusTarget | null
 }
 
 interface GeoFeature {
@@ -66,8 +72,11 @@ export default function CountyBoundaryMap({
   showAirPoints = true,
   showDronePoints = true,
   showRadarPoints = true,
+  showEmissionOutletPoints = true,
+  focusTarget,
 }: CountyBoundaryMapProps) {
   const containerRef = useRef<HTMLDivElement>(null)
+  const sceneRef = useRef<Scene | null>(null)
   const [ready, setReady] = useState(false)
   const [loadError, setLoadError] = useState('')
   const deviceLayersRef = useRef<DeviceMapLayers | null>(null)
@@ -118,10 +127,12 @@ export default function CountyBoundaryMap({
 
   // 页面按钮组/Switch → 图层显隐（持久层 show/hide，不销毁重建）
   useLayerVisibility(
-    { alertLayersRef, airLayersRef, deviceLayersRef, radarAlarmLayersRef },
-    { showAlertPoints, showAirPoints, showDronePoints, showRadarPoints },
+    { alertLayersRef, airLayersRef, deviceLayersRef, radarAlarmLayersRef, emissionOutletLayersRef },
+    { showAlertPoints, showAirPoints, showDronePoints, showRadarPoints, showEmissionOutletPoints },
     ready,
   )
+
+  useMapFocus(sceneRef, ready, focusTarget)
 
   useEffect(() => {
     if (!containerRef.current) return
@@ -141,6 +152,7 @@ export default function CountyBoundaryMap({
         rotation: 0,
       }),
     })
+    sceneRef.current = scene
 
     scene.setBgColor('rgba(9, 54, 114, 0.5)')
     scene.on('loaded', async () => {
@@ -230,7 +242,7 @@ export default function CountyBoundaryMap({
         )
         // 预警点位标记（alertEvent/list 经纬度，warn-l1~l3 图标，与空气质量打点切换显示）
         alertLayersRef.current = await createAlertLayers(scene, alertPointsRef.current, 0)
-        // 雷达突发告警点（hbdp/leida/alarmPoint，橙/红圆点常显）
+        // monitor 雷达常规/突发点（hbdp/leida/alarmPointTop5，橙/红圆点）
         radarAlarmLayersRef.current = await createRadarAlarmLayers(scene, radarAlarmPointsRef.current, 0)
 
         // 企业排口打点（hbdp/emissionOutlet/list，灰色圆点，zoom>=13 图标 / >=15 两行文字）
@@ -258,6 +270,7 @@ export default function CountyBoundaryMap({
       radarAlarmLayersRef.current = null
       emissionOutletLayersRef.current = null
       scene.destroy()
+      sceneRef.current = null
     }
   }, [county])
 

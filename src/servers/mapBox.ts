@@ -11,6 +11,45 @@ export function alarmPointAll(params?: object) {
   return request.get('/dpSys/hbdp/leida/alarmPoint', { params })
 }
 
+/** monitor 地图使用的细网格 Top 5% 常规/突发点位 */
+export interface AlarmPointTop5Item {
+  times?: number
+  address?: string
+  type?: number
+  dapLng?: number
+  dapLat?: number
+}
+
+export interface AlarmPointTop5Data {
+  regularPoints?: AlarmPointTop5Item[]
+  suddenPoints?: AlarmPointTop5Item[]
+}
+
+/** 异常点位查询：细网格（10m）前 5%，仅 monitor 页面使用 */
+export function alarmPointTop5(params: {
+  BsiId: string
+  hour?: 1 | 3 | 24
+  startTime?: string
+  endTime?: string
+}) {
+  return request.get<AlarmPointTop5Data>('/dpSys/hbdp/leida/alarmPointTop5', { params })
+}
+
+// ========== monitor 全局搜索 ==========
+export interface GlobalSearchItem {
+  type?: string
+  typeName?: string
+  name?: string
+  longitude?: number
+  latitude?: number
+  sourceId?: string
+}
+
+/** 全局搜索（排口/无人机/微站/雷达等） */
+export function globalSearch(keyword: string) {
+  return request.get<GlobalSearchItem[]>('/dpSys/hbdp/global/search', { params: { keyword } })
+}
+
 // ========== 无人机 ==========
 // 无人机机场列表
 export function dockList(params?: object) {

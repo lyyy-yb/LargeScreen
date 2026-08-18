@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Modal, Select, Spin, Switch, Table } from 'antd'
+import { CloseOutlined, SearchOutlined } from '@ant-design/icons'
 import type { ColumnsType } from 'antd/es/table'
 import { Chart } from '@antv/g2'
 import dayjs from 'dayjs'
@@ -11,7 +12,15 @@ import { useAppStore } from '@/stores'
 import { cities, districts } from '@/utils/city'
 import type { RegionSelection } from '@/types/region'
 import { toRegionQuery } from '@/utils/region'
-import { dockList, leidaList, listFlyJob, alarmPointAll, emissionOutletList } from '@/servers/mapBox'
+import {
+  dockList,
+  leidaList,
+  listFlyJob,
+  alarmPointTop5,
+  emissionOutletList,
+  globalSearch,
+  type GlobalSearchItem,
+} from '@/servers/mapBox'
 import { leiDaBaojingTongji } from '@/servers/api'
 import { getDockModeLabel, getDockModeColor, getDockOnlineStatus, type DockItem } from '@/utils/dock'
 import { airDataLatest, airDataStationAirRange } from '@/servers/airData'
@@ -24,6 +33,7 @@ import { resolveAlertLevel, type AlertMapPoint } from '@/utils/mapAlertLayers'
 import type { AirDataLatestVO, AirQualityPoint, AirTrendItem, StationAirRange } from '@/types/airData'
 import type { AirPointClickPos } from '@/utils/mapAirLayers'
 import { flattenDepts, findCityDeptId, findDistrictDeptId } from '@/utils/airQuality'
+import type { MapFocusTarget } from '@/types/mapFocus'
 import droneSpinGif from '@/assets/images/drone-spin.gif'
 import radarSpinGif from '@/assets/images/radar-spin.gif'
 import './index.less'
@@ -416,41 +426,86 @@ interface OutletPointDetail extends EmissionOutletPoint {
   pos?: OutletPointClickPos
 }
 
-/** 从 aqiDetail 返回中提取趋势数组（兼容直接返回数组或包一层对象的结构） */
+/** 将单条趋势对象解析为 AirTrendItem（字段名兼容） */
+function parseTrendRow(row: UnknownRecord): AirTrendItem | null {
+  const hourText = firstText(row, ['hour', 'time', 'dataTime'])
+  if (!hourText) return null
+  const numVal = (key: string) => {
+    const raw = row[key]
+    const num = Number(raw)
+    return raw != null && Number.isFinite(num) ? num : null
+  }
+  return {
+    hour: hourText,
+    pm25: numVal('pm25'),
+    pm10: numVal('pm10'),
+    so2: numVal('so2'),
+    no2: numVal('no2'),
+    co: numVal('co'),
+    o3: numVal('o3'),
+  }
+}
+
+/** 从 aqiDetail 返回中提取趋势数组（兼容直接返回数组、*Trend 独立数组或包一层对象的结构） */
 function extractTrendRows(value: unknown): AirTrendItem[] {
-  let rows: UnknownRecord[] = []
+  // 直接数组：按旧格式 { hour, pm25, pm10, ... } 解析
   if (Array.isArray(value)) {
-    rows = value.filter(item => !!item && typeof item === 'object') as UnknownRecord[]
-  } else if (value && typeof value === 'object') {
-    const record = value as UnknownRecord
-    for (const key of ['trendList', 'trend', 'list', 'rows', 'data', 'hours']) {
-      const nested = record[key]
-      if (Array.isArray(nested)) {
-        rows = nested.filter(item => !!item && typeof item === 'object') as UnknownRecord[]
-        break
+    return value
+      .filter(item => !!item && typeof item === 'object')
+      .map(item => parseTrendRow(item as UnknownRecord))
+      .filter((item): item is AirTrendItem => !!item)
+  }
+
+  if (!value || typeof value !== 'object') return []
+  const record = value as UnknownRecord
+
+  // 后端实际结构：{ so2Trend: [{hour,value},...], no2Trend: [...], ... }
+  const TREND_FIELD_MAP: Record<string, keyof AirTrendItem> = {
+    so2Trend: 'so2',
+    no2Trend: 'no2',
+    coTrend: 'co',
+    o3Trend: 'o3',
+    pm10Trend: 'pm10',
+    pm25Trend: 'pm25',
+  }
+  const merged = new Map<string, AirTrendItem>()
+  let hasTrendFields = false
+  Object.entries(TREND_FIELD_MAP).forEach(([trendKey, itemKey]) => {
+    const arr = record[trendKey]
+    if (!Array.isArray(arr)) return
+    hasTrendFields = true
+    arr.forEach((item: unknown) => {
+      if (!item || typeof item !== 'object') return
+      const row = item as UnknownRecord
+      const hourText = firstText(row, ['hour', 'time', 'dataTime'])
+      if (!hourText) return
+      const rawValue = row.value
+      const num = Number(rawValue)
+      const val = rawValue != null && Number.isFinite(num) ? num : null
+      let existing = merged.get(hourText)
+      if (!existing) {
+        existing = { hour: hourText, pm25: null, pm10: null, so2: null, no2: null, co: null, o3: null }
+        merged.set(hourText, existing)
       }
+      ;(existing as unknown as UnknownRecord)[itemKey] = val
+    })
+  })
+  if (hasTrendFields) {
+    return Array.from(merged.values()).sort((a, b) => a.hour.localeCompare(b.hour))
+  }
+
+  // 兼容旧结构：{ trendList: [...], trend: [...], list: [...], rows: [...], data: [...], hours: [...] }
+  for (const key of ['trendList', 'trend', 'list', 'rows', 'data', 'hours']) {
+    const nested = record[key]
+    if (Array.isArray(nested)) {
+      return nested
+        .filter(item => !!item && typeof item === 'object')
+        .map(item => parseTrendRow(item as UnknownRecord))
+        .filter((item): item is AirTrendItem => !!item)
     }
   }
-  return rows
-    .map((row): AirTrendItem | null => {
-      const hourText = firstText(row, ['hour', 'time', 'dataTime'])
-      if (!hourText) return null
-      const numVal = (key: string) => {
-        const raw = row[key]
-        const num = Number(raw)
-        return raw != null && Number.isFinite(num) ? num : null
-      }
-      return {
-        hour: hourText,
-        pm25: numVal('pm25'),
-        pm10: numVal('pm10'),
-        so2: numVal('so2'),
-        no2: numVal('no2'),
-        co: numVal('co'),
-        o3: numVal('o3'),
-      }
-    })
-    .filter((item): item is AirTrendItem => !!item)
+
+  return []
 }
 
 /** 弹窗固定宽高（定位计算与内容布局均基于此尺寸，避免加载前后尺寸抖动） */
@@ -658,7 +713,7 @@ export default function Monitor() {
   const [radarStations, setRadarStations] = useState<MonitorStation[]>([])
   const [droneTaskStats, setDroneTaskStats] = useState({ pending: 0, flying: 0 })
   const [radarAlarmStats, setRadarAlarmStats] = useState({ oneHour: 0, threeHours: 0, day: 0 })
-  // 雷达突发告警点（hbdp/leida/alarmPoint，统一 hour=24，地图常显）
+  // 雷达常规/突发告警点（hbdp/leida/alarmPointTop5，统一 hour=24）
   const [radarAlarmPoints, setRadarAlarmPoints] = useState<RadarAlarmPoint[]>([])
   // 近一小时污染物区间（stationAirRange，按站点类型分组）
   const [airRanges, setAirRanges] = useState<StationAirRange[]>([])
@@ -669,12 +724,21 @@ export default function Monitor() {
   const [airPoints, setAirPoints] = useState<AirQualityPoint[]>([])
   // 预警点位打点（alertEvent/list 经纬度，同经纬度已聚合）
   const [alertPoints, setAlertPoints] = useState<AlertMapPoint[]>([])
-  // 企业排口打点（hbdp/emissionOutlet/list，全量；zoom>=12 图标 / >=14 两行文字）
+  // 企业排口打点（hbdp/emissionOutlet/list，全量；zoom>=13 图标 / >=15 两行文字）
   const [emissionOutletPoints, setEmissionOutletPoints] = useState<EmissionOutletPoint[]>([])
   // 打点显隐控制：预警↔空气互斥（按钮组单选），无人机/雷达独立 Switch
   const [pointMode, setPointMode] = useState<'alert' | 'air'>('air')
   const [showDronePoints, setShowDronePoints] = useState(true)
   const [showRadarPoints, setShowRadarPoints] = useState(true)
+  const [showEmissionOutletPoints, setShowEmissionOutletPoints] = useState(true)
+  const [searchKeyword, setSearchKeyword] = useState('')
+  const [searchResults, setSearchResults] = useState<GlobalSearchItem[]>([])
+  const [searchLoading, setSearchLoading] = useState(false)
+  const [searchOpen, setSearchOpen] = useState(false)
+  const [mapFocusTarget, setMapFocusTarget] = useState<MapFocusTarget | null>(null)
+  const searchTimerRef = useRef<number | null>(null)
+  const searchRequestRef = useRef(0)
+  const focusRequestRef = useRef(0)
   // 数据源列表总数（左下“在线数据源”展示）
   const [sourceTotal, setSourceTotal] = useState(0)
   const [airDetail, setAirDetail] = useState<AirPointDetail | null>(null)
@@ -714,7 +778,7 @@ export default function Monitor() {
           day: sumWindowStats(stats, 'hour24'),
         })
       }
-      // 雷达突发告警点：按雷达逐一查询 alarmPoint（与 radar 页统一 hour=24），合并去重后地图常显，无数据则清空
+      // monitor 按雷达逐一查询细网格 Top 5% 常规/突发点；radar 页仍使用 alarmPoint。
       const radarBsiIds = radarResult.status === 'fulfilled'
         ? extractRecords(radarResult.value.data)
           .map(item => firstText(item, ['bsiId', 'bsId', 'id']))
@@ -724,19 +788,27 @@ export default function Monitor() {
         if (!cancelled) setRadarAlarmPoints([])
         return
       }
-      Promise.all(radarBsiIds.map(bsiId => alarmPointAll({ BsiId: bsiId, hour: 24 }).catch(() => null)))
+      Promise.all(radarBsiIds.map(bsiId => alarmPointTop5({ BsiId: bsiId, hour: 24 }).catch(() => null)))
         .then(results => {
           if (cancelled) return
           const merged = new Map<string, RadarAlarmPoint>()
           results.forEach(res => {
-            if (res?.resultCode !== 0 || !Array.isArray(res.data)) return
-            res.data.forEach((item: UnknownRecord) => {
-              const lng = Number(item.dapLng)
-              const lat = Number(item.dapLat)
-              const type = Number(item.type)
-              if (!Number.isFinite(lng) || !Number.isFinite(lat) || (type !== 1 && type !== 2)) return
-              const key = `${lng.toFixed(6)}-${lat.toFixed(6)}-${type}`
-              if (!merged.has(key)) merged.set(key, { lng, lat, type: type as 1 | 2, name: firstText(item, ['address']) })
+            if (res?.resultCode !== 0 || !res.data || typeof res.data !== 'object') return
+            const groups = [
+              { points: res.data.regularPoints, fallbackType: 1 as const },
+              { points: res.data.suddenPoints, fallbackType: 2 as const },
+            ]
+            groups.forEach(({ points, fallbackType }) => {
+              if (!Array.isArray(points)) return
+              points.forEach(item => {
+                const lng = Number(item.dapLng)
+                const lat = Number(item.dapLat)
+                const rawType = Number(item.type)
+                const type: 1 | 2 = rawType === 1 || rawType === 2 ? rawType : fallbackType
+                if (!Number.isFinite(lng) || !Number.isFinite(lat)) return
+                const key = `${lng.toFixed(6)}-${lat.toFixed(6)}-${type}`
+                if (!merged.has(key)) merged.set(key, { lng, lat, type, name: item.address })
+              })
             })
           })
           setRadarAlarmPoints([...merged.values()])
@@ -899,7 +971,7 @@ export default function Monitor() {
     return () => { cancelled = true; window.clearInterval(timer) }
   }, [allDepts, selection])
 
-  // 企业排口打点（hbdp/emissionOutlet/list）：全量加载，不按区域过滤；zoom>=12 才显示图标、>=14 才显示两行文字
+  // 企业排口打点（hbdp/emissionOutlet/list）：全量加载，不按区域过滤；zoom>=13 才显示图标、>=15 才显示两行文字
   useEffect(() => {
     let cancelled = false
     emissionOutletList()
@@ -1016,6 +1088,78 @@ export default function Monitor() {
     if (city) selectCity(city.adcode)
   }
 
+  const runGlobalSearch = async (value: string) => {
+    const keyword = value.trim()
+    if (!keyword) return
+    const requestId = ++searchRequestRef.current
+    setSearchLoading(true)
+    try {
+      const res = await globalSearch(keyword)
+      if (requestId !== searchRequestRef.current) return
+      const results = Array.isArray(res.data)
+        ? res.data.filter(item => {
+            const lng = Number(item.longitude)
+            const lat = Number(item.latitude)
+            return Number.isFinite(lng) && Number.isFinite(lat)
+          })
+        : []
+      setSearchResults(results)
+      setSearchOpen(true)
+    } catch {
+      if (requestId !== searchRequestRef.current) return
+      setSearchResults([])
+      setSearchOpen(true)
+    } finally {
+      if (requestId === searchRequestRef.current) setSearchLoading(false)
+    }
+  }
+
+  const handleSearchChange = (value: string) => {
+    setSearchKeyword(value)
+    if (searchTimerRef.current != null) window.clearTimeout(searchTimerRef.current)
+    searchRequestRef.current += 1
+    if (!value.trim()) {
+      setSearchResults([])
+      setSearchOpen(false)
+      setSearchLoading(false)
+      return
+    }
+    setSearchLoading(true)
+    searchTimerRef.current = window.setTimeout(() => {
+      void runGlobalSearch(value)
+    }, 800)
+  }
+
+  const handleSearchSubmit = () => {
+    if (searchTimerRef.current != null) window.clearTimeout(searchTimerRef.current)
+    void runGlobalSearch(searchKeyword)
+  }
+
+  const handleSearchClear = () => {
+    if (searchTimerRef.current != null) window.clearTimeout(searchTimerRef.current)
+    searchRequestRef.current += 1
+    setSearchKeyword('')
+    setSearchResults([])
+    setSearchOpen(false)
+    setSearchLoading(false)
+  }
+
+  const handleSearchLocate = (item: GlobalSearchItem) => {
+    const lng = Number(item.longitude)
+    const lat = Number(item.latitude)
+    if (!Number.isFinite(lng) || !Number.isFinite(lat)) return
+    setMapFocusTarget({ lng, lat, zoom: 15, requestId: ++focusRequestRef.current })
+    setSearchKeyword(item.name?.trim() || '未命名地址')
+    setSearchOpen(false)
+    setAirDetail(null)
+    setOutletDetail(null)
+  }
+
+  useEffect(() => () => {
+    if (searchTimerRef.current != null) window.clearTimeout(searchTimerRef.current)
+    searchRequestRef.current += 1
+  }, [])
+
   return (
     <div className="monitor-screen w-full h-full flex overflow-hidden text-[#e7f7ff]">
       {/* 左侧面板：三个独立卡片（与右侧无人机场/光量子雷达卡片同款样式） */}
@@ -1096,6 +1240,8 @@ export default function Monitor() {
             showAirPoints={pointMode === 'air'}
             showDronePoints={showDronePoints}
             showRadarPoints={showRadarPoints}
+            showEmissionOutletPoints={showEmissionOutletPoints}
+            focusTarget={mapFocusTarget}
             onCityClick={handleCityClick}
             onCityHover={setHoverRegion}
             onAirPointClick={handleAirPointClick}
@@ -1113,6 +1259,8 @@ export default function Monitor() {
             showAirPoints={pointMode === 'air'}
             showDronePoints={showDronePoints}
             showRadarPoints={showRadarPoints}
+            showEmissionOutletPoints={showEmissionOutletPoints}
+            focusTarget={mapFocusTarget}
             onAirPointClick={handleAirPointClick}
           />
         ) : activeCity ? (
@@ -1130,6 +1278,8 @@ export default function Monitor() {
             showAirPoints={pointMode === 'air'}
             showDronePoints={showDronePoints}
             showRadarPoints={showRadarPoints}
+            showEmissionOutletPoints={showEmissionOutletPoints}
+            focusTarget={mapFocusTarget}
             onDistrictClick={selectDistrict}
             onDistrictHover={setHoverRegion}
             onAirPointClick={handleAirPointClick}
@@ -1171,6 +1321,53 @@ export default function Monitor() {
           </div>
         </div>
 
+        {/* 底部全局搜索：结果仅展示名称，点击后定位地图并短暂高亮 */}
+        <div className="global-map-search absolute bottom-94px left-1/2 -translate-x-1/2 z-30 w-460px">
+          {searchOpen && (
+            <div className="global-map-search__results">
+              {searchResults.length ? searchResults.map((item, index) => {
+                const lng = Number(item.longitude)
+                const lat = Number(item.latitude)
+                return (
+                  <button
+                    type="button"
+                    key={`${item.type ?? 'item'}-${item.sourceId ?? index}-${lng}-${lat}`}
+                    className="global-map-search__option"
+                    onMouseDown={event => event.preventDefault()}
+                    onClick={() => handleSearchLocate(item)}
+                  >
+                    <span className="global-map-search__name">{item.name?.trim() || '未命名地址'}</span>
+                  </button>
+                )
+              }) : (
+                <div className="global-map-search__empty">未找到匹配位置</div>
+              )}
+            </div>
+          )}
+          <div className="global-map-search__input-wrap">
+            <SearchOutlined className="global-map-search__icon" />
+            <input
+              value={searchKeyword}
+              className="global-map-search__input"
+              placeholder="请输入要搜索的名称"
+              aria-label="全局地图搜索"
+              onChange={event => handleSearchChange(event.target.value)}
+              onFocus={() => { if (searchKeyword.trim() && !searchLoading) setSearchOpen(true) }}
+              onKeyDown={event => {
+                if (event.key === 'Enter') handleSearchSubmit()
+                if (event.key === 'Escape') setSearchOpen(false)
+              }}
+            />
+            {searchLoading ? (
+              <Spin size="small" />
+            ) : searchKeyword ? (
+              <button type="button" className="global-map-search__clear" aria-label="清空搜索" onClick={handleSearchClear}>
+                <CloseOutlined />
+              </button>
+            ) : null}
+          </div>
+        </div>
+
         {/* 底部水平居中：打点显示控件条（预警↔空气互斥按钮组 + 无人机/雷达 Switch），位于底部导航条正上方不被遮挡 */}
         <div className="point-display-bar absolute bottom-52px left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 rounded-8px bg-[rgba(4,22,52,0.85)] px-2 py-1.5 border border-[#00d4ff]/30 shadow-[0_4px_12px_rgba(0,0,0,0.3)]">
           {/* 预警点位 ↔ 空气质量监测站：互斥单选（页面 state 保证同刻只显一类） */}
@@ -1193,7 +1390,7 @@ export default function Monitor() {
             空气质量监测站
           </button>
           <span className="w-1px h-16px bg-[#2f9bff]/40 mx-1" />
-          {/* 无人机 / 雷达：独立开关（图层 show/hide，不重建） */}
+          {/* 无人机 / 雷达 / 排口：独立开关（图层 show/hide，不重建） */}
           <div className="flex items-center gap-1.5 text-[#d2ecff] text-11px">
             <span>无人机</span>
             <Switch size="small" checked={showDronePoints} onChange={setShowDronePoints} />
@@ -1201,6 +1398,10 @@ export default function Monitor() {
           <div className="flex items-center gap-1.5 text-[#d2ecff] text-11px">
             <span>雷达</span>
             <Switch size="small" checked={showRadarPoints} onChange={setShowRadarPoints} />
+          </div>
+          <div className="flex items-center gap-1.5 text-[#d2ecff] text-11px">
+            <span>排口</span>
+            <Switch size="small" checked={showEmissionOutletPoints} onChange={setShowEmissionOutletPoints} />
           </div>
         </div>
 
