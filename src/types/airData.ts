@@ -3,6 +3,7 @@ export interface AirDataLatestVO {
   id: number
   mnCode: string
   deviceName: string
+  shortName?: string
   dataType: string
   dataTime: string
   cityId: number

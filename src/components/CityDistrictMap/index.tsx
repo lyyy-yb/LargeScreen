@@ -27,7 +27,7 @@ interface CityDistrictMapProps {
   alertPoints?: AlertMapPoint[]
   /** monitor 雷达常规/突发点（hbdp/leida/alarmPointTop5） */
   radarAlarmPoints?: RadarAlarmPoint[]
-  /** 企业排口打点（hbdp/emissionOutlet/list，灰点，zoom>=13 图标 / >=15 两行文字） */
+  /** 企业排口打点（hbdp/emissionOutlet/list，灰点，zoom>=13 图标 / >=16 两行文字） */
   emissionOutletPoints?: EmissionOutletPoint[]
   /** 点击企业排口圆点，弹出详情弹窗 */
   onOutletClick?: (point: EmissionOutletPoint, pos?: OutletPointClickPos) => void
@@ -370,7 +370,7 @@ export default function CityDistrictMap({
         // monitor 雷达常规/突发点（hbdp/leida/alarmPointTop5，橙/红圆点）
         radarAlarmLayersRef.current = await createRadarAlarmLayers(scene, radarAlarmPointsRef.current, 0)
 
-        // 企业排口打点（hbdp/emissionOutlet/list，灰色圆点，zoom>=13 图标 / >=15 两行文字）
+        // 企业排口打点（hbdp/emissionOutlet/list，灰色圆点，zoom>=13 图标 / >=16 两行文字）
         emissionOutletLayersRef.current = await createEmissionOutletLayers(
           scene,
           emissionOutletPointsRef.current,

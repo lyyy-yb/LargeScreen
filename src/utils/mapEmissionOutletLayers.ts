@@ -4,7 +4,7 @@ import { bindZoomNameLayer } from './mapZoomName'
 /**
  * 企业排口打点（/dpSys/hbdp/emissionOutlet/list）：
  * 紫蓝渐变圆点（深紫中心 → 浅蓝边缘，inline SVG image 渲染）；
- * 图标 zoom >= 13 才显示；文字 zoom >= 15 才显示，两行：第一行排口名、第二行企业名。
+ * 图标 zoom >= 13 才显示；文字 zoom >= 16 才显示，两行：第一行排口名、第二行企业名。
  */
 export interface EmissionOutletPoint {
   id?: number
@@ -44,7 +44,7 @@ export interface EmissionOutletLayers {
 /** 图标显示的最小缩放级别（放大到该级别后展示渐变圆点） */
 export const OUTLET_ICON_MIN_ZOOM = 13
 /** 名称显示的最小缩放级别（放大到该级别后展示两行文字） */
-export const OUTLET_NAME_MIN_ZOOM = 15
+export const OUTLET_NAME_MIN_ZOOM = 16
 
 /** 排口圆点 image 的 scene 标识（同一 scene 内复用 addImage 结果） */
 const OUTLET_ICON_IMAGE = 'emission-outlet-gradient-icon'

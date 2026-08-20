@@ -1,0 +1,41 @@
+/* 搜索框专用样式，消除全局 .ant-input 设置的双层背景与双层边框 */
+.drone-header-search {
+  background: rgba(0, 0, 0, 0.25) !important;
+  border: 1px solid rgba(255, 255, 255, 0.2) !important;
+  border-radius: 6px !important;
+  box-shadow: none !important;
+  padding: 2px 8px !important;
+  height: 28px !important;
+  width: 140px !important;
+  transition: all 0.2s ease-in-out !important;
+
+  &:hover,
+  &:focus-within {
+    border-color: #01C2FF !important;
+    background: rgba(0, 0, 0, 0.45) !important;
+  }
+
+  /* 核心：清空内部 .ant-input 的全局背景色和边框，解决双层背景色/双框问题 */
+  .ant-input,
+  input.ant-input {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    color: #A8D6FF !important;
+    border-radius: 0 !important;
+    padding: 0 !important;
+    height: 100% !important;
+
+    &::placeholder {
+      color: rgba(168, 214, 255, 0.45) !important;
+    }
+  }
+
+  .ant-input-clear-icon {
+    color: rgba(168, 214, 255, 0.5) !important;
+
+    &:hover {
+      color: #ffffff !important;
+    }
+  }
+}

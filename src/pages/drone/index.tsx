@@ -1,8 +1,9 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Button, Image, Spin, message } from 'antd'
-import { ArrowLeftOutlined, RocketOutlined, VideoCameraOutlined, EnvironmentOutlined, DashboardOutlined, SendOutlined, PlayCircleOutlined } from '@ant-design/icons'
+import { Button, Image, Input, Modal, Spin, message } from 'antd'
+import { ArrowLeftOutlined, RocketOutlined, VideoCameraOutlined, PictureOutlined, DashboardOutlined, SendOutlined, PlayCircleOutlined, CloseOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
+import './index.less'
 import L7MapView from '@/components/L7MapView'
 import { dockList, listFlyJob, listFlyPlan, listFlyResult } from '@/servers/mapBox'
 import RegionSelector from '@/components/RegionSelector'
@@ -21,9 +22,13 @@ interface FlyResultItem { resultsID: string; resultsTime: string; resultsType: s
 interface SensorData { pm25: number; pm10: number; altitude: number; battery: number; speed: number; signal: number }
 
 const statusObj: Record<string, { message: string; color: string }> = {
-  '1': { message: '等待中', color: '#ffb024' },
+  '0': { message: '等待中', color: '#ffb024' },
+  '1': { message: '进行中', color: '#399293' },
+  'a': { message: '已完成', color: '#02f8fa' },
+  'f': { message: '失败', color: '#f12a27' },
+  // 兼顾旧枚举值备用
   '2': { message: '进行中', color: '#399293' },
-  '3': { message: '成功', color: '#02f8fa' },
+  '3': { message: '已完成', color: '#02f8fa' },
   '4': { message: '取消', color: '#ef6c6a' },
   '5': { message: '失败', color: '#f12a27' },
   '6': { message: '任务中断', color: '#f37472' },
@@ -62,16 +67,23 @@ export default function Drone() {
   const mapSelection = regionContext?.mapSelection
   const [refreshStatus, setRefreshStatus] = useState<string | null>(null)
 
-  // 飞行任务 / 待执飞任务（与原项目一致：按选中机场 dockCode + 年初~今天时间范围真实查询）
+  // 飞行任务 / 待执飞任务
   const [jobs, setJobs] = useState<TaskItem[]>([])
   const [plans, setPlans] = useState<PlanItem[]>([])
   const [docksLoading, setDocksLoading] = useState(true)
   const [jobsLoading, setJobsLoading] = useState(false)
   const [plansLoading, setPlansLoading] = useState(false)
-  // 当前选中的飞行任务，用于在视频采集面板展示 listFlyResult 图片/视频结果
+  // 当前选中的飞行任务，用于在视频采集面板展示 listFlyResult 图片/视频结果（默认不选中）
   const [curJobID, setCurJobID] = useState('')
   const [jobResults, setJobResults] = useState<FlyResultItem[]>([])
   const [resultsLoading, setResultsLoading] = useState(false)
+
+  // 在线视频播放弹窗
+  const [videoModalUrl, setVideoModalUrl] = useState<string | null>(null)
+
+  // 搜索关键字
+  const [jobSearchText, setJobSearchText] = useState('')
+  const [planSearchText, setPlanSearchText] = useState('')
 
   // 地图中心控制（首次加载数据后飞到机场）
   const [mapCenter, setMapCenter] = useState<[number, number] | undefined>(undefined)
@@ -106,18 +118,14 @@ export default function Drone() {
         if (res?.resultCode === 0 && Array.isArray(res.data) && res.data.length > 0) {
           loadedDocks = (res.data as Record<string, unknown>[]).map(item => normalizeDock(item))
         }
-        // 接口正常返回空数组（data=[] 或 resultCode 非 0）：保持空列表，
-        // 由 UI 展示"暂无无人机机场"。不允许用 mock 假数据兜底。
       } catch (e) {
         console.warn('无人机机场列表加载失败', e)
-        // 接口异常/失败：保持空列表，不兜底 mock
       }
 
       if (cancelled) return
       setDocksLoading(false)
       setDocks(loadedDocks)
       const firstDock = loadedDocks.find(item => isValidCoordinate(item.dockLng, item.dockLat))
-      // 与原项目一致：默认选中第一台机场，右侧飞行任务/待执飞列表随之加载
       setDockCode(loadedDocks[0]?.dockCode ?? null)
       if (firstDock) {
         moveMapTo([firstDock.dockLng, firstDock.dockLat], 13)
@@ -130,13 +138,12 @@ export default function Drone() {
     return () => { cancelled = true }
   }, [moveMapTo, querySelection])
 
-  // 选中机场变化 → 查询该机场飞行任务/待执飞计划（默认年初至今天，与原项目 rightBar 一致）
+  // 选中机场变化 → 查询该机场飞行任务/待执飞计划
   useEffect(() => {
     if (!dockCode) return
     let cancelled = false
     const param = { dockCode, startDate: dayjs().startOf('year').format('YYYY-MM-DD'), endDate: dayjs().format('YYYY-MM-DD') }
-    // 标准的列表数据拉取模式，忽略 set-state-in-effect 规则
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+
     setJobsLoading(true)
     setPlansLoading(true)
     listFlyJob(param)
@@ -156,19 +163,22 @@ export default function Drone() {
     return () => { cancelled = true }
   }, [dockCode])
 
-  // 点击飞行任务 → 选中该任务，视频采集面板自动加载其 listFlyResult 图片/视频
+  // 点击飞行任务 → 选中该任务，加载其 listFlyResult 图片/视频
   const selectJob = (jobID: string) => {
     setCurJobID(jobID)
   }
-  const openExternalUrl = (url: string) => {
-    if (!url) return
-    window.open(url, '_blank', 'noopener,noreferrer')
+
+  // 媒体成果预览弹窗选中项
+  const [previewItem, setPreviewItem] = useState<FlyResultItem | null>(null)
+
+  // 点击采集成果 → 弹出 Modal 预览
+  const openMediaPreview = (item: FlyResultItem) => {
+    setPreviewItem(item)
   }
+
   useEffect(() => {
     if (!curJobID) return
     let cancelled = false
-    // 标准的列表数据拉取模式，忽略 set-state-in-effect 规则
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setResultsLoading(true)
     listFlyResult({ jobID: curJobID })
       .then(res => {
@@ -179,14 +189,25 @@ export default function Drone() {
     return () => { cancelled = true }
   }, [curJobID])
 
-  // 传感器数据来自真实接口（无对应接口前保持空），不使用任何模拟数据
+  // 纯前端搜索过滤
+  const filteredJobs = useMemo(() => {
+    if (!jobSearchText.trim()) return jobs
+    const q = jobSearchText.trim().toLowerCase()
+    return jobs.filter(j =>
+      ((j.jobName || j.jobID) && (j.jobName || j.jobID).toLowerCase().includes(q)) ||
+      (j.jobID && String(j.jobID).toLowerCase().includes(q)),
+    )
+  }, [jobs, jobSearchText])
 
-  // 机场切换/首次加载后，自动选中最新一条飞行任务，让视频采集面板直接有数据
-  useEffect(() => {
-    if (jobs.length > 0 && !curJobID) {
-      setCurJobID(jobs[0].jobID)
-    }
-  }, [jobs, curJobID])
+  const filteredPlans = useMemo(() => {
+    if (!planSearchText.trim()) return plans
+    const q = planSearchText.trim().toLowerCase()
+    return plans.filter(p =>
+      (p.planName && p.planName.toLowerCase().includes(q)) ||
+      (p.lineName && p.lineName.toLowerCase().includes(q)) ||
+      (p.planId && String(p.planId).toLowerCase().includes(q)),
+    )
+  }, [plans, planSearchText])
 
   const handleRefresh = (code: string) => {
     setRefreshStatus(code)
@@ -199,6 +220,7 @@ export default function Drone() {
     if (dockCode !== item.dockCode) {
       setJobs([])
       setPlans([])
+      setCurJobID('')
     }
     setDockCode(item.dockCode)
     if (isValidCoordinate(item.dockLng, item.dockLat)) {
@@ -218,13 +240,10 @@ export default function Drone() {
   // 地图右键 → 显示上下文菜单（无人机派遣入口）
   const handleSceneLoaded = useCallback((scene: Scene) => {
     mapSceneRef.current = scene
-    // 阻止地图默认右键菜单
     scene.on('contextmenu', (ev: any) => {
       ev.originalEvent?.preventDefault()
-      // 阻止事件冒泡到 window 的 contextmenu 监听，避免菜单刚打开就被关闭
       ev.originalEvent?.stopPropagation()
       if (ev.lngLat) {
-        // 大屏存在 transform 缩放，需将视口坐标换算为地图容器内未缩放的设计坐标，否则菜单位置会按缩放倍数偏移
         const container = scene.getContainer()
         const oe = ev.originalEvent
         let x = ev.x
@@ -244,7 +263,6 @@ export default function Drone() {
     })
   }, [])
 
-  // 点击其他区域 / 再次右键关闭右键菜单
   useEffect(() => {
     const close = () => setContextMenu(null)
     window.addEventListener('click', close)
@@ -286,7 +304,6 @@ export default function Drone() {
               }`}
               onClick={() => flyTo(item)}
             >
-              {/* 最右上角 status 状态标签（进一步向上、向右对齐） */}
               <div className="absolute top-1.5 right-2 z-10">
                 <span
                   className="text-11px font-medium px-2 py-0.5 rounded-full inline-flex items-center gap-1 border"
@@ -309,7 +326,6 @@ export default function Drone() {
                 </span>
               </div>
 
-              {/* 名称 (第一行) */}
               <div className="mb-2 pr-18">
                 <span className="text-[#A8D6FF] text-16px font-bold flex items-center gap-1.5 min-w-0 truncate">
                   <RocketOutlined className="text-[#01C2FF] shrink-0" />
@@ -317,7 +333,6 @@ export default function Drone() {
                 </span>
               </div>
 
-              {/* 地址与 modeCode 同行 (modeCode 占右侧一列，与右上角 status 对齐) */}
               <div className="flex items-start justify-between gap-2">
                 <div className="flex-1 text-[rgba(168,214,255,0.6)] text-12px line-clamp-2 min-h-[2.6em] leading-relaxed">
                   {item.dockAddress}
@@ -339,6 +354,7 @@ export default function Drone() {
           ))}
         </div>
       </div>
+
       {/* 底部中间 - 传感器数据面板 */}
       {dockCode && (
         <div className="absolute bottom-20px left-1/2 -translate-x-1/2 z-50 w-680px">
@@ -370,102 +386,58 @@ export default function Drone() {
           </div>
         </div>
       )}
-      {/* 右侧 - 飞行任务 + 待执飞 */}
-      <div className="absolute right-20px top-70px bottom-20px z-50 w-380px flex flex-col gap-3 pointer-events-none">
-        <div className="bg-[rgba(0,56,129,0.85)] flex-1 rounded-20px px-3 py-2 flex flex-col overflow-hidden pointer-events-auto">
-          <div className="text-[#A0C7FF] text-16px font-bold py-2">飞行任务</div>
-          <div className="flex-1 overflow-y-auto space-y-2 py-1">
-            {!dockCode && <div className="text-[rgba(168,214,255,0.4)] text-11px py-2 text-center">请先在左侧选择无人机机场</div>}
-            {dockCode && jobsLoading && <div className="flex items-center justify-center gap-2 py-2 text-[#A8D6FF] text-11px"><Spin size="small" />加载中…</div>}
-            {dockCode && !jobsLoading && jobs.length === 0 && <div className="text-[rgba(168,214,255,0.4)] text-11px py-2 text-center">暂无飞行任务</div>}
-            {dockCode && jobs.map(item => (
-              <div
-                key={item.jobID}
-                className={`rounded-xl p-3 cursor-pointer transition-all border ${
-                  curJobID === item.jobID
-                    ? 'bg-[rgba(1,194,255,0.18)] border-[#01C2FF] shadow-[0_0_10px_rgba(1,194,255,0.18)]'
-                    : 'bg-[rgba(0,0,0,0.2)] border-[rgba(255,255,255,0.15)] hover:bg-[rgba(255,255,255,0.06)]'
-                }`}
-                onClick={() => selectJob(item.jobID)}
-              >
-                <div className="flex items-center justify-between mb-1">
-                  <div className="text-[#A8D6FF] text-13px">{item.jobName}</div>
-                  <span className="px-2 py-0.5 rounded text-12px text-white" style={{ backgroundColor: statusObj[item.jobStatus]?.color }}>{statusObj[item.jobStatus]?.message}</span>
-                </div>
-                <div className="text-[rgba(168,214,255,0.5)] text-11px">{item.jobTime}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-        <div className="bg-[rgba(0,56,129,0.85)] flex-1 rounded-20px px-3 py-2 flex flex-col overflow-hidden pointer-events-auto">
-          <div className="text-[#A0C7FF] text-16px font-bold py-2">待执飞任务</div>
-          <div className="flex-1 overflow-y-auto space-y-2 py-1">
-            {!dockCode && <div className="text-[rgba(168,214,255,0.4)] text-11px py-2 text-center">请先在左侧选择无人机机场</div>}
-            {dockCode && plansLoading && <div className="flex items-center justify-center gap-2 py-2 text-[#A8D6FF] text-11px"><Spin size="small" />加载中…</div>}
-            {dockCode && !plansLoading && plans.length === 0 && <div className="text-[rgba(168,214,255,0.4)] text-11px py-2 text-center">暂无待执飞任务</div>}
-            {dockCode && plans.map(item => (
-              <div key={item.planId} className="rounded-xl p-3 transition-all bg-[rgba(0,0,0,0.2)] border border-[rgba(255,255,255,0.15)] hover:bg-[rgba(255,255,255,0.06)]">
-                <div className="flex items-center justify-between mb-1">
-                  <div className="text-[#A8D6FF] text-13px">{item.lineName}</div>
-                  <div className="text-[#01C2FF] text-12px cursor-pointer hover:underline" onClick={() => message.info(`查看计划: ${item.planName}`)}>详情</div>
-                </div>
-                <div className="flex items-center justify-between">
-                  <div className="text-[rgba(168,214,255,0.5)] text-11px">{item.dockCode} | {item.flyTime}</div>
-                  <div className="text-[rgba(168,214,255,0.5)] text-11px">{item.startDate}</div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-      {/* 右侧底部 - 视频采集 + 飞行路线 */}
-      <div className="absolute right-20px bottom-20px z-50 w-380px flex gap-3 pointer-events-none">
-        {/* 视频采集：对接 listFlyResult，点击跳转外链 */}
-        <div className="flex-1 pointer-events-auto min-w-0">
-          <div className="bg-[rgba(0,56,129,0.85)] rounded-16px border border-[rgba(255,255,255,0.3)] px-3 py-2 h-full flex flex-col">
-            <div className="flex items-center justify-between mb-2 shrink-0">
-              <span className="text-[#A0C7FF] text-13px font-bold flex items-center gap-1.5">
+
+      {/* 右侧容器 - [视频采集(选中飞行任务后在此左侧显示)] + [飞行任务 + 待执飞任务] */}
+      <div className="absolute right-20px top-70px bottom-20px z-50 flex gap-3 pointer-events-none">
+        {/* 视频采集面板：仅在选中飞行任务 curJobID 有值时显示在飞行任务左侧 */}
+        {curJobID && (
+          <div className="w-360px mt-45px mb-115px bg-[rgba(0,56,129,0.85)] rounded-20px border border-[rgba(255,255,255,0.3)] px-3.5 py-3 flex flex-col pointer-events-auto overflow-hidden">
+            <div className="flex items-center justify-between pb-2 mb-2 border-b border-[rgba(255,255,255,0.15)] shrink-0">
+              <span className="text-[#A0C7FF] text-15px font-bold flex items-center gap-1.5">
                 <VideoCameraOutlined className="text-[#01C2FF]" />视频采集
               </span>
-              <span className="text-[#01C2FF] text-11px px-1.5 py-0.5 rounded-full bg-[rgba(1,194,255,0.12)] border border-[rgba(1,194,255,0.25)]">
-                {jobResults.length}
-              </span>
+              <div className="flex items-center gap-2">
+                <span className="text-[#01C2FF] text-11px px-2 py-0.5 rounded-full bg-[rgba(1,194,255,0.12)] border border-[rgba(1,194,255,0.25)]">
+                  {jobResults.length} 个结果
+                </span>
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<CloseOutlined className="!text-[#A8D6FF] hover:!text-white" />}
+                  onClick={() => setCurJobID('')}
+                  title="关闭视频采集面板"
+                />
+              </div>
             </div>
-            <div className="flex-1 overflow-y-auto max-h-210px min-h-80px space-y-2 pr-1">
-              {!dockCode && (
-                <div className="text-[rgba(168,214,255,0.5)] text-11px py-4 text-center">请先在左侧选择机场</div>
-              )}
-              {dockCode && resultsLoading && (
-                <div className="flex flex-col items-center justify-center gap-2 py-4 text-[#A8D6FF] text-11px">
-                  <Spin size="small" /><span>加载任务结果…</span>
+            <div className="flex-1 overflow-y-auto space-y-2.5 py-1 pr-1">
+              {resultsLoading && (
+                <div className="flex flex-col items-center justify-center gap-2 py-8 text-[#A8D6FF] text-11px">
+                  <Spin size="small" /><span>加载任务采集结果…</span>
                 </div>
               )}
-              {dockCode && !resultsLoading && !curJobID && (
-                <div className="text-[rgba(168,214,255,0.5)] text-11px py-4 text-center">点击上方飞行任务查看采集结果</div>
+              {!resultsLoading && jobResults.length === 0 && (
+                <div className="text-[rgba(168,214,255,0.5)] text-11px py-8 text-center">该任务暂无关联视频或图片</div>
               )}
-              {dockCode && !resultsLoading && curJobID && jobResults.length === 0 && (
-                <div className="text-[rgba(168,214,255,0.5)] text-11px py-4 text-center">该任务暂无视频/图片</div>
-              )}
-              {dockCode && !resultsLoading && jobResults.map(item => (
+              {!resultsLoading && jobResults.map(item => (
                 <div
                   key={item.resultsID}
                   className="group rounded-lg overflow-hidden border border-[rgba(255,255,255,0.12)] bg-[rgba(0,0,0,0.25)] hover:border-[#01C2FF] hover:shadow-[0_0_8px_rgba(1,194,255,0.15)] transition-all cursor-pointer"
-                  onClick={() => openExternalUrl(item.resultsUrl)}
-                  title={item.resultsType === 'v' ? '点击播放视频' : '点击查看图片'}
+                  onClick={() => openMediaPreview(item)}
+                  title="点击打开弹窗预览/播放"
                 >
-                  <div className="relative w-full h-86px overflow-hidden bg-[rgba(0,0,0,0.35)]">
+                  <div className="relative w-full h-110px overflow-hidden bg-[rgba(0,0,0,0.35)]">
                     {item.resultsType === 'p' ? (
                       <Image src={item.resultsUrl} preview={false} className="w-full h-full object-cover" fallback="" />
                     ) : (
-                      <>
+                      <div className="w-full h-full relative">
                         <video src={item.resultsUrl} className="w-full h-full object-cover" preload="metadata" />
-                        <div className="absolute inset-0 flex items-center justify-center bg-[rgba(0,0,0,0.25)] group-hover:bg-[rgba(0,0,0,0.15)] transition-all">
-                          <PlayCircleOutlined className="text-28px text-white/90 drop-shadow-md" />
+                        <div className="absolute inset-0 flex items-center justify-center bg-[rgba(0,0,0,0.3)] group-hover:bg-[rgba(0,0,0,0.15)] transition-all">
+                          <PlayCircleOutlined className="text-36px text-white/90 drop-shadow-md group-hover:scale-110 transition-transform" />
                         </div>
-                      </>
+                      </div>
                     )}
                   </div>
-                  <div className="px-2 py-1.5 flex items-center justify-between">
+                  <div className="px-2.5 py-1.5 flex items-center justify-between bg-[rgba(0,0,0,0.2)]">
                     <span className="text-[#A8D6FF] text-11px truncate flex-1">{item.resultsType === 'v' ? '视频' : '图片'}</span>
                     <span className="text-[rgba(168,214,255,0.5)] text-10px shrink-0">{item.resultsTime}</span>
                   </div>
@@ -473,42 +445,95 @@ export default function Drone() {
               ))}
             </div>
           </div>
-        </div>
-        {/* 飞行路线：用待执飞计划数据展示路线卡片 */}
-        <div className="flex-1 pointer-events-auto min-w-0">
-          <div className="bg-[rgba(0,56,129,0.85)] rounded-16px border border-[rgba(255,255,255,0.3)] px-3 py-2 h-full flex flex-col">
-            <div className="flex items-center justify-between mb-2 shrink-0">
-              <span className="text-[#A0C7FF] text-13px font-bold flex items-center gap-1.5">
-                <EnvironmentOutlined className="text-[#01C2FF]" />飞行路线
-              </span>
-              <span className="text-[#01C2FF] text-11px px-1.5 py-0.5 rounded-full bg-[rgba(1,194,255,0.12)] border border-[rgba(1,194,255,0.25)]">
-                {plans.length}
-              </span>
+        )}
+
+        {/* 飞行任务 + 待执飞任务 */}
+        <div className="w-380px flex flex-col gap-3 pointer-events-none">
+          <div className="bg-[rgba(0,56,129,0.85)] flex-1 rounded-20px px-3.5 py-2 flex flex-col overflow-hidden pointer-events-auto border border-[rgba(255,255,255,0.3)]">
+            <div className="flex items-center justify-between py-1.5 shrink-0 gap-2">
+              <span className="text-[#A0C7FF] text-16px font-bold shrink-0">飞行任务</span>
+              <Input
+                placeholder="搜索名称/ID"
+                allowClear
+                size="small"
+                value={jobSearchText}
+                onChange={e => setJobSearchText(e.target.value)}
+                className="drone-header-search"
+              />
             </div>
-            <div className="flex-1 overflow-y-auto max-h-210px min-h-80px space-y-2 pr-1">
-              {!dockCode && (
-                <div className="text-[rgba(168,214,255,0.5)] text-11px py-4 text-center">请先在左侧选择机场</div>
-              )}
-              {dockCode && plansLoading && (
-                <div className="flex flex-col items-center justify-center gap-2 py-4 text-[#A8D6FF] text-11px">
-                  <Spin size="small" /><span>加载路线计划…</span>
+            <div className="flex-1 overflow-y-auto space-y-2 py-1">
+              {!dockCode && <div className="text-[rgba(168,214,255,0.4)] text-11px py-2 text-center">请先在左侧选择无人机机场</div>}
+              {dockCode && jobsLoading && <div className="flex items-center justify-center gap-2 py-2 text-[#A8D6FF] text-11px"><Spin size="small" />加载中…</div>}
+              {dockCode && !jobsLoading && filteredJobs.length === 0 && (
+                <div className="text-[rgba(168,214,255,0.4)] text-11px py-2 text-center">
+                  {jobSearchText ? '未搜索到匹配任务' : '暂无飞行任务'}
                 </div>
               )}
-              {dockCode && !plansLoading && plans.length === 0 && (
-                <div className="text-[rgba(168,214,255,0.5)] text-11px py-4 text-center">暂无飞行路线计划</div>
-              )}
-              {dockCode && !plansLoading && plans.map(item => (
+              {dockCode && filteredJobs.map(item => (
                 <div
-                  key={item.planId}
-                  className="rounded-lg p-2.5 border border-[rgba(255,255,255,0.12)] bg-[rgba(0,0,0,0.2)] hover:bg-[rgba(255,255,255,0.06)] transition-colors"
+                  key={item.jobID}
+                  className={`rounded-xl p-3 cursor-pointer transition-all border ${
+                    curJobID === item.jobID
+                      ? 'bg-[rgba(1,194,255,0.18)] border-[#01C2FF] shadow-[0_0_10px_rgba(1,194,255,0.18)]'
+                      : 'bg-[rgba(0,0,0,0.2)] border-[rgba(255,255,255,0.15)] hover:bg-[rgba(255,255,255,0.06)]'
+                  }`}
+                  onClick={() => selectJob(item.jobID)}
                 >
-                  <div className="flex items-center gap-1.5 mb-1">
-                    <span className="w-1.5 h-1.5 rounded-full bg-[#01C2FF] shrink-0" />
-                    <span className="text-[#A8D6FF] text-12px font-medium truncate flex-1" title={item.lineName}>{item.lineName}</span>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <div className="text-[#A8D6FF] text-13px font-medium truncate flex-1 pr-2" title={item.jobName || item.jobID}>
+                      {item.jobName || item.jobID}
+                    </div>
+                    <span
+                      className="px-2 py-0.5 rounded text-11px font-medium shrink-0"
+                      style={{
+                        backgroundColor: statusObj[item.jobStatus]?.color || 'rgba(255,255,255,0.2)',
+                        color: ['a', '3'].includes(item.jobStatus) ? '#003881' : '#ffffff',
+                      }}
+                    >
+                      {statusObj[item.jobStatus]?.message || '未知状态'}
+                    </span>
                   </div>
-                  <div className="text-[rgba(168,214,255,0.55)] text-10px leading-5">
-                    <div className="truncate">机场：{item.dockCode}</div>
-                    <div>时间：{item.flyTime || item.startDate}</div>
+                  <div className="text-[rgba(168,214,255,0.5)] text-11px font-normal">
+                    {item.jobTime}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="bg-[rgba(0,56,129,0.85)] flex-1 rounded-20px px-3.5 py-2 flex flex-col overflow-hidden pointer-events-auto border border-[rgba(255,255,255,0.3)]">
+            <div className="flex items-center justify-between py-1.5 shrink-0 gap-2">
+              <span className="text-[#A0C7FF] text-16px font-bold shrink-0">待执飞任务</span>
+              <Input
+                placeholder="搜索名称/ID"
+                allowClear
+                size="small"
+                value={planSearchText}
+                onChange={e => setPlanSearchText(e.target.value)}
+                className="drone-header-search"
+              />
+            </div>
+            <div className="flex-1 overflow-y-auto space-y-2 py-1">
+              {!dockCode && <div className="text-[rgba(168,214,255,0.4)] text-11px py-2 text-center">请先在左侧选择无人机机场</div>}
+              {dockCode && plansLoading && <div className="flex items-center justify-center gap-2 py-2 text-[#A8D6FF] text-11px"><Spin size="small" />加载中…</div>}
+              {dockCode && !plansLoading && filteredPlans.length === 0 && (
+                <div className="text-[rgba(168,214,255,0.4)] text-11px py-2 text-center">
+                  {planSearchText ? '未搜索到匹配计划' : '暂无待执飞任务'}
+                </div>
+              )}
+              {dockCode && filteredPlans.map(item => (
+                <div key={item.planId} className="rounded-xl p-3 transition-all bg-[rgba(0,0,0,0.2)] border border-[rgba(255,255,255,0.15)] hover:bg-[rgba(255,255,255,0.06)]">
+                  <div className="flex items-center justify-between mb-1">
+                    <div className="text-[#A8D6FF] text-13px font-medium truncate flex-1 pr-2" title={item.lineName || item.planName || item.planId}>
+                      {item.lineName || item.planName || item.planId}
+                    </div>
+                    <div className="text-[#01C2FF] text-12px cursor-pointer hover:underline shrink-0" onClick={() => message.info(`查看计划: ${item.planName || item.planId}`)}>
+                      详情
+                    </div>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <div className="text-[rgba(168,214,255,0.5)] text-11px">{item.dockCode} | {item.flyTime || '全天'}</div>
+                    <div className="text-[rgba(168,214,255,0.5)] text-11px">{item.startDate}</div>
                   </div>
                 </div>
               ))}
@@ -516,6 +541,7 @@ export default function Drone() {
           </div>
         </div>
       </div>
+
       {/* 右键上下文菜单 - 无人机派遣 */}
       {contextMenu && (
         <div
@@ -536,6 +562,7 @@ export default function Drone() {
           </div>
         </div>
       )}
+
       {/* 派遣无人机巡逻弹窗（右键菜单触发） */}
       {flyVisible && (
         <FlyListModel
@@ -546,7 +573,66 @@ export default function Drone() {
           lngLat={flyLngLat}
         />
       )}
-      {/* 任务结果已内联到"视频采集"面板，不再使用弹窗 */}
+
+      {/* 媒体成果预览弹窗（视频采集成果预览 / 图片采集成果预览） */}
+      {previewItem && (
+        <Modal
+          open
+          onCancel={() => setPreviewItem(null)}
+          footer={null}
+          width={960}
+          centered
+          destroyOnClose
+          title={
+            <div className="flex items-center justify-between pr-8">
+              <span className="text-[#03FBFD] text-17px font-bold flex items-center gap-2">
+                {previewItem.resultsType === 'v' ? (
+                  <VideoCameraOutlined className="text-[#01C2FF]" />
+                ) : (
+                  <PictureOutlined className="text-[#01C2FF]" />
+                )}
+                {previewItem.resultsType === 'v' ? '视频采集成果预览' : '图片采集成果预览'}
+              </span>
+              {previewItem.resultsTime && (
+                <span className="text-[rgba(168,214,255,0.7)] text-12px font-normal">
+                  采集时间：{previewItem.resultsTime}
+                </span>
+              )}
+            </div>
+          }
+        >
+          <div className="flex flex-col items-center justify-center p-4 min-h-[300px] overflow-hidden">
+            {previewItem.resultsType === 'v' ? (
+              <div className="w-full flex flex-col items-center gap-3">
+                <div className="w-full rounded-2xl overflow-hidden shadow-[0_0_30px_rgba(0,0,0,0.5)] border border-[rgba(255,255,255,0.2)] bg-black">
+                  <video
+                    src={previewItem.resultsUrl}
+                    controls
+                    autoPlay
+                    className="w-full max-h-[65vh] object-contain"
+                  />
+                </div>
+                <div className="text-[rgba(168,214,255,0.6)] text-12px">提示：支持画中画、全屏播放与倍速调节</div>
+              </div>
+            ) : (
+              <div className="w-full flex flex-col items-center gap-3">
+                <div className="p-2 rounded-2xl bg-[rgba(0,56,129,0.5)] border border-[rgba(255,255,255,0.2)] shadow-[0_0_30px_rgba(0,0,0,0.4)] flex items-center justify-center">
+                  <Image
+                    src={previewItem.resultsUrl}
+                    preview={{
+                      mask: <div className="text-[#03FBFD] text-14px font-medium flex items-center gap-1">点击放大旋转预览</div>,
+                    }}
+                    className="max-h-[62vh] max-w-full object-contain rounded-xl"
+                  />
+                </div>
+                <div className="text-[rgba(168,214,255,0.6)] text-12px">提示：点击图片可直接进行放大、旋转、全屏预览</div>
+              </div>
+            )}
+          </div>
+        </Modal>
+      )}
     </div>
   )
 }
+
+

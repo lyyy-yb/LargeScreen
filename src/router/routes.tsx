@@ -13,6 +13,7 @@ const Login = lazy(() => import('@/pages/login'))
 const Monitor = lazy(() => import('@/pages/monitor'))
 const Radar = lazy(() => import('@/pages/radar'))
 const Drone = lazy(() => import('@/pages/drone'))
+const DroneMediaPreview = lazy(() => import('@/pages/drone/MediaPreview'))
 const Patrol = lazy(() => import('@/pages/patrol'))
 const AlertPage = lazy(() => import('@/pages/alert'))
 const Report = lazy(() => import('@/pages/report'))
@@ -76,6 +77,11 @@ export const routes: RouteObject[] = [
         path: 'drone',
         element: <LazyComponent><Drone /></LazyComponent>,
         handle: { title: '无人机机场', tab: true } as RouteMeta,
+      },
+      {
+        path: 'drone/media',
+        element: <LazyComponent><DroneMediaPreview /></LazyComponent>,
+        handle: { title: '成果预览', hidden: true } as RouteMeta,
       },
       {
         path: 'patrol',

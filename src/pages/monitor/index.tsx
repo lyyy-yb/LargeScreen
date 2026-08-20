@@ -335,10 +335,12 @@ const STATION_DATA_FIELDS: { key: 'pm10' | 'pm25' | 'o3' | 'so2' | 'no2' | 'co' 
 const STATION_DATA_COLUMNS: ColumnsType<AirDataLatestVO> = [
   {
     title: '基站名称',
-    dataIndex: 'deviceName',
-    key: 'deviceName',
+    dataIndex: 'shortName',
+    key: 'shortName',
     width: 180,
-    render: (value: unknown) => <span className="text-[#d2ecff]">{String(value ?? '--')}</span>,
+    render: (value: unknown, record: AirDataLatestVO) => (
+      <span className="text-[#d2ecff]">{String(value ?? record.deviceName ?? '--')}</span>
+    ),
   },
   ...STATION_DATA_FIELDS.map(field => ({
     title: field.label,
@@ -516,11 +518,30 @@ const AIR_POPUP_GAP = 14
 
 /** 空气质量站监测详情弹窗：6 项污染物可勾选（默认勾选第一项，至少保留一项），底部近 12 小时趋势图 */
 function AirStationDetailPopup({ detail, onClose }: { detail: AirPointDetail; onClose: () => void }) {
+  const popupRef = useRef<HTMLDivElement>(null)
   // 勾选项默认第一项（PM2.5），trendKey 即趋势数据字段
   const [checkedKeys, setCheckedKeys] = useState<string[]>([AIR_DETAIL_FIELDS[0].trendKey])
   const [trend, setTrend] = useState<AirTrendItem[]>([])
   const [loading, setLoading] = useState(true)
   const chartBoxRef = useRef<HTMLDivElement>(null)
+
+  // 点击弹窗外部区域时自动关闭弹窗
+  useEffect(() => {
+    const handlePointerDown = (event: MouseEvent | TouchEvent) => {
+      if (popupRef.current && !popupRef.current.contains(event.target as Node)) {
+        onClose()
+      }
+    }
+    const timer = setTimeout(() => {
+      document.addEventListener('mousedown', handlePointerDown)
+      document.addEventListener('touchstart', handlePointerDown)
+    }, 0)
+    return () => {
+      clearTimeout(timer)
+      document.removeEventListener('mousedown', handlePointerDown)
+      document.removeEventListener('touchstart', handlePointerDown)
+    }
+  }, [onClose])
 
   // 弹窗立即展示（卡片数据随点击已返回），趋势接口异步加载并带 loading（初始 true，按站点 key 重挂载时重置）
   useEffect(() => {
@@ -589,7 +610,8 @@ function AirStationDetailPopup({ detail, onClose }: { detail: AirPointDetail; on
 
   return (
     <div
-      className="absolute z-30 p-3 rounded-8px border border-[#00d4ff]/45 bg-[rgba(4,22,52,0.94)] shadow-[0_8px_28px_rgba(0,10,35,0.55)] flex flex-col box-border"
+      ref={popupRef}
+      className="absolute z-[99999] p-3 rounded-8px border border-[#00d4ff]/45 bg-[rgba(4,22,52,0.94)] shadow-[0_8px_28px_rgba(0,10,35,0.55)] flex flex-col box-border"
       style={{ ...anchorStyle, width: AIR_POPUP_WIDTH, height: AIR_POPUP_HEIGHT }}
     >
       <div className="flex items-center justify-between mb-2 shrink-0">
@@ -651,6 +673,26 @@ const OUTLET_POPUP_WIDTH = 320
 const OUTLET_POPUP_GAP = 14
 
 function OutletDetailPopup({ detail, onClose }: { detail: OutletPointDetail; onClose: () => void }) {
+  const popupRef = useRef<HTMLDivElement>(null)
+
+  // 点击弹窗外部区域时自动关闭弹窗
+  useEffect(() => {
+    const handlePointerDown = (event: MouseEvent | TouchEvent) => {
+      if (popupRef.current && !popupRef.current.contains(event.target as Node)) {
+        onClose()
+      }
+    }
+    const timer = setTimeout(() => {
+      document.addEventListener('mousedown', handlePointerDown)
+      document.addEventListener('touchstart', handlePointerDown)
+    }, 0)
+    return () => {
+      clearTimeout(timer)
+      document.removeEventListener('mousedown', handlePointerDown)
+      document.removeEventListener('touchstart', handlePointerDown)
+    }
+  }, [onClose])
+
   // 优先展示在点击位置上方，上方放不下时翻转到下方；无坐标时居中
   const pos = detail.pos
   const anchorStyle: CSSProperties = pos
@@ -671,7 +713,8 @@ function OutletDetailPopup({ detail, onClose }: { detail: OutletPointDetail; onC
 
   return (
     <div
-      className="absolute z-30 p-3 rounded-8px border border-[#9aa7b4]/45 bg-[rgba(10,18,32,0.94)] shadow-[0_8px_28px_rgba(0,10,35,0.55)] box-border"
+      ref={popupRef}
+      className="absolute z-[99999] p-3 rounded-8px border border-[#9aa7b4]/45 bg-[rgba(10,18,32,0.94)] shadow-[0_8px_28px_rgba(0,10,35,0.55)] box-border"
       style={{ ...anchorStyle, width: OUTLET_POPUP_WIDTH }}
     >
       <div className="flex items-center justify-between mb-2 pb-2 border-b border-[#9aa7b4]/25">
@@ -724,9 +767,8 @@ export default function Monitor() {
   const [airPoints, setAirPoints] = useState<AirQualityPoint[]>([])
   // 预警点位打点（alertEvent/list 经纬度，同经纬度已聚合）
   const [alertPoints, setAlertPoints] = useState<AlertMapPoint[]>([])
-  // 企业排口打点（hbdp/emissionOutlet/list，全量；zoom>=13 图标 / >=15 两行文字）
+  // 企业排口打点（hbdp/emissionOutlet/list，全量；zoom>=13 图标 / >=16 两行文字）
   const [emissionOutletPoints, setEmissionOutletPoints] = useState<EmissionOutletPoint[]>([])
-  // 打点显隐控制：预警↔空气互斥（按钮组单选），无人机/雷达独立 Switch
   const [pointMode, setPointMode] = useState<'alert' | 'air'>('air')
   const [showDronePoints, setShowDronePoints] = useState(true)
   const [showRadarPoints, setShowRadarPoints] = useState(true)
@@ -1148,7 +1190,7 @@ export default function Monitor() {
     const lng = Number(item.longitude)
     const lat = Number(item.latitude)
     if (!Number.isFinite(lng) || !Number.isFinite(lat)) return
-    setMapFocusTarget({ lng, lat, zoom: 15, requestId: ++focusRequestRef.current })
+    setMapFocusTarget({ lng, lat, zoom: 17, requestId: ++focusRequestRef.current })
     setSearchKeyword(item.name?.trim() || '未命名地址')
     setSearchOpen(false)
     setAirDetail(null)
@@ -1479,24 +1521,6 @@ export default function Monitor() {
           </div>
         )}
 
-        {/* 空气质量打点详情弹窗（唯一弹窗，锚定在图标点击位置；key 按站点切换重置勾选状态） */}
-        {airDetail && (
-          <AirStationDetailPopup
-            key={airDetail.id ?? airDetail.name}
-            detail={airDetail}
-            onClose={() => setAirDetail(null)}
-          />
-        )}
-
-        {/* 企业排口详情弹窗（与空气质量弹窗互斥，锚定在圆点点击位置） */}
-        {outletDetail && (
-          <OutletDetailPopup
-            key={outletDetail.id ?? outletDetail.outletName}
-            detail={outletDetail}
-            onClose={() => setOutletDetail(null)}
-          />
-        )}
-
         {/* 左下浮层：数据源概况（在线数据源取 dataSource/list 的 total，其余暂无数据源先显示 0） */}
         <div className="source-summary absolute bottom-56px left-3 z-20 text-11px text-[#b2d9ff]/90 space-y-1 font-mono p-2.5 rounded-6px bg-[rgba(4,22,52,0.45)] border border-[#00d4ff]/25">
           <div>在线数据源：<span className="text-[#00ffff] font-bold">{sourceTotal}</span></div>
@@ -1508,7 +1532,7 @@ export default function Monitor() {
         <div className="distribution-summary absolute bottom-56px right-3 z-20 p-3 rounded-8px border border-[#00d4ff]/35 bg-[rgba(4,22,52,0.9)] shadow-lg max-w-340px">
           <div className="text-[#00f0ff] text-13px font-bold mb-1">{selectedRegionName}环境监测分布</div>
           <div className="text-[#b2d9ff]/80 text-11px leading-relaxed">
-            共 <span className="text-[#00f0ff] font-bold font-mono">11</span> 个空气质量检测站<br />
+            共 <span className="text-[#00f0ff] font-bold font-mono">{airPoints.length}</span> 个空气质量检测站<br />
             <span className="text-[#00f0ff] font-bold font-mono">{radarStations.length}</span> 个光量子雷达站 | <span className="text-[#00f0ff] font-bold font-mono">{droneStations.length}</span> 个无人机场
           </div>
         </div>
@@ -1656,6 +1680,24 @@ export default function Monitor() {
           </button>
         </section>
       </aside>
+
+      {/* 空气质量打点详情弹窗（全局最高 z-index 浮层，锚定在图标点击位置） */}
+      {airDetail && (
+        <AirStationDetailPopup
+          key={airDetail.id ?? airDetail.name}
+          detail={airDetail}
+          onClose={() => setAirDetail(null)}
+        />
+      )}
+
+      {/* 企业排口详情弹窗（全局最高 z-index 浮层，锚定在圆点点击位置） */}
+      {outletDetail && (
+        <OutletDetailPopup
+          key={outletDetail.id ?? outletDetail.outletName}
+          detail={outletDetail}
+          onClose={() => setOutletDetail(null)}
+        />
+      )}
     </div>
   )
 }
