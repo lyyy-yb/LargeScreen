@@ -147,7 +147,7 @@ export async function createEmissionOutletLayers(
   scene.addLayer(nameLayer)
   const nameControl = bindZoomNameLayer(scene, nameLayer, OUTLET_NAME_MIN_ZOOM)
 
-  // 第二行文字：企业名称。字体调小至 8.5px，淡暗色背景与第一行保持紧凑间距。
+  // 第二行文字：企业名称。字体调小至 8.5px，向下偏移加大至 -46px 避免遮挡第一行排口名。
   const companyLayer = new PointLayer({
     zIndex: 30,
     name: 'emission-outlet-company-layer',
@@ -159,7 +159,7 @@ export async function createEmissionOutletLayers(
     .color('#c4e6ff')
     .style({
       textAnchor: 'top',
-      textOffset: [0, -32],
+      textOffset: [0, -46],
       spacing: 2,
       padding: [2, 2],
       fontWeight: 500,
