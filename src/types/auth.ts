@@ -20,6 +20,7 @@ export interface UserInfo {
   userId: number
   userName: string
   nickName?: string
+  avatar?: string | null
   deptId?: number | null
   dept?: DeptInfo | null
   roles?: RoleInfo[]

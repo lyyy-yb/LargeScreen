@@ -57,6 +57,14 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true,
           rewrite: (path) => path.replace(new RegExp('^/upImg/'), '/'),
         },
+        '^/prod-api': {
+          target: 'http://218.244.154.247:7089',
+          changeOrigin: true,
+        },
+        '^/profile': {
+          target: 'http://218.244.154.247:7089/prod-api',
+          changeOrigin: true,
+        },
         '^/gaodeservice': {
           target: 'https://gaode.com/service',
           changeOrigin: true,

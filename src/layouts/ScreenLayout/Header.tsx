@@ -8,12 +8,28 @@ import { useAppStore, useAuthStore } from '@/stores'
 import { isBusinessRole } from '@/utils/region'
 import hBg from '@/assets/images/bg/h-bg.png'
 
+function resolveAvatarUrl(avatar?: string | null): string | undefined {
+  if (!avatar) return undefined
+  if (avatar.startsWith('http://') || avatar.startsWith('https://') || avatar.startsWith('blob:') || avatar.startsWith('data:')) {
+    return avatar
+  }
+  const cleanPath = avatar.startsWith('/') ? avatar : `/${avatar}`
+  if (cleanPath.startsWith('/profile')) {
+    return `http://218.244.154.247:7089/prod-api${cleanPath}`
+  }
+  return cleanPath
+}
+
 export default function Header() {
   const navigate = useNavigate()
   const { username, logout } = useAuthStore()
+  const user = useAuthStore(state => state.user)
   const resetRegionContext = useAppStore(state => state.resetRegionContext)
   const regionContext = useAppStore(state => state.regionContext)
   const [currentTime, setCurrentTime] = useState(() => dayjs().format('YYYY / MM / DD HH:mm'))
+
+  const avatarUrl = resolveAvatarUrl(user?.avatar)
+  const displayName = user?.nickName || username || '用户'
 
   useEffect(() => {
     const timer = window.setInterval(
@@ -100,8 +116,12 @@ export default function Header() {
         </Dropdown>
         <Dropdown menu={{ items: userItems, onClick: onUserClick }}>
           <Space onClick={e => e.preventDefault()} className="cursor-pointer">
-            <span className="c-#FFFFFF">{username || '用户'}</span>
-            <Avatar style={{ backgroundColor: '#0efbfd' }} icon={<UserOutlined />} />
+            <span className="c-#FFFFFF">{displayName}</span>
+            <Avatar
+              src={avatarUrl}
+              style={{ backgroundColor: '#0efbfd', color: '#004385' }}
+              icon={!avatarUrl ? <UserOutlined /> : undefined}
+            />
           </Space>
         </Dropdown>
       </div>
