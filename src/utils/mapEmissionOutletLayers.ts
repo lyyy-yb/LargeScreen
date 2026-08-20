@@ -94,7 +94,7 @@ export async function createEmissionOutletLayers(
     await scene.addImage(OUTLET_ICON_IMAGE, OUTLET_ICON_DATA_URL)
   }
 
-  // 渐变圆点图标层（zoom >= 13 显示）
+  // 渐变圆点图标层：参考雷达告警点位，使用 4.5px 圆点 + 白色描边，对齐三维视角与尺寸（zoom >= 13 显示）
   const layer = new PointLayer({
     zIndex: 29,
     name: 'emission-outlet-icon-layer',
@@ -102,9 +102,10 @@ export async function createEmissionOutletLayers(
     pickingBuffer: 4,
   })
     .source(data, { parser: { type: 'json', x: 'lng', y: 'lat' } })
-    .shape(OUTLET_ICON_IMAGE)
-    .size(6)
-    .style({ raisingHeight, heightfixed: true, depth: false, opacity: 1 })
+    .shape('circle')
+    .color('#00c2ff')
+    .size(4.5)
+    .style({ raisingHeight, heightfixed: true, depth: false, stroke: '#ffffff', strokeWidth: 1, opacity: 0.95 })
   scene.addLayer(layer)
 
   // 点击排口圆点：回调页面侧弹出详情弹窗（含点击像素坐标，锚定弹窗位置）
@@ -117,36 +118,7 @@ export async function createEmissionOutletLayers(
   // 图标层缩放门控：复用 bindZoomNameLayer（仅调 layer.show/hide，不限定图层类型）
   const iconControl = bindZoomNameLayer(scene, layer, OUTLET_ICON_MIN_ZOOM)
 
-  // 第二行文字：企业名称。L7 的 textOffset Y 轴为正数向上，因此使用负值将文字放到圆点下方。
-  const companyLayer = new PointLayer({
-    zIndex: 30,
-    name: 'emission-outlet-company-layer',
-    enablePicking: false,
-  })
-    .source(data, { parser: { type: 'json', x: 'lng', y: 'lat' } })
-    .shape('companyName', 'text')
-    .size(10)
-    .color('#e8fbff')
-    .style({
-      textAnchor: 'top',
-      textOffset: [0, -60],
-      spacing: 2,
-      padding: [2, 2],
-      fontWeight: 700,
-      stroke: '#03264c',
-      strokeWidth: 2,
-      backgroundColor: 'rgba(8, 47, 84, 0.58)',
-      backgroundPadding: [3, 1],
-      backgroundRadius: 2,
-      raisingHeight,
-      heightfixed: true,
-      textAllowOverlap: true,
-      depth: false,
-    })
-  scene.addLayer(companyLayer)
-  const companyControl = bindZoomNameLayer(scene, companyLayer, OUTLET_NAME_MIN_ZOOM)
-
-  // 第一行文字：排口名称，与企业名保持紧凑的两行间距。
+  // 第一行文字：排口名称。字体调小至 9px，背景色调淡，对齐雷达告警点样式。
   const nameLayer = new PointLayer({
     zIndex: 30,
     name: 'emission-outlet-name-layer',
@@ -154,18 +126,18 @@ export async function createEmissionOutletLayers(
   })
     .source(data, { parser: { type: 'json', x: 'lng', y: 'lat' } })
     .shape('outletName', 'text')
-    .size(11)
+    .size(9)
     .color('#e8fbff')
     .style({
       textAnchor: 'top',
-      textOffset: [0, -22],
+      textOffset: [0, -18],
       spacing: 2,
       padding: [2, 2],
-      fontWeight: 700,
-      stroke: '#03264c',
-      strokeWidth: 2,
-      backgroundColor: 'rgba(8, 47, 84, 0.58)',
-      backgroundPadding: [3, 1],
+      fontWeight: 500,
+      stroke: '#021833',
+      strokeWidth: 1.5,
+      backgroundColor: 'rgba(4, 22, 52, 0.35)',
+      backgroundPadding: [1.5, 2],
       backgroundRadius: 2,
       raisingHeight,
       heightfixed: true,
@@ -174,6 +146,35 @@ export async function createEmissionOutletLayers(
     })
   scene.addLayer(nameLayer)
   const nameControl = bindZoomNameLayer(scene, nameLayer, OUTLET_NAME_MIN_ZOOM)
+
+  // 第二行文字：企业名称。字体调小至 8.5px，淡暗色背景与第一行保持紧凑间距。
+  const companyLayer = new PointLayer({
+    zIndex: 30,
+    name: 'emission-outlet-company-layer',
+    enablePicking: false,
+  })
+    .source(data, { parser: { type: 'json', x: 'lng', y: 'lat' } })
+    .shape('companyName', 'text')
+    .size(8.5)
+    .color('#c4e6ff')
+    .style({
+      textAnchor: 'top',
+      textOffset: [0, -32],
+      spacing: 2,
+      padding: [2, 2],
+      fontWeight: 500,
+      stroke: '#021833',
+      strokeWidth: 1.5,
+      backgroundColor: 'rgba(4, 22, 52, 0.35)',
+      backgroundPadding: [1.5, 2],
+      backgroundRadius: 2,
+      raisingHeight,
+      heightfixed: true,
+      textAllowOverlap: true,
+      depth: false,
+    })
+  scene.addLayer(companyLayer)
+  const companyControl = bindZoomNameLayer(scene, companyLayer, OUTLET_NAME_MIN_ZOOM)
 
   return {
     layer,
