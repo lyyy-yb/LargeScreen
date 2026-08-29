@@ -20,6 +20,18 @@ export interface AirPointClickPos {
 const AQ_NONE_ICON_NAME = 'aq-none'
 const AQ_NONE_ICON_URL = '/marker/aq-none.png'
 
+/** 固定站使用设计稿提供的方形切图；移动站继续使用原圆形图标。 */
+const FIXED_AQ_LEVEL_ICON = {
+  good: '/marker/aq-fixed-good.png',
+  moderate: '/marker/aq-fixed-moderate.png',
+  light: '/marker/aq-fixed-light.png',
+  medium: '/marker/aq-fixed-medium.png',
+  heavy: '/marker/aq-fixed-heavy.png',
+  severe: '/marker/aq-fixed-severe.png',
+} as const
+const FIXED_AQ_NONE_ICON_NAME = 'aq-fixed-none'
+const FIXED_AQ_NONE_ICON_URL = '/marker/aq-fixed-none.png'
+
 /** 判断打点是否具备空气质量数据（无数据时展示占位图标且不弹详情） */
 export function hasAirQualityData(point: AirQualityPoint): boolean {
   return point.aqiLevel != null && point.aqiLevel !== ''
@@ -29,9 +41,13 @@ export function hasAirQualityData(point: AirQualityPoint): boolean {
 function decorate(points: AirQualityPoint[]) {
   return points.map(point => ({
     ...point,
-    iconName: hasAirQualityData(point)
-      ? `aq-${resolveAqiLevelKey(point.aqiLevel, point.iaqi)}`
-      : AQ_NONE_ICON_NAME,
+    iconName: point.stationType === 'fixed'
+      ? (hasAirQualityData(point)
+          ? `aq-fixed-${resolveAqiLevelKey(point.aqiLevel, point.iaqi)}`
+          : FIXED_AQ_NONE_ICON_NAME)
+      : (hasAirQualityData(point)
+          ? `aq-${resolveAqiLevelKey(point.aqiLevel, point.iaqi)}`
+          : AQ_NONE_ICON_NAME),
   }))
 }
 
@@ -50,7 +66,9 @@ export async function createAirQualityLayers(
   // 注册六级 AQI 图标与无数据占位图标：直接使用设计原始切图，不做透视/光晕等立体加工
   const iconEntries: [string, string][] = [
     ...Object.entries(AQI_LEVEL_ICON).map(([level, url]) => [`aq-${level}`, url] as [string, string]),
+    ...Object.entries(FIXED_AQ_LEVEL_ICON).map(([level, url]) => [`aq-fixed-${level}`, url] as [string, string]),
     [AQ_NONE_ICON_NAME, AQ_NONE_ICON_URL],
+    [FIXED_AQ_NONE_ICON_NAME, FIXED_AQ_NONE_ICON_URL],
   ]
   iconEntries.forEach(([name, url]) => {
     if (scene.hasImage(name)) return

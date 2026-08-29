@@ -46,6 +46,8 @@ export interface StationAirRange {
 
 /** 地图空气质量打点（按数据源经纬度展示六级图标） */
 export interface AirQualityPoint {
+  /** 站点类型：fixed-固定站 mobile-移动站 */
+  stationType?: string
   name: string
   lng: number
   lat: number
@@ -77,4 +79,6 @@ export interface AirTrendItem {
   no2?: number | null
   co?: number | null
   o3?: number | null
+  vocs?: number | null
+  tsp?: number | null
 }
