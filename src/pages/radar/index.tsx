@@ -214,6 +214,7 @@ interface AlarmPointPanelProps {
   items: AlarmItem[]
   urgent?: boolean
   loading?: boolean
+  hourRange?: number
   onLocate: (item: AlarmItem) => void
   onShare: (item: AlarmItem) => void
   dispatchContent: (item: AlarmItem) => React.ReactNode
@@ -226,6 +227,7 @@ function AlarmPointPanel({
   items,
   urgent = false,
   loading = false,
+  hourRange = 24,
   onLocate,
   onShare,
   dispatchContent,
@@ -266,7 +268,7 @@ function AlarmPointPanel({
             <div className="flex items-start justify-between gap-2">
               <button type="button" onClick={() => onLocate(item)} className="min-w-0 text-left flex-1 cursor-pointer">
                 <div className="text-[#edf8ff] text-12px font-600 leading-17px truncate">{item.address}</div>
-                <div className="mt-0.5 text-9px text-[#bdddf8]/52">最近 24 小时监测</div>
+                <div className="mt-0.5 text-9px text-[#bdddf8]/52">最近 {hourRange} 小时监测</div>
               </button>
               <div className="shrink-0 flex items-baseline gap-1 rounded-7px px-2 py-1 bg-[rgba(3,42,98,0.38)]">
                 <span className="text-15px font-mono font-800" style={{ color: accent }}>{item.times}</span>
@@ -305,6 +307,7 @@ export default function Radar() {
   const [radarList, setRadarList] = useState<RadarStation[]>([])
   const [radarLoading, setRadarLoading] = useState(false)
   const [selectedBsiId, setSelectedBsiId] = useState('')
+  const [hourRange, setHourRange] = useState<1 | 3 | 24>(24)
   const [sceneReady, setSceneReady] = useState(false)
   const sceneRef = useRef<Scene | null>(null)
   const radarLayersRef = useRef<{ scan: RadarScanOverlay | null; icon: ILayer | null }>({ scan: null, icon: null })
@@ -411,7 +414,7 @@ export default function Radar() {
     return () => { cancelled = true }
   }, [querySelection])
 
-  // 按选中雷达查询突发/常规告警点位（与 monitor 统一默认 hour=24；结果为空/失败时清空列表，不使用 mock 数据）
+  // 按选中雷达查询突发/常规告警点位（hour 随底部时间范围切换，默认 24；结果为空/失败时清空列表，不使用 mock 数据）
   useEffect(() => {
     let cancelled = false
     const loadAlarm = async () => {
@@ -422,7 +425,7 @@ export default function Radar() {
       }
       try {
         setAlarmLoading(true)
-        const res = await alarmPointAll({ BsiId: selectedBsiId, hour: 24 })
+        const res = await alarmPointAll({ BsiId: selectedBsiId, hour: hourRange })
         if (cancelled) return
         const data: AlarmItem[] = res?.resultCode === 0 && Array.isArray(res.data) ? res.data : []
         const cg: AlarmItem[] = []
@@ -445,7 +448,7 @@ export default function Radar() {
     // 切换雷达后清除旧的定位高亮
     highlightLayerRef.current?.setData({ type: 'FeatureCollection', features: [] })
     return () => { cancelled = true }
-  }, [selectedBsiId])
+  }, [selectedBsiId, hourRange])
 
   // 绘制雷达扫描动画 + 图标层（与原项目 showRadar 一致）
   const renderRadarLayers = useCallback(async (scene: Scene, list: RadarStation[]) => {
@@ -721,6 +724,7 @@ export default function Radar() {
           items={tfList}
           urgent
           loading={alarmLoading}
+          hourRange={hourRange}
           onLocate={flyTo}
           onShare={showWX}
           dispatchContent={showContent}
@@ -731,6 +735,7 @@ export default function Radar() {
           subtitle="持续关注的例行监测点位"
           items={cgList}
           loading={alarmLoading}
+          hourRange={hourRange}
           onLocate={flyTo}
           onShare={showWX}
           dispatchContent={showContent}
@@ -790,9 +795,18 @@ export default function Radar() {
       {/* 底部时间选择 */}
       <div className="absolute bottom-58px left-1/2 -translate-x-1/2 z-50 bg-[rgba(0,56,129,0.8)] px-4 py-2 rounded-xl border border-[rgba(255,255,255,0.3)] flex items-center gap-3">
         <span className="text-[#A0C7FF] text-12px">时间范围</span>
-        <Button size="small" className="!text-[#01C2FF] !border-[#6788AF]">近1小时</Button>
-        <Button size="small" className="!text-[#01C2FF] !border-[#6788AF]">近3小时</Button>
-        <Button size="small" className="!text-[#01C2FF] !border-[#6788AF]">近24小时</Button>
+        {([1, 3, 24] as const).map(h => (
+          <Button
+            key={h}
+            size="small"
+            onClick={() => setHourRange(h)}
+            className={hourRange === h
+              ? '!text-[#D5F9F9] !border-[#01C2FF] !bg-[#01C2FF] font-600'
+              : '!text-[#D5F9F9] !border-[#6788AF]'}
+          >
+            近{h}小时
+          </Button>
+        ))}
       </div>
       {/* 二维码弹窗 */}
       <Modal open={wxVisible} onCancel={() => setWxVisible(false)} footer={null} title={null} width={380}>
