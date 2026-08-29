@@ -1,75 +1,569 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Button, Table, Modal, Form, Input, Select, Tag, message } from 'antd'
-import { EyeOutlined, WarningOutlined, ImportOutlined, ArrowLeftOutlined } from '@ant-design/icons'
+import { App, Button, Checkbox, DatePicker, Input, Select, Table, Tag, Upload } from 'antd'
+import { ArrowLeftOutlined, DownloadOutlined, UploadOutlined } from '@ant-design/icons'
+import dayjs, { type Dayjs } from 'dayjs'
+import { dataManageApi } from '@/servers/dataManage'
+import { dataSourceApi } from '@/servers/business'
+import { dockList } from '@/servers/mapBox'
 import { useAppStore } from '@/stores'
+import { normalizeDock, type NormalizedDock } from '@/utils/dock'
+import { disabledFutureDate } from '@/utils/helpers'
+import { toRegionQuery } from '@/utils/region'
+import type {
+  AirDataDetailVO,
+  AirDataLevel,
+  DroneTaskDataSource,
+  DroneTaskStatus,
+  DroneTaskVO,
+  MobileMonitorDetailVO,
+} from '@/types/dataManage'
+import type { DataSourceDTO } from '@/types/business'
 
-interface AirQualityRecord { id: string; monitorTime: string; pm25: number; o3: number; temperature: number; pressure: number; humidity: number; windSpeed: number; windDirection: string; rainfall: number; dataLevel: 'minute' | 'hour' }
-interface MobileCarRecord { id: string; monitorTime: string; totalSuspendedParticulates: number; fineParticulates: number; latitude: number; longitude: number; roadDustLoad: number }
-interface CustomCollectRecord { id: string; monitorTime: string; longitude: number; latitude: number; tvocs: number }
-interface NoxCollectRecord { id: string; monitorTime: string; longitude: number; latitude: number; nox: number; no2: number; no: number }
-interface DataRecord { id: string; name: string; deviceId: string; location: string; accessTime: string; status: string; lat?: number; lng?: number; duration?: string; fileSize?: string; resolution?: string; airQualityData?: AirQualityRecord; mobileCarData?: MobileCarRecord; customCollectData?: CustomCollectRecord; noxCollectData?: NoxCollectRecord }
-interface DataSource { id: string; name: string; type: string; typeLabel: string; protocol: string; protocolLabel: string; connectionStatus: string; createdAt: string; description: string; records: DataRecord[] }
+const { RangePicker } = DatePicker
 
-const typeOptions = [
-  { value: 'air_quality_station', label: '空气质量检测站' },
-  { value: 'mobile_monitor_car', label: '走航车' },
-  { value: 'drone_video', label: '无人机视频' },
-  { value: 'drone_sensor', label: '无人机传感器' },
-  { value: 'power_monitor', label: '用电监控' },
-  { value: 'radar_station', label: '雷达站' },
-  { value: 'manual_import', label: '人工采集导入' },
+type TabKey = 'station' | 'mobile' | 'drone'
+
+/** 查询条件变更后防抖触发接口查询的时长（项目 debounce 工具默认 300ms，此处按需用 500ms） */
+const QUERY_DEBOUNCE = 500
+
+/** 默认时间范围：昨天 00:00:00 ~ 今天 00:00:00（默认查一天） */
+function defaultDayRange(): [Dayjs, Dayjs] {
+  return [dayjs().subtract(1, 'day').startOf('day'), dayjs().startOf('day')]
+}
+
+/**
+ * 查询条件变化后防抖自动查询（无需查询/重置按钮）
+ * 用 effect + setTimeout 实现：条件变化即重置定时器，停止输入 500ms 后才真正请求
+ * @param enabled 是否启用（仅当前页签激活时查询）
+ * @param query 查询条件（需为稳定引用，用 useMemo 包装）
+ * @param run 实际执行的查询函数
+ */
+function useDebouncedQuery(enabled: boolean, query: unknown, run: () => void, delay = QUERY_DEBOUNCE) {
+  useEffect(() => {
+    if (!enabled) return
+    const timer = setTimeout(run, delay)
+    return () => clearTimeout(timer)
+    // run 随 state 变化产生新引用，此处只依赖查询条件本身，故忽略
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabled, query, delay])
+}
+
+/** 数据级别：'' 表示全部（后端不传 level） */
+const LEVEL_OPTIONS: { value: AirDataLevel | ''; label: string }[] = [
+  { value: '', label: '全部' },
+  { value: 'minute', label: '分钟级' },
+  { value: 'hourly', label: '小时级汇总' },
+  { value: 'daily', label: '日级汇总' },
 ]
+
+const LEVEL_LABEL: Record<AirDataLevel, string> = {
+  minute: '分钟级',
+  hourly: '小时级汇总',
+  daily: '日级汇总',
+}
+
+const LEVEL_COLOR: Record<AirDataLevel, string> = {
+  minute: 'blue',
+  hourly: 'orange',
+  daily: 'purple',
+}
+
+/**
+ * 无人机任务状态：与 /drone 飞行任务（listFlyJob.jobStatus）同一套字符串枚举，仅四个值
+ * 0-等待中 1-进行中 a-已完成 f-失败
+ * 来源：src/pages/drone/index.tsx 的 statusObj
+ */
+const TASK_STATUS_MAP: Record<DroneTaskStatus, { label: string; color: string }> = {
+  '0': { label: '等待中', color: 'default' },
+  '1': { label: '进行中', color: 'processing' },
+  'a': { label: '已完成', color: 'success' },
+  'f': { label: '失败', color: 'error' },
+}
+
+const TASK_STATUS_OPTIONS: { value: DroneTaskStatus; label: string }[] = [
+  { value: '0', label: '等待中' },
+  { value: '1', label: '进行中' },
+  { value: 'a', label: '已完成' },
+  { value: 'f', label: '失败' },
+]
+
+/** 表格状态渲染：后端可能返回数字或字符串，统一转字符串后再查表 */
+function renderTaskStatus(v: unknown) {
+  const meta = TASK_STATUS_MAP[String(v) as DroneTaskStatus]
+  return <Tag color={meta?.color}>{meta?.label ?? String(v ?? '-')}</Tag>
+}
+
+const DATA_SOURCE_MAP: Record<DroneTaskDataSource, string> = {
+  api: '第三方接口',
+  import: '本地导入',
+}
+
+const DATE_TIME_FMT = 'YYYY-MM-DD HH:mm:ss'
+const DATE_FMT = 'YYYY-MM-DD'
+
+/** 数值格式化：分钟级/小时级部分污染物为 null，统一渲染为 - */
+const fmt = (v: number | null | undefined) => (v == null ? '-' : v)
+
+/** 下载 Blob 文件（模板下载/导出共用） */
+function downloadBlob(blob: Blob, filename: string) {
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = filename
+  document.body.appendChild(anchor)
+  anchor.click()
+  anchor.remove()
+  URL.revokeObjectURL(url)
+}
+
+/** 后端异常时也会返回 JSON 格式的 blob，先识别再提示 */
+async function isJsonErrorBlob(blob: Blob): Promise<boolean> {
+  if (!blob.type.includes('application/json')) return false
+  try {
+    const body = JSON.parse(await blob.text()) as { msg?: string; message?: string }
+    return !(body == null)
+  } catch {
+    return true
+  }
+}
 
 export default function DataManage() {
   const navigate = useNavigate()
+  const { message } = App.useApp()
   const roleKey = useAppStore(state => state.regionContext?.roleKey)
+  const querySelection = useAppStore(state => state.regionContext?.querySelection)
   // 乡镇业务人员无监控大屏权限，不显示返回按钮
   const showBackToMonitor = roleKey !== 'town_business'
-  const [dataSources] = useState<DataSource[]>([])
-  const [selectedType, setSelectedType] = useState('')
-  const [selectedStatus, setSelectedStatus] = useState('')
-  const [searchText, setSearchText] = useState('')
-  const [showDetailModal, setShowDetailModal] = useState(false)
-  const [showAirQualityDetail, setShowAirQualityDetail] = useState(false)
-  const [showImportModal, setShowImportModal] = useState(false)
-  const [showAlertModal, setShowAlertModal] = useState(false)
-  const [selectedSource, setSelectedSource] = useState<DataSource | null>(null)
-  const [selectedRecord, setSelectedRecord] = useState<DataRecord | null>(null)
-  const [selectedAirQuality, setSelectedAirQuality] = useState<AirQualityRecord | null>(null)
-  const [importSource, setImportSource] = useState<DataSource | null>(null)
-  const [dataLevelFilter, setDataLevelFilter] = useState<'all' | 'minute' | 'hour'>('all')
-  const [alertForm] = Form.useForm()
-  const [importForm] = Form.useForm()
 
-  const getStatusIcon = (status: string) => {
-    if (['online', '正常', '在线', '已审核', '已汇总'].includes(status)) return <span className="inline-block w-2 h-2 rounded-full bg-green-500" />
-    if (['offline', '离线'].includes(status)) return <span className="inline-block w-2 h-2 rounded-full bg-red-500" />
-    return <span className="inline-block w-2 h-2 rounded-full bg-blue-500" />
+  const [activeTab, setActiveTab] = useState<TabKey>('station')
+
+  // ============ 微站数据 ============
+  const [stations, setStations] = useState<DataSourceDTO[]>([])
+  /** 不传 deviceId 时后端返回数据权限内的全部设备数据 */
+  const [stationDeviceId, setStationDeviceId] = useState<string>('')
+  const [level, setLevel] = useState<AirDataLevel | ''>('minute')
+  const [stationRange, setStationRange] = useState<[Dayjs, Dayjs] | null>(defaultDayRange)
+  const [stationRows, setStationRows] = useState<AirDataDetailVO[]>([])
+  const [stationTotal, setStationTotal] = useState(0)
+  const [stationPage, setStationPage] = useState(1)
+  const [stationSize, setStationSize] = useState(15)
+  const [stationLoading, setStationLoading] = useState(false)
+  const [stationExporting, setStationExporting] = useState(false)
+
+  // ============ 走航任务 ============
+  const [cars, setCars] = useState<DataSourceDTO[]>([])
+  const [carCode, setCarCode] = useState<string>('')
+  const [carRange, setCarRange] = useState<[Dayjs, Dayjs] | null>(defaultDayRange)
+  const [carDetail, setCarDetail] = useState<MobileMonitorDetailVO | null>(null)
+  const [carLoading, setCarLoading] = useState(false)
+  const [carExporting, setCarExporting] = useState(false)
+
+  // ============ 无人机任务 ============
+  /** 无人机机场下拉（与 /drone 页面同一接口 /dpSys/hbdp/wurenji/dockList，带区域与数据权限） */
+  const [docks, setDocks] = useState<NormalizedDock[]>([])
+  const [docksLoading, setDocksLoading] = useState(false)
+  const [droneDockCode, setDroneDockCode] = useState('')
+  const [droneTaskName, setDroneTaskName] = useState('')
+  const [droneStatus, setDroneStatus] = useState<DroneTaskStatus>()
+  const [includeThirdParty, setIncludeThirdParty] = useState(true)
+  const [droneRange, setDroneRange] = useState<[Dayjs, Dayjs] | null>(defaultDayRange)
+  const [droneRows, setDroneRows] = useState<DroneTaskVO[]>([])
+  const [droneTotal, setDroneTotal] = useState(0)
+  const [dronePage, setDronePage] = useState(1)
+  const [droneSize, setDroneSize] = useState(15)
+  const [droneLoading, setDroneLoading] = useState(false)
+  const [droneExporting, setDroneExporting] = useState(false)
+  const [droneImporting, setDroneImporting] = useState(false)
+
+  // 设备下拉：微站与走航车（大屏数据源列表，带数据权限）
+  useEffect(() => {
+    const loadDevices = async () => {
+      try {
+        const [stationRes, carRes] = await Promise.all([
+          dataSourceApi.screenList('air_quality_station'),
+          dataSourceApi.screenList('mobile_monitor_car'),
+        ])
+        const stationList = stationRes?.data ?? []
+        const carList = carRes?.data ?? []
+        setStations(stationList)
+        setCars(carList)
+        if (carList.length && !carCode) {
+          setCarCode(carList[0].deviceId)
+        }
+      } catch {
+        message.error('数据源列表加载失败')
+      }
+    }
+    loadDevices()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const stationQuery = useMemo(
+    () => ({
+      deviceId: stationDeviceId || undefined,
+      level: level || undefined,
+      startTime: stationRange?.[0]?.format(DATE_TIME_FMT),
+      endTime: stationRange?.[1]?.format(DATE_TIME_FMT),
+    }),
+    [stationDeviceId, level, stationRange],
+  )
+
+  const fetchStations = useCallback(
+    async (page = stationPage, size = stationSize) => {
+      // deviceId 非必传，不传时按数据权限查全部设备
+      setStationLoading(true)
+      try {
+        const page$ = await dataManageApi.airStationDetail({
+          ...stationQuery,
+          pageNum: page,
+          pageSize: size,
+        })
+        setStationRows(page$?.records ?? [])
+        setStationTotal(page$?.total ?? 0)
+        setStationPage(page)
+        setStationSize(size)
+      } catch (err) {
+        setStationRows([])
+        setStationTotal(0)
+        message.error(err instanceof Error ? err.message : '微站数据加载失败')
+      } finally {
+        setStationLoading(false)
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [stationQuery, stationPage, stationSize, stationDeviceId],
+  )
+
+  const droneQuery = useMemo(
+    () => ({
+      dockCode: droneDockCode || undefined,
+      taskName: droneTaskName || undefined,
+      taskStatus: droneStatus,
+      includeThirdParty,
+      startTime: droneRange?.[0]?.format(DATE_TIME_FMT),
+      endTime: droneRange?.[1]?.format(DATE_TIME_FMT),
+    }),
+    [droneDockCode, droneTaskName, droneStatus, includeThirdParty, droneRange],
+  )
+
+  const fetchDrone = useCallback(
+    async (page = dronePage, size = droneSize) => {
+      setDroneLoading(true)
+      try {
+        const page$ = await dataManageApi.droneTaskList({
+          ...droneQuery,
+          pageNum: page,
+          pageSize: size,
+        })
+        setDroneRows(page$?.records ?? [])
+        setDroneTotal(page$?.total ?? 0)
+        setDronePage(page)
+        setDroneSize(size)
+      } catch (err) {
+        setDroneRows([])
+        setDroneTotal(0)
+        message.error(err instanceof Error ? err.message : '无人机任务加载失败')
+      } finally {
+        setDroneLoading(false)
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [droneQuery, dronePage, droneSize],
+  )
+
+  const carQuery = useMemo(
+    () => ({
+      mnCode: carCode,
+      startDate: carRange?.[0]?.format(DATE_FMT),
+      endDate: carRange?.[1]?.format(DATE_FMT),
+    }),
+    [carCode, carRange],
+  )
+
+  const fetchCar = useCallback(async () => {
+    // 走航车接口 mnCode 必传，未选择时静默跳过
+    if (!carCode) return
+    setCarLoading(true)
+    try {
+      const detail = await dataManageApi.mobileMonitorDetail(carQuery)
+      setCarDetail(detail ?? null)
+    } catch (err) {
+      setCarDetail(null)
+      message.error(err instanceof Error ? err.message : '走航任务加载失败')
+    } finally {
+      setCarLoading(false)
+    }
+  }, [carQuery, carCode, message])
+
+  // 查询条件或页签变化时防抖自动查询（无需查询/重置按钮）
+  useDebouncedQuery(activeTab === 'station', stationQuery, () => { void fetchStations(1, stationSize) })
+  useDebouncedQuery(activeTab === 'mobile' && !!carCode, carQuery, () => { void fetchCar() })
+  useDebouncedQuery(activeTab === 'drone', droneQuery, () => { void fetchDrone(1, droneSize) })
+
+  /** 切换页签（数据加载由 useDebouncedQuery 按页签启用状态自动触发） */
+  // 切页签：无人机机场列表在「用户点击切页签」时按需加载一次（不在 effect 内 setState）
+  const loadDocks = useCallback(async () => {
+    if (docks.length) return
+    setDocksLoading(true)
+    try {
+      const res = await dockList(querySelection ? toRegionQuery(querySelection) : undefined)
+      if (res?.resultCode === 0 && Array.isArray(res.data)) {
+        setDocks((res.data as Record<string, unknown>[]).map(item => normalizeDock(item)))
+      }
+    } catch {
+      setDocks([])
+    } finally {
+      setDocksLoading(false)
+    }
+  }, [docks.length, querySelection])
+
+  const handleTabSwitch = (tab: TabKey) => {
+    setActiveTab(tab)
+    if (tab === 'drone' && !docks.length && !docksLoading) void loadDocks()
   }
 
-  const filteredSources = dataSources.filter(s => {
-    const typeMatch = !selectedType || s.type === selectedType
-    const statusMatch = !selectedStatus || s.connectionStatus === selectedStatus
-    const searchMatch = !searchText || s.name.toLowerCase().includes(searchText.toLowerCase()) || s.typeLabel.includes(searchText)
-    return typeMatch && statusMatch && searchMatch
-  })
+  // ---------- 导出（全量，不带分页） ----------
+  const handleExport = async (type: TabKey) => {
+    const setExporting =
+      type === 'station' ? setStationExporting : type === 'mobile' ? setCarExporting : setDroneExporting
+    setExporting(true)
+    try {
+      let blob: unknown
+      let filename: string
+      if (type === 'station') {
+        // deviceId 为空即导出全部设备（数据权限内）
+        blob = await dataManageApi.airStationExport(stationQuery)
+        filename = `微站数据_${stationDeviceId || '全部设备'}_${dayjsText()}.xlsx`
+      } else if (type === 'mobile') {
+        if (!carCode) {
+          message.warning('请选择车辆编码')
+          return
+        }
+        blob = await dataManageApi.mobileMonitorExport(carQuery)
+        filename = `走航任务_${carCode}_${dayjsText()}.xlsx`
+      } else {
+        blob = await dataManageApi.droneTaskExport(droneQuery)
+        filename = `无人机任务_${dayjsText()}.xlsx`
+      }
+      const file = blob as Blob
+      if (await isJsonErrorBlob(file)) {
+        message.error('导出失败')
+        return
+      }
+      downloadBlob(file, filename)
+      message.success('导出成功')
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '导出失败')
+    } finally {
+      setExporting(false)
+    }
+  }
 
-  const filteredRecords = selectedSource?.records.filter(r => {
-    if (selectedSource?.type !== 'air_quality_station') return true
-    if (dataLevelFilter === 'all') return true
-    return r.airQualityData?.dataLevel === dataLevelFilter
-  }) || []
+  const handleDownloadTemplate = async () => {
+    try {
+      const blob = (await dataManageApi.droneTaskImportTemplate()) as unknown as Blob
+      if (await isJsonErrorBlob(blob)) {
+        message.error('模板下载失败')
+        return
+      }
+      downloadBlob(blob, '无人机任务导入模板.xlsx')
+    } catch {
+      message.error('模板下载失败')
+    }
+  }
 
-  const handleViewDetail = (source: DataSource) => { setSelectedSource(source); setDataLevelFilter('all'); setShowDetailModal(true) }
-  const handleManualImport = (source: DataSource) => { setImportSource(source); importForm.resetFields(); setShowImportModal(true) }
-  const handleConvertToAlert = (record: DataRecord) => { setSelectedRecord(record); alertForm.resetFields(); setShowAlertModal(true) }
+  const handleImport = async (file: File) => {
+    setDroneImporting(true)
+    try {
+      const res = await dataManageApi.droneTaskImportData(file)
+      const text = (res as unknown as { message?: string })?.message
+      message.success(text || '导入成功')
+      await fetchDrone(1, droneSize)
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '导入失败')
+    } finally {
+      setDroneImporting(false)
+    }
+  }
 
-  const submitAlert = (values: any) => { message.success(`已将「${selectedRecord?.name}」转为预警，级别：${values.alertLevel}`); setShowAlertModal(false) }
-  const submitImport = () => { message.success('已成功导入数据'); setShowImportModal(false); importForm.resetFields() }
+  // ---------- 表格列 ----------
+  const stationColumns = [
+    { title: '监测时间', dataIndex: 'dataTime', key: 'dataTime', width: 170 },
+    {
+      title: '数据级别',
+      dataIndex: 'dataLevel',
+      key: 'dataLevel',
+      width: 110,
+      align: 'center' as const,
+      render: (v: AirDataLevel) => <Tag color={LEVEL_COLOR[v]}>{LEVEL_LABEL[v] ?? v}</Tag>,
+    },
+    {
+      title: 'PM2.5(μg/m³)',
+      dataIndex: 'pm25',
+      key: 'pm25',
+      width: 110,
+      align: 'center' as const,
+      render: (v: number | null) => fmt(v),
+    },
+    {
+      title: 'PM10(μg/m³)',
+      dataIndex: 'pm10',
+      key: 'pm10',
+      width: 110,
+      align: 'center' as const,
+      render: (v: number | null) => fmt(v),
+    },
+    {
+      title: 'SO₂(μg/m³)',
+      dataIndex: 'so2',
+      key: 'so2',
+      width: 110,
+      align: 'center' as const,
+      render: (v: number | null) => fmt(v),
+    },
+    {
+      title: 'NO₂(μg/m³)',
+      dataIndex: 'no2',
+      key: 'no2',
+      width: 110,
+      align: 'center' as const,
+      render: (v: number | null) => fmt(v),
+    },
+    {
+      title: 'O₃(μg/m³)',
+      dataIndex: 'o3',
+      key: 'o3',
+      width: 110,
+      align: 'center' as const,
+      render: (v: number | null) => fmt(v),
+    },
+    {
+      title: 'CO(mg/m³)',
+      dataIndex: 'co',
+      key: 'co',
+      width: 110,
+      align: 'center' as const,
+      render: (v: number | null) => fmt(v),
+    },
+    {
+      title: 'VOCs(μg/m³)',
+      dataIndex: 'vocs',
+      key: 'vocs',
+      width: 110,
+      align: 'center' as const,
+      render: (v: number | null) => fmt(v),
+    },
+    {
+      title: 'TSP(μg/m³)',
+      dataIndex: 'tsp',
+      key: 'tsp',
+      width: 110,
+      align: 'center' as const,
+      render: (v: number | null) => fmt(v),
+    },
+    {
+      title: '温度(℃)',
+      dataIndex: 'temperature',
+      key: 'temperature',
+      width: 90,
+      align: 'center' as const,
+      render: (v: number | null) => fmt(v),
+    },
+    {
+      title: '湿度(%)',
+      dataIndex: 'humidity',
+      key: 'humidity',
+      width: 90,
+      align: 'center' as const,
+      render: (v: number | null) => fmt(v),
+    },
+    {
+      title: '气压(KPa)',
+      dataIndex: 'pressure',
+      key: 'pressure',
+      width: 100,
+      align: 'center' as const,
+      render: (v: number | null) => fmt(v),
+    },
+    {
+      title: '风速(m/s)',
+      dataIndex: 'windSpeed',
+      key: 'windSpeed',
+      width: 100,
+      align: 'center' as const,
+      render: (v: number | null) => fmt(v),
+    },
+    {
+      title: '风向(°)',
+      dataIndex: 'windDirection',
+      key: 'windDirection',
+      width: 100,
+      align: 'center' as const,
+      render: (v: number | null) => fmt(v),
+    },
+    {
+      title: '样本数',
+      dataIndex: 'sampleCount',
+      key: 'sampleCount',
+      width: 90,
+      align: 'center' as const,
+      render: (v: number | null) => fmt(v),
+    },
+  ]
 
-  const thStyle = { color: '#03FBFD', fontWeight: 500 } as const
-  const tdStyle = { color: 'rgba(255,255,255,0.75)' } as const
+  const droneColumns = [
+    { title: '任务ID', dataIndex: 'taskId', key: 'taskId', width: 160 },
+    { title: '任务名称', dataIndex: 'taskName', key: 'taskName', width: 180 },
+    { title: '机场编码', dataIndex: 'dockCode', key: 'dockCode', width: 140 },
+    {
+      title: '任务状态',
+      dataIndex: 'taskStatus',
+      key: 'taskStatus',
+      width: 100,
+      align: 'center' as const,
+      render: renderTaskStatus,
+    },
+    { title: '执行时间', dataIndex: 'taskTime', key: 'taskTime', width: 170 },
+    { title: '结果数', dataIndex: 'resultCount', key: 'resultCount', width: 90, align: 'center' as const },
+    {
+      title: '数据来源',
+      dataIndex: 'dataSource',
+      key: 'dataSource',
+      width: 110,
+      align: 'center' as const,
+      render: (v: DroneTaskDataSource) => DATA_SOURCE_MAP[v] ?? v,
+    },
+    {
+      title: '失败原因',
+      dataIndex: 'failReason',
+      key: 'failReason',
+      width: 180,
+      render: (v: string) => v || '-',
+    },
+    { title: '创建人', dataIndex: 'createBy', key: 'createBy', width: 110 },
+  ]
+
+  /**
+   * 走航任务表格数据：后端只返回有数据的日期数组，
+   * 车辆编码/车辆名称在查询时已知，需逐行重复展示。
+   */
+  const carColumns = [
+    { title: '车辆编码', dataIndex: 'mnCode', key: 'mnCode', width: 180 },
+    { title: '车辆名称', dataIndex: 'mnName', key: 'mnName', width: 220 },
+    { title: '数据日期', dataIndex: 'date', key: 'date', width: 180 },
+  ]
+
+  const carName = cars.find(c => c.deviceId === carCode)?.shortName
+    || cars.find(c => c.deviceId === carCode)?.deviceName
+    || carDetail?.mnName
+    || '-'
+
+  const carRows = (carDetail?.dataDates ?? []).map(d => ({
+    date: d,
+    mnCode: carDetail?.deviceId ?? carDetail?.mnCode ?? carCode ?? '-',
+    mnName: carName,
+  }))
 
   return (
     <div className="alert-page-container">
@@ -86,316 +580,256 @@ export default function DataManage() {
             </Button>
           )}
         </div>
-
-        <div className="header-right" />
       </div>
 
-      <div className="flex items-center justify-center flex-shrink-0 mb-2">
-        <div className="alert-center-title" style={{ position: 'static', transform: 'none' }}>
+      {/* 标题 + Tabs 同一行，与 alert 页布局一致 */}
+      <div className="alert-title-tabs-row">
+        <div className="alert-center-title">
           <span className="title-diamond">◆</span>
           <span>数据管理</span>
           <span className="title-diamond">◆</span>
         </div>
+        <div className="tech-tabs-bar">
+          <div
+            className={`tech-tab-item ${activeTab === 'station' ? 'active' : ''}`}
+            onClick={() => handleTabSwitch('station')}
+          >
+            微站数据
+          </div>
+          <div
+            className={`tech-tab-item ${activeTab === 'mobile' ? 'active' : ''}`}
+            onClick={() => handleTabSwitch('mobile')}
+          >
+            走航任务
+          </div>
+          <div
+            className={`tech-tab-item ${activeTab === 'drone' ? 'active' : ''}`}
+            onClick={() => handleTabSwitch('drone')}
+          >
+            无人机任务
+          </div>
+        </div>
       </div>
 
-      <div className="flex gap-4 mb-3 flex-shrink-0">
-        <Input placeholder="搜索数据源名称、类型..." value={searchText} onChange={e => setSearchText(e.target.value)} className="max-w-xs model_from_input" />
-        <Select placeholder="选择接入类型" value={selectedType} onChange={setSelectedType} className="w-180px model_from_sel" popupClassName="alert-rule-dropdown" allowClear>
-          <Select.Option value="">全部数据源</Select.Option>
-          {typeOptions.map(opt => <Select.Option key={opt.value} value={opt.value}>{opt.label}</Select.Option>)}
-        </Select>
-        <Select placeholder="选择连接状态" value={selectedStatus} onChange={setSelectedStatus} className="w-140px model_from_sel" popupClassName="alert-rule-dropdown" allowClear>
-          <Select.Option value="">全部状态</Select.Option>
-          <Select.Option value="online">在线</Select.Option>
-          <Select.Option value="offline">离线</Select.Option>
-        </Select>
-      </div>
-
-      <div className="tech-table-wrapper">
-        <Table
-          dataSource={filteredSources}
-          columns={[
-            { title: '数据源ID', dataIndex: 'id', key: 'id', width: 90 },
-            { title: '数据源名称', dataIndex: 'name', key: 'name', width: 180 },
-            { title: '接入类型', dataIndex: 'typeLabel', key: 'typeLabel', width: 120 },
-            { title: '接入协议', dataIndex: 'protocolLabel', key: 'protocolLabel', width: 100, render: (v: string) => v || '-' },
-            { title: '创建时间', dataIndex: 'createdAt', key: 'createdAt', width: 150 },
-            {
-              title: '连接状态', dataIndex: 'connectionStatus', key: 'connectionStatus', width: 90, align: 'center' as const,
-              render: (status: string) => (
-                <span className="flex items-center gap-1 justify-center">
-                  {getStatusIcon(status)}
-                  <span className={status === 'online' ? 'text-green-400' : 'text-red-400'}>{status === 'online' ? '在线' : '离线'}</span>
-                </span>
-              )
-            },
-            { title: '数据量', dataIndex: 'records', key: 'records', width: 80, align: 'center' as const, render: (records: any[]) => <Tag color="blue">{records?.length || 0} 条</Tag> },
-            {
-              title: '操作', key: 'actions', width: 130, align: 'center' as const,
-              render: (_: any, source: DataSource) => (
-                <div className="flex items-center gap-1 justify-center">
-                  <Button type="link" size="small" icon={<EyeOutlined />} className="!text-[#03FBFD] !p-0 hover:!text-white" onClick={() => handleViewDetail(source)}>详情</Button>
-                  {['air_quality_station', 'mobile_monitor_car', 'drone_video'].includes(source.type) || (source.type === 'manual_import') ? (
-                    <Button type="link" size="small" icon={<ImportOutlined />} className="!text-[#52C41A] !p-0 hover:!text-green-300" onClick={() => handleManualImport(source)}>导入</Button>
-                  ) : null}
-                </div>
-              )
-            }
-          ]}
-          rowKey="id"
-          size="small"
-          pagination={{ defaultPageSize: 15, showSizeChanger: true }}
-          scroll={{ x: 940 }}
-        />
-      </div>
-
-      {/* 数据源详情弹窗 */}
-      <Modal
-        title={<span className="alert-rule-modal-title">{selectedSource ? `${selectedSource.name} - 数据列表` : '数据列表'}</span>}
-        open={showDetailModal}
-        onCancel={() => { setShowDetailModal(false); setSelectedSource(null) }}
-        footer={null}
-        width={1000}
-        className="alert-rule-modal"
-      >
-        {selectedSource && (
-          <div className="space-y-4">
-            <div className="p-4 rounded bg-cyan-500/5 border border-cyan-500/15">
-              <div className="grid grid-cols-4 gap-4 text-sm">
-                <div><span className="text-[#03FBFD]">数据源ID：</span><span className="text-white/75">{selectedSource.id}</span></div>
-                <div><span className="text-[#03FBFD]">接入类型：</span><span className="text-white/75">{selectedSource.typeLabel}</span></div>
-                <div><span className="text-[#03FBFD]">接入协议：</span><span className="text-white/75">{selectedSource.protocolLabel || '-'}</span></div>
-                <div><span className="text-[#03FBFD]">连接状态：</span><Tag color={selectedSource.connectionStatus === 'online' ? 'green' : 'red'}>{selectedSource.connectionStatus === 'online' ? '在线' : '离线'}</Tag></div>
-              </div>
-              <div className="mt-2"><span className="text-[#03FBFD]">描述：</span><span className="text-white/75">{selectedSource.description}</span></div>
+      {/* ========== 微站数据 ========== */}
+      {activeTab === 'station' && (
+        <>
+          <div className="flex items-center gap-3 flex-wrap flex-shrink-0 mb-2">
+            <Select
+              className="!w-260px model_from_sel"
+              classNames={{ popup: { root: 'alert-rule-dropdown' } }}
+              placeholder="全部设备"
+              value={stationDeviceId || undefined}
+              onChange={v => setStationDeviceId(v ?? '')}
+              showSearch
+              allowClear
+              optionFilterProp="label"
+              options={[
+                { value: '', label: '全部设备' },
+                ...stations.map(s => ({ value: s.deviceId, label: s.shortName || s.deviceName })),
+              ]}
+            />
+            <div className="flex items-center gap-2">
+              <span className="text-[#03FBFD] text-sm">数据级别：</span>
+              {LEVEL_OPTIONS.map(opt => (
+                <button
+                  key={opt.value || 'all'}
+                  onClick={() => setLevel(opt.value)}
+                  className={`px-3 py-1 rounded text-sm transition-all ${
+                    level === opt.value
+                      ? 'bg-cyan-500/15 border border-cyan-400 text-[#03FBFD] font-semibold'
+                      : 'bg-black/30 border border-cyan-500/30 text-white'
+                  }`}
+                >
+                  {opt.label}
+                </button>
+              ))}
             </div>
-
-            {selectedSource.type === 'air_quality_station' && (
-              <div className="flex items-center gap-4 p-3 rounded-lg bg-[rgba(0,56,129,0.8)] border border-cyan-500/20">
-                <span className="text-[#03FBFD] font-semibold text-sm">数据级别筛选：</span>
-                {(['all', 'minute', 'hour'] as const).map(level => (
-                  <button key={level} onClick={() => setDataLevelFilter(level)} className={`px-4 py-2 rounded-lg text-sm transition-all ${dataLevelFilter === level ? 'bg-cyan-500/15 border border-cyan-400 text-[#03FBFD] font-semibold' : 'bg-black/30 border border-cyan-500/30 text-white'}`}>
-                    {level === 'all' ? '全部' : level === 'minute' ? '分钟级' : '小时级'}
-                  </button>
-                ))}
-              </div>
-            )}
-
-            <div className="tech-table-wrapper overflow-x-auto max-h-400px overflow-y-auto">
-              {selectedSource.type === 'air_quality_station' ? (
-                <table className="w-full" style={{ borderCollapse: 'collapse' }}>
-                  <thead><tr style={{ borderBottom: '1px solid rgba(3,251,253,0.2)' }}>
-                    <th className="p-2 text-left" style={thStyle}>监测时间</th><th className="p-2 text-center" style={thStyle}>级别</th><th className="p-2 text-center" style={thStyle}>PM2.5</th><th className="p-2 text-center" style={thStyle}>O3</th><th className="p-2 text-center" style={thStyle}>温度</th><th className="p-2 text-center" style={thStyle}>湿度</th><th className="p-2 text-center" style={thStyle}>风速</th><th className="p-2 text-center" style={thStyle}>操作</th>
-                  </tr></thead>
-                  <tbody>
-                    {filteredRecords.map(r => r.airQualityData && (
-                      <tr key={r.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
-                        <td className="p-2" style={tdStyle}>{r.airQualityData.monitorTime}</td>
-                        <td className="p-2 text-center"><Tag color={r.airQualityData.dataLevel === 'minute' ? 'blue' : 'orange'}>{r.airQualityData.dataLevel === 'minute' ? '分钟级' : '小时级'}</Tag></td>
-                        <td className="p-2 text-center" style={tdStyle}>{r.airQualityData.pm25}</td>
-                        <td className="p-2 text-center" style={tdStyle}>{r.airQualityData.o3}</td>
-                        <td className="p-2 text-center" style={tdStyle}>{r.airQualityData.temperature}</td>
-                        <td className="p-2 text-center" style={tdStyle}>{r.airQualityData.humidity}</td>
-                        <td className="p-2 text-center" style={tdStyle}>{r.airQualityData.windSpeed}</td>
-                        <td className="p-2 text-center"><Button size="small" onClick={() => { setSelectedAirQuality(r.airQualityData!); setShowAirQualityDetail(true) }}>详情</Button></td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              ) : selectedSource.type === 'mobile_monitor_car' ? (
-                <table className="w-full" style={{ borderCollapse: 'collapse' }}>
-                  <thead><tr style={{ borderBottom: '1px solid rgba(3,251,253,0.2)' }}>
-                    <th className="p-2 text-left" style={thStyle}>监测时间</th><th className="p-2 text-center" style={thStyle}>总悬浮颗粒物</th><th className="p-2 text-center" style={thStyle}>细微颗粒物</th><th className="p-2 text-center" style={thStyle}>纬度</th><th className="p-2 text-center" style={thStyle}>经度</th><th className="p-2 text-center" style={thStyle}>尘负荷</th>
-                  </tr></thead>
-                  <tbody>
-                    {filteredRecords.map(r => r.mobileCarData && (
-                      <tr key={r.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
-                        <td className="p-2" style={tdStyle}>{r.mobileCarData.monitorTime}</td>
-                        <td className="p-2 text-center" style={tdStyle}>{r.mobileCarData.totalSuspendedParticulates}</td>
-                        <td className="p-2 text-center" style={tdStyle}>{r.mobileCarData.fineParticulates}</td>
-                        <td className="p-2 text-center" style={tdStyle}>{r.mobileCarData.latitude}</td>
-                        <td className="p-2 text-center" style={tdStyle}>{r.mobileCarData.longitude}</td>
-                        <td className="p-2 text-center" style={tdStyle}>{r.mobileCarData.roadDustLoad}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              ) : selectedSource.name.includes('MS') ? (
-                <table className="w-full" style={{ borderCollapse: 'collapse' }}>
-                  <thead><tr style={{ borderBottom: '1px solid rgba(3,251,253,0.2)' }}>
-                    <th className="p-2 text-left" style={thStyle}>测量时间</th><th className="p-2 text-center" style={thStyle}>经度</th><th className="p-2 text-center" style={thStyle}>纬度</th><th className="p-2 text-center" style={thStyle}>TVOCs(ppb)</th>
-                  </tr></thead>
-                  <tbody>
-                    {filteredRecords.map(r => r.customCollectData && (
-                      <tr key={r.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
-                        <td className="p-2" style={tdStyle}>{r.customCollectData.monitorTime}</td>
-                        <td className="p-2 text-center" style={tdStyle}>{r.customCollectData.longitude.toFixed(6)}</td>
-                        <td className="p-2 text-center" style={tdStyle}>{r.customCollectData.latitude.toFixed(6)}</td>
-                        <td className="p-2 text-center" style={tdStyle}>{r.customCollectData.tvocs.toFixed(6)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              ) : selectedSource.name.includes('NOX') ? (
-                <table className="w-full" style={{ borderCollapse: 'collapse' }}>
-                  <thead><tr style={{ borderBottom: '1px solid rgba(3,251,253,0.2)' }}>
-                    <th className="p-2 text-left" style={thStyle}>测量时间</th><th className="p-2 text-center" style={thStyle}>NOX</th><th className="p-2 text-center" style={thStyle}>NO2</th><th className="p-2 text-center" style={thStyle}>NO</th><th className="p-2 text-center" style={thStyle}>经度</th><th className="p-2 text-center" style={thStyle}>纬度</th>
-                  </tr></thead>
-                  <tbody>
-                    {filteredRecords.map(r => r.noxCollectData && (
-                      <tr key={r.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
-                        <td className="p-2" style={tdStyle}>{r.noxCollectData.monitorTime}</td>
-                        <td className="p-2 text-center" style={tdStyle}>{r.noxCollectData.nox.toFixed(4)}</td>
-                        <td className="p-2 text-center" style={tdStyle}>{r.noxCollectData.no2.toFixed(4)}</td>
-                        <td className="p-2 text-center" style={tdStyle}>{r.noxCollectData.no.toFixed(4)}</td>
-                        <td className="p-2 text-center" style={tdStyle}>{r.noxCollectData.longitude.toFixed(6)}</td>
-                        <td className="p-2 text-center" style={tdStyle}>{r.noxCollectData.latitude.toFixed(6)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              ) : (
-                <table className="w-full" style={{ borderCollapse: 'collapse' }}>
-                  <thead><tr style={{ borderBottom: '1px solid rgba(3,251,253,0.2)' }}>
-                    <th className="p-2 text-left" style={thStyle}>任务ID</th><th className="p-2 text-left" style={thStyle}>任务名称</th><th className="p-2 text-left" style={thStyle}>执行时间</th><th className="p-2 text-center" style={thStyle}>状态</th><th className="p-2 text-center" style={thStyle}>操作</th>
-                  </tr></thead>
-                  <tbody>
-                    {filteredRecords.map(r => (
-                      <tr key={r.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
-                        <td className="p-2" style={tdStyle}>{r.id}</td>
-                        <td className="p-2" style={tdStyle}>{r.name}</td>
-                        <td className="p-2" style={tdStyle}>{r.accessTime}</td>
-                        <td className="p-2 text-center"><span className="flex items-center gap-2 justify-center">{getStatusIcon(r.status)}<span>{r.status}</span></span></td>
-                        <td className="p-2 text-center">
-                          <Button size="small" onClick={() => setSelectedRecord(r)}>查看</Button>
-                          {selectedSource.type === 'drone_video' && <Button size="small" icon={<WarningOutlined />} className="ml-2" danger onClick={() => handleConvertToAlert(r)}>转预警</Button>}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
+            <RangePicker
+              showTime
+              className="model_from_input"
+              value={stationRange}
+              onChange={v => setStationRange(v as [Dayjs, Dayjs] | null)}
+              placeholder={['开始时间', '结束时间']}
+              disabledDate={disabledFutureDate}
+            />
+            <div className="ml-auto flex items-center gap-3">
+              <Button
+                icon={<DownloadOutlined />}
+                loading={stationExporting}
+                onClick={() => handleExport('station')}
+              >
+                导出
+              </Button>
             </div>
           </div>
-        )}
-      </Modal>
 
-      {/* 空气质量详情 */}
-      <Modal title={<span className="text-[#03FBFD] font-bold">空气质量数据详情</span>} open={showAirQualityDetail} onCancel={() => { setShowAirQualityDetail(false); setSelectedAirQuality(null) }} footer={null} width={500}>
-        {selectedAirQuality && (
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div><span className="text-[#03FBFD] font-medium">监测时间：</span><span className="text-white/75">{selectedAirQuality.monitorTime}</span></div>
-              <div><span className="text-[#03FBFD] font-medium">数据级别：</span><Tag color={selectedAirQuality.dataLevel === 'minute' ? 'blue' : 'orange'}>{selectedAirQuality.dataLevel === 'minute' ? '分钟级' : '小时级'}</Tag></div>
-            </div>
-            <div className="grid grid-cols-3 gap-4 mt-4">
-              <div className="p-3 rounded bg-blue-500/10 border border-blue-500/30"><div className="text-xs text-blue-400 mb-1">PM2.5</div><div className="text-2xl font-bold text-white">{selectedAirQuality.pm25}<span className="text-sm font-normal text-gray-400 ml-1">μg/m³</span></div></div>
-              <div className="p-3 rounded bg-green-500/10 border border-green-500/30"><div className="text-xs text-green-400 mb-1">O3</div><div className="text-2xl font-bold text-white">{selectedAirQuality.o3}<span className="text-sm font-normal text-gray-400 ml-1">μg/m³</span></div></div>
-              <div className="p-3 rounded bg-red-500/10 border border-red-500/30"><div className="text-xs text-red-400 mb-1">温度</div><div className="text-2xl font-bold text-white">{selectedAirQuality.temperature}<span className="text-sm font-normal text-gray-400 ml-1">℃</span></div></div>
-              <div className="p-3 rounded bg-yellow-500/10 border border-yellow-500/30"><div className="text-xs text-yellow-400 mb-1">大气压力</div><div className="text-2xl font-bold text-white">{selectedAirQuality.pressure}<span className="text-sm font-normal text-gray-400 ml-1">kpa</span></div></div>
-              <div className="p-3 rounded bg-cyan-500/10 border border-cyan-500/30"><div className="text-xs text-cyan-400 mb-1">湿度</div><div className="text-2xl font-bold text-white">{selectedAirQuality.humidity}<span className="text-sm font-normal text-gray-400 ml-1">%</span></div></div>
-              <div className="p-3 rounded bg-purple-500/10 border border-purple-500/30"><div className="text-xs text-purple-400 mb-1">风速</div><div className="text-2xl font-bold text-white">{selectedAirQuality.windSpeed}<span className="text-sm font-normal text-gray-400 ml-1">m/s</span></div></div>
-            </div>
-            <div className="mt-4 pt-4 border-t border-white/10 flex justify-between">
-              <span className="text-[#03FBFD]">主导风向：{selectedAirQuality.windDirection}</span>
-              <span className="text-[#03FBFD]">雨量：{selectedAirQuality.rainfall} mm</span>
+          <div className="tech-table-wrapper">
+            <Table
+              dataSource={stationRows}
+              columns={stationColumns}
+              rowKey="id"
+              size="small"
+              loading={stationLoading}
+              scroll={{ x: 'max-content' }}
+              pagination={{
+                current: stationPage,
+                pageSize: stationSize,
+                total: stationTotal,
+                showSizeChanger: true,
+                showTotal: total => `共 ${total} 条`,
+                onChange: (page, size) => fetchStations(page, size),
+              }}
+            />
+          </div>
+        </>
+      )}
+
+      {/* ========== 走航任务 ========== */}
+      {activeTab === 'mobile' && (
+        <>
+          <div className="flex items-center gap-3 flex-wrap flex-shrink-0 mb-2">
+            <Select
+              className="!w-260px model_from_sel"
+              classNames={{ popup: { root: 'alert-rule-dropdown' } }}
+              placeholder="选择车辆编码"
+              value={carCode}
+              onChange={setCarCode}
+              showSearch
+              optionFilterProp="label"
+              options={cars.map(c => ({ value: c.deviceId, label: c.shortName || c.deviceName }))}
+            />
+            <RangePicker
+              className="model_from_input"
+              value={carRange}
+              onChange={v => setCarRange(v as [Dayjs, Dayjs] | null)}
+              placeholder={['开始日期', '结束日期']}
+              disabledDate={disabledFutureDate}
+            />
+            <div className="ml-auto flex items-center gap-3">
+              <Button icon={<DownloadOutlined />} loading={carExporting} onClick={() => handleExport('mobile')}>
+                导出
+              </Button>
             </div>
           </div>
-        )}
-      </Modal>
 
-      {/* 手工导入 */}
-      <Modal title={<span className="alert-rule-modal-title">手工导入数据</span>} open={showImportModal} onCancel={() => { setShowImportModal(false); setImportSource(null) }} footer={null} width={650} className="alert-rule-modal">
-        {importSource && (
-          <Form form={importForm} layout="vertical" onFinish={submitImport} className="alert-rule-form pt-2">
-            <div className="mb-4 p-3 rounded bg-cyan-500/8 border border-cyan-500/15">
-              <div className="text-sm text-white/75"><span className="text-[#03FBFD]">目标数据源：</span>{importSource.name}</div>
-            </div>
-            <Form.Item name="monitorTime" label={<span className="text-[#03FBFD]">监测时间</span>} rules={[{ required: true, message: '请输入监测时间' }]}><Input className="model_from_input" placeholder="格式：2023-12-01 00:00:00" /></Form.Item>
-            {importSource.type === 'air_quality_station' && (
-              <div className="grid grid-cols-2 gap-4">
-                <Form.Item name="pm25" label={<span className="text-[#03FBFD]">PM2.5 (μg/m³)</span>} rules={[{ required: true }]}><Input className="model_from_input" type="number" /></Form.Item>
-                <Form.Item name="o3" label={<span className="text-[#03FBFD]">O3 (μg/m³)</span>} rules={[{ required: true }]}><Input className="model_from_input" type="number" /></Form.Item>
-                <Form.Item name="temperature" label={<span className="text-[#03FBFD]">温度 (℃)</span>} rules={[{ required: true }]}><Input className="model_from_input" type="number" /></Form.Item>
-                <Form.Item name="humidity" label={<span className="text-[#03FBFD]">湿度 (%)</span>} rules={[{ required: true }]}><Input className="model_from_input" type="number" /></Form.Item>
-                <Form.Item name="windSpeed" label={<span className="text-[#03FBFD]">风速 (m/s)</span>} rules={[{ required: true }]}><Input className="model_from_input" type="number" /></Form.Item>
-                <Form.Item name="windDirection" label={<span className="text-[#03FBFD]">主导风向</span>} rules={[{ required: true }]}><Select className="model_from_sel" popupClassName="alert-rule-dropdown" placeholder="请选择"><Select.Option value="北风">北风</Select.Option><Select.Option value="南风">南风</Select.Option><Select.Option value="东风">东风</Select.Option><Select.Option value="西风">西风</Select.Option></Select></Form.Item>
-              </div>
-            )}
-            {importSource.type === 'mobile_monitor_car' && (
-              <div className="grid grid-cols-2 gap-4">
-                <Form.Item name="totalSuspendedParticulates" label={<span className="text-[#03FBFD]">总悬浮颗粒物</span>} rules={[{ required: true }]}><Input className="model_from_input" type="number" /></Form.Item>
-                <Form.Item name="fineParticulates" label={<span className="text-[#03FBFD]">细微颗粒物</span>} rules={[{ required: true }]}><Input className="model_from_input" type="number" /></Form.Item>
-                <Form.Item name="latitude" label={<span className="text-[#03FBFD]">纬度</span>} rules={[{ required: true }]}><Input className="model_from_input" type="number" /></Form.Item>
-                <Form.Item name="longitude" label={<span className="text-[#03FBFD]">经度</span>} rules={[{ required: true }]}><Input className="model_from_input" type="number" /></Form.Item>
-                <Form.Item name="roadDustLoad" label={<span className="text-[#03FBFD]">道路尘负荷</span>} rules={[{ required: true }]}><Input className="model_from_input" type="number" /></Form.Item>
-              </div>
-            )}
-            {importSource.name.includes('MS') && (
-              <div className="grid grid-cols-2 gap-4">
-                <Form.Item name="longitude" label={<span className="text-[#03FBFD]">经度</span>} rules={[{ required: true }]}><Input className="model_from_input" type="number" /></Form.Item>
-                <Form.Item name="latitude" label={<span className="text-[#03FBFD]">纬度</span>} rules={[{ required: true }]}><Input className="model_from_input" type="number" /></Form.Item>
-                <Form.Item name="tvocs" label={<span className="text-[#03FBFD]">TVOCs (ppb)</span>} rules={[{ required: true }]}><Input className="model_from_input" type="number" /></Form.Item>
-              </div>
-            )}
-            {importSource.name.includes('NOX') && (
-              <div className="grid grid-cols-2 gap-4">
-                <Form.Item name="nox" label={<span className="text-[#03FBFD]">NOX (μg/m³)</span>} rules={[{ required: true }]}><Input className="model_from_input" type="number" /></Form.Item>
-                <Form.Item name="no2" label={<span className="text-[#03FBFD]">NO2 (μg/m³)</span>} rules={[{ required: true }]}><Input className="model_from_input" type="number" /></Form.Item>
-                <Form.Item name="no" label={<span className="text-[#03FBFD]">NO (μg/m³)</span>} rules={[{ required: true }]}><Input className="model_from_input" type="number" /></Form.Item>
-                <Form.Item name="longitude" label={<span className="text-[#03FBFD]">经度</span>} rules={[{ required: true }]}><Input className="model_from_input" type="number" /></Form.Item>
-                <Form.Item name="latitude" label={<span className="text-[#03FBFD]">纬度</span>} rules={[{ required: true }]}><Input className="model_from_input" type="number" /></Form.Item>
-              </div>
-            )}
-            <div className="flex justify-end gap-4 mt-4">
-              <Button onClick={() => setShowImportModal(false)}>取消</Button>
-              <Button type="primary" htmlType="submit">确认导入</Button>
-            </div>
-          </Form>
-        )}
-      </Modal>
-
-      {/* 数据记录详情 */}
-      <Modal title={<span className="alert-rule-modal-title">数据详情</span>} open={!!selectedRecord} onCancel={() => setSelectedRecord(null)} footer={null} className="alert-rule-modal">
-        {selectedRecord && (
-          <div className="space-y-3 p-4 rounded text-white/85" style={{ backgroundColor: 'rgba(3,251,253,0.05)', border: '1px solid rgba(3,251,253,0.15)' }}>
-            <div className="text-sm text-white/75"><span className="text-[#03FBFD] font-medium">任务ID：</span>{selectedRecord.id}</div>
-            <div className="text-sm text-white/75"><span className="text-[#03FBFD] font-medium">任务名称：</span>{selectedRecord.name}</div>
-            <div className="text-sm text-white/75"><span className="text-[#03FBFD] font-medium">执行时间：</span>{selectedRecord.accessTime}</div>
-            <div className="text-sm text-white/75"><span className="text-[#03FBFD] font-medium">状态：</span><Tag color={['正常', '在线', '已审核', '已汇总'].includes(selectedRecord.status) ? 'green' : selectedRecord.status === '离线' ? 'red' : 'blue'}>{selectedRecord.status}</Tag></div>
-            {selectedRecord.lat != null && selectedRecord.lng != null && <div className="text-sm text-white/75"><span className="text-[#03FBFD] font-medium">坐标：</span>{selectedRecord.lat.toFixed(6)}, {selectedRecord.lng.toFixed(6)}</div>}
-            {selectedRecord.duration && <div className="text-sm text-white/75"><span className="text-[#03FBFD] font-medium">视频时长：</span>{selectedRecord.duration}</div>}
-            {selectedRecord.fileSize && <div className="text-sm text-white/75"><span className="text-[#03FBFD] font-medium">文件大小：</span>{selectedRecord.fileSize}</div>}
-            {selectedRecord.resolution && <div className="text-sm text-white/75"><span className="text-[#03FBFD] font-medium">分辨率：</span>{selectedRecord.resolution}</div>}
+          <div className="tech-table-wrapper">
+            <Table
+              dataSource={carRows}
+              columns={carColumns}
+              rowKey="date"
+              size="small"
+              loading={carLoading}
+              pagination={false}
+              locale={{ emptyText: carCode ? '该时间范围内暂无数据' : '请选择车辆编码后查询' }}
+            />
           </div>
-        )}
-      </Modal>
+        </>
+      )}
 
-      {/* 转预警 */}
-      <Modal title={<span className="alert-rule-modal-title">转预警</span>} open={showAlertModal} onCancel={() => setShowAlertModal(false)} footer={null} width={600} className="alert-rule-modal">
-        {selectedRecord && (
-          <Form form={alertForm} layout="vertical" onFinish={submitAlert} className="alert-rule-form pt-2">
-            <div className="mb-4 p-3 rounded bg-cyan-500/8 border border-cyan-500/15">
-              <div className="text-sm text-white/75"><span className="text-[#03FBFD]">数据名称：</span>{selectedRecord.name}</div>
-              <div className="text-sm text-white/75"><span className="text-[#03FBFD]">设备ID：</span>{selectedRecord.deviceId}</div>
+      {/* ========== 无人机任务 ========== */}
+      {activeTab === 'drone' && (
+        <>
+          <div className="flex items-center gap-3 flex-wrap flex-shrink-0 mb-2">
+            <Select
+              className="!w-260px model_from_sel"
+              classNames={{ popup: { root: 'alert-rule-dropdown' } }}
+              placeholder="全部机场"
+              value={droneDockCode || undefined}
+              onChange={v => setDroneDockCode(v ?? '')}
+              showSearch
+              allowClear
+              optionFilterProp="label"
+              loading={docksLoading}
+              notFoundContent={docksLoading ? undefined : '当前数据权限内暂无机场'}
+              options={[
+                { value: '', label: '全部机场' },
+                ...docks.map(d => ({
+                  value: d.dockCode,
+                  label: `${d.dockName}（${d.dockCode}）`,
+                })),
+              ]}
+            />
+            <Input
+              className="model_from_input !w-180px"
+              placeholder="任务名称（模糊）"
+              value={droneTaskName}
+              onChange={e => setDroneTaskName(e.target.value)}
+              allowClear
+            />
+            <Select
+              className="!w-130px model_from_sel"
+              classNames={{ popup: { root: 'alert-rule-dropdown' } }}
+              placeholder="任务状态"
+              value={droneStatus}
+              onChange={setDroneStatus}
+              allowClear
+              options={TASK_STATUS_OPTIONS}
+            />
+            <Checkbox
+              checked={includeThirdParty}
+              onChange={e => setIncludeThirdParty(e.target.checked)}
+              className="text-white whitespace-nowrap"
+            >
+              包含第三方数据
+            </Checkbox>
+            <RangePicker
+              showTime
+              className="model_from_input"
+              value={droneRange}
+              onChange={v => setDroneRange(v as [Dayjs, Dayjs] | null)}
+              placeholder={['开始时间', '结束时间']}
+              disabledDate={disabledFutureDate}
+            />
+            <div className="ml-auto flex items-center gap-3">
+              <Button icon={<DownloadOutlined />} loading={droneExporting} onClick={() => handleExport('drone')}>
+                导出
+              </Button>
+              <Button icon={<DownloadOutlined />} onClick={handleDownloadTemplate}>
+                下载模板
+              </Button>
+              <Upload
+                beforeUpload={file => {
+                  handleImport(file)
+                  return false
+                }}
+                showUploadList={false}
+                accept=".xlsx,.xls"
+              >
+                <Button icon={<UploadOutlined />} loading={droneImporting}>
+                  导入
+                </Button>
+              </Upload>
             </div>
-            <Form.Item name="alertLevel" label={<span className="text-[#03FBFD]">预警级别</span>} rules={[{ required: true, message: '请选择预警级别' }]}>
-              <Select className="model_from_sel" popupClassName="alert-rule-dropdown" placeholder="请选择预警级别">
-                <Select.Option value="level1">一级预警（严重）</Select.Option>
-                <Select.Option value="level2">二级预警（较重）</Select.Option>
-                <Select.Option value="level3">三级预警（一般）</Select.Option>
-                <Select.Option value="level4">轻微预警（轻微）</Select.Option>
-              </Select>
-            </Form.Item>
-            <Form.Item name="reason" label={<span className="text-[#03FBFD]">预警原因</span>} rules={[{ required: true, message: '请输入预警原因' }]}><Input.TextArea className="model_from_input" rows={3} placeholder="请输入污染情况描述" /></Form.Item>
-            <Form.Item name="suggestion" label={<span className="text-[#03FBFD]">处置建议</span>}><Input.TextArea className="model_from_input" rows={2} placeholder="请输入处置建议（可选）" /></Form.Item>
-            <div className="flex justify-end gap-4">
-              <Button onClick={() => setShowAlertModal(false)}>取消</Button>
-              <Button type="primary" htmlType="submit">确认转预警</Button>
-            </div>
-          </Form>
-        )}
-      </Modal>
+          </div>
+
+          <div className="tech-table-wrapper">
+            <Table
+              dataSource={droneRows}
+              columns={droneColumns}
+              rowKey="taskId"
+              size="small"
+              loading={droneLoading}
+              scroll={{ x: 1320 }}
+              pagination={{
+                current: dronePage,
+                pageSize: droneSize,
+                total: droneTotal,
+                showSizeChanger: true,
+                showTotal: total => `共 ${total} 条`,
+                onChange: (page, size) => fetchDrone(page, size),
+              }}
+            />
+          </div>
+        </>
+      )}
     </div>
   )
+}
+
+/** 导出文件名时间戳 */
+function dayjsText() {
+  const d = new Date()
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}${pad(d.getHours())}${pad(d.getMinutes())}`
 }

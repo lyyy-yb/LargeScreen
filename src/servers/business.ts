@@ -120,4 +120,10 @@ export const dataSourceApi = {
   /** AQI 详情（当前 AQI + 近 12 小时各污染物小时均值趋势；后端异常时不兜底 mock，页面展示空态） */
   aqiDetail: (id: number) =>
     request.get<unknown>(`${API_PREFIX}/dataSource/${id}/aqiDetail`),
+  /**
+   * 大屏数据源列表（不分页，按当前用户数据权限过滤）
+   * @param dataType 可选，多选用逗号分隔，如 drone_video,drone_sensor
+   */
+  screenList: (dataType?: string) =>
+    request.get<DataSourceDTO[]>(`${API_PREFIX}/dataSource/screenList`, { params: { dataType } }),
 }

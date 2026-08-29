@@ -47,6 +47,10 @@ export default defineConfig(({ mode }) => {
           changeOrigin: true,
           rewrite: (path) => path.replace(new RegExp('^/offMap/'), '/'),
         },
+        '^/data-manage': {
+          target: 'http://218.244.154.247:8089',
+          changeOrigin: true,
+        },
         '^/dpSys': {
           target: 'http://218.244.154.247:8089',
           changeOrigin: true,
