@@ -85,8 +85,8 @@ export type DataDetailExportQuery = Omit<DataDetailQuery, 'pageNum' | 'pageSize'
 
 /** 走航任务查询参数 */
 export interface MobileMonitorQuery {
-  /** 车辆编码（mnCode），必填 */
-  mnCode: string
+  /** 设备编号（deviceId），必填。后端 DTO 实际为 deviceId，非 Swagger 声明的 mnCode */
+  deviceId: string
   /** 开始日期 yyyy-MM-dd */
   startDate?: string
   /** 结束日期 yyyy-MM-dd */

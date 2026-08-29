@@ -274,7 +274,7 @@ export default function DataManage() {
 
   const carQuery = useMemo(
     () => ({
-      mnCode: carCode,
+      deviceId: carCode,
       startDate: carRange?.[0]?.format(DATE_FMT),
       endDate: carRange?.[1]?.format(DATE_FMT),
     }),
@@ -282,7 +282,7 @@ export default function DataManage() {
   )
 
   const fetchCar = useCallback(async () => {
-    // 走航车接口 mnCode 必传，未选择时静默跳过
+    // 走航车接口 deviceId 必传，未选择时静默跳过
     if (!carCode) return
     setCarLoading(true)
     try {

@@ -34,10 +34,9 @@ import radarSpinGif from '@/assets/images/radar-spin.gif'
 import AirStationDetailPopup from './popups/AirStationDetailPopup'
 import OutletDetailPopup from './popups/OutletDetailPopup'
 import type { AirPointDetail, OutletPointDetail } from './popups/shared'
-import DialGraphic from './cards/DialGraphic'
 import AirStationRangeCard from './cards/AirStationRangeCard'
-import AlertStatCard from './cards/AlertStatCard'
-import AlertLatestCarousel from './cards/AlertLatestCarousel'
+import AlertHandlingPanel from './cards/AlertHandlingPanel'
+import StationStatusCard from './cards/StationStatusCard'
 import StationDataModal from './modals/StationDataModal'
 import { usePolling } from './hooks/usePolling'
 import MapLegendGroup from './overlays/MapLegendGroup'
@@ -152,19 +151,11 @@ function getStationTooltip(station: MonitorStation) {
   return station.name
 }
 
-/** 5 个 sub-components（DialGraphic / AirStationRangeCard / AlertStatCard /
- *  AlertLatestCarousel / StationDataModal）已分别抽到 cards/ 与 modals/。
+/** 6 个 sub-components（AirStationRangeCard / AlertHandlingPanel / DialGraphic /
+ *  AlertStatCard / AlertLatestCarousel / StationDataModal / StationStatusCard）已抽到 cards/ 与 modals/。
  */
 
-/** 侧栏卡片通用面板样式（主组件内多个 status-card 共用） */
-const sidePanelStyle = {
-  background: 'linear-gradient(160deg, rgba(7, 36, 78, 0.9), rgba(4, 22, 55, 0.85))',
-  border: '1px solid rgba(0, 180, 255, 0.35)',
-  boxShadow: '0 4px 24px rgba(0, 10, 35, 0.6), inset 0 0 15px rgba(0, 180, 255, 0.1)',
-}
-
-/** 最新预警最多展示条数（被 AlertLatestCarousel 调用前裁剪） */
-const ALERT_LATEST_LIMIT = 10
+/** 侧栏卡片通用面板样式已下沉到 StationStatusCard / AlertHandlingPanel 内部。 */
 
 /** 主组件：监控大屏。包含地图（ZJ3DMap / CityDistrictMap / CountyBoundaryMap）+
  * 站点/预警/排口数据层 + 3 个内嵌弹窗（空气质量站、排口、站点数据）+ 侧栏数据卡片。 */
@@ -495,11 +486,7 @@ export default function Monitor() {
     return sorted.length ? sorted[sorted.length - 1] : undefined
   }, [fixedRange, mobileRange])
 
-  // 最新预警：取前 10 条用于轮播展示
-  const latestAlerts = useMemo(
-    () => (alertDashboard?.latestAlerts ?? []).slice(0, ALERT_LATEST_LIMIT),
-    [alertDashboard],
-  )
+  // 最新预警：AlertHandlingPanel 内部处理裁剪
 
   const selectedRegionName = selection?.countyName || selection?.cityName || selection?.provinceName || '浙江省'
 
@@ -637,41 +624,8 @@ export default function Monitor() {
           onView={() => setStationModal({ open: true, type: 'mobile' })}
         />
 
-        {/* 预警处置：填充剩余高度，点击进入预警中心（边框/背景与右侧卡片同源 sidePanelStyle） */}
-        <section className="status-card flex-1 min-h-0 flex flex-col overflow-hidden" style={sidePanelStyle}>
-          <div className="panel-title-divider flex items-center gap-1.5 mb-2 pb-2">
-            <span className="w-3px h-11px bg-[#ff6868]" />
-            <span className="text-[#7bd7ff] text-12px font-bold">预警处置</span>
-            <button
-              type="button"
-              onClick={() => navigate('/alert')}
-              className="ml-auto shrink-0 text-10px px-2.5 py-0.5 rounded-3px border border-[#2f9bff] text-[#7bd7ff] bg-[#1890ff]/15 cursor-pointer transition-all hover:text-white hover:border-[#00f0ff]"
-            >
-              进入
-            </button>
-          </div>
-
-          {/* 状态统计：2×2 卡片式展示，重背景色块 + 纯白文字 */}
-          <div className="grid grid-cols-2 gap-2 mb-2">
-            <AlertStatCard label="预警" count={alertDashboard?.effectiveCount ?? 0} bg="rgba(239,68,68,0.75)" />
-            <AlertStatCard label="待处置" count={alertDashboard?.pendingCount ?? 0} bg="rgba(255,154,32,0.75)" />
-            <AlertStatCard label="处置中" count={alertDashboard?.processingCount ?? 0} bg="rgba(37,155,255,0.75)" />
-            <AlertStatCard label="已完成" count={alertDashboard?.completedCount ?? 0} bg="rgba(56,193,114,0.75)" />
-          </div>
-
-          {/* 今日派单 / 今日处置 */}
-          <div className="grid grid-cols-2 gap-2 mb-2">
-            <AlertStatCard label="今日派单" count={alertDashboard?.todayDispatchCount ?? 0} bg="rgba(99,102,241,0.75)" />
-            <AlertStatCard label="今日处置" count={alertDashboard?.todayClosedCount ?? 0} bg="rgba(168,85,247,0.75)" />
-          </div>
-
-          <div className="text-[#7bd7ff] text-11px font-bold mb-1.5 shrink-0">最新预警</div>
-          {latestAlerts.length ? (
-            <AlertLatestCarousel items={latestAlerts} onNavigate={() => navigate('/alert')} />
-          ) : (
-            <div className="text-10px text-[#7088a8] text-center py-4">暂无预警数据</div>
-          )}
-        </section>
+        {/* 预警处置：填充剩余高度，点击进入预警中心 */}
+        <AlertHandlingPanel dashboard={alertDashboard} onNavigate={() => navigate('/alert')} />
 
         {stationModal.open && (
           <StationDataModal
@@ -866,144 +820,103 @@ export default function Monitor() {
       {/* 右侧面板：无人机场 & 光量子雷达 (完全对齐原型图) */}
       <aside className="status-panel w-310px shrink-0 flex flex-col overflow-hidden rounded-12px border border-[#00d4ff]/35 bg-[rgba(6,30,70,0.65)] p-3 space-y-3 shadow-[0_0_20px_rgba(0,180,255,0.15)]">
         {/* 无人机场 */}
-        <section className="status-card status-card--drone flex-1 flex flex-col overflow-hidden rounded-10px p-3.5" style={sidePanelStyle}>
-          <div className="status-card__title flex items-center gap-2 mb-2">
-            <span className="w-3px h-15px bg-[#1ad4ef] rounded-xs shadow-[0_0_8px_#1ad4ef]" />
-            <span className="text-white text-14px font-bold">无人机场</span>
-          </div>
-
-          <div className="status-card__overview">
-            <DialGraphic gifSrc={droneSpinGif} alt="无人机" />
-            <div className="status-card__headline">
-              <div className="status-card__value">
-                <strong>{droneStations.length}</strong>
-                <span>架</span>
-              </div>
-              <div className="status-card__availability">
-                <div><i className="is-online" /><span>在线</span><b>{droneOnline}</b></div>
-                <div><i className="is-offline" /><span>离线</span><b className="is-warning">{droneStations.length - droneOnline}</b></div>
-              </div>
-            </div>
-          </div>
-
-          <div className="status-card__statistics">
-            <div className="status-card__section-label">任务统计</div>
-            <div className="status-card__row">
-              <span><i className="is-blue" />待飞任务</span>
-              <b className="is-yellow">{droneTaskStats.pending}</b>
-            </div>
-            <div className="status-card__row">
-              <span><i className="is-blue" />飞行中</span>
-              <b>{droneTaskStats.flying}</b>
-            </div>
-          </div>
-
-          <div className="mt-2 max-h-72px overflow-y-auto space-y-1">
-            {droneStations.slice(0, 5).map(station => (
-              <div key={station.id} className="flex items-center justify-between text-10px text-[#b2d9ff]">
-                <span className="truncate pr-2 cursor-pointer" title={getStationTooltip(station)}>{station.name}</span>
-                <span className="shrink-0 flex items-center gap-1.5">
-                  <span
-                    className="text-10px font-medium px-1.5 py-0.2 rounded-full inline-flex items-center gap-1 border shrink-0"
-                    style={
-                      station.online
-                        ? {
-                            color: '#00ff88',
-                            backgroundColor: 'rgba(0, 255, 136, 0.15)',
-                            borderColor: 'rgba(0, 255, 136, 0.4)',
-                          }
-                        : {
-                            color: '#94a3b8',
-                            backgroundColor: 'rgba(148, 163, 184, 0.15)',
-                            borderColor: 'rgba(148, 163, 184, 0.3)',
-                          }
-                    }
-                  >
-                    <span className={`w-1 h-1 rounded-full ${station.online ? 'bg-[#00ff88] shadow-[0_0_4px_#00ff88]' : 'bg-[#94a3b8]'}`} />
-                    {station.online ? '在线' : '离线'}
-                  </span>
-                  {station.modeLabel && (
-                    <span
-                      className="text-10px font-medium px-1 py-0.2 rounded border shrink-0"
-                      style={{
-                        color: getDockModeColor(station.modeCode),
-                        borderColor: `${getDockModeColor(station.modeCode)}55`,
-                        backgroundColor: `${getDockModeColor(station.modeCode)}20`,
-                      }}
-                    >
-                      {station.modeLabel}
-                    </span>
-                  )}
+        <StationStatusCard
+          modifier="drone"
+          title="无人机场"
+          accentColor="#1ad4ef"
+          gifSrc={droneSpinGif}
+          alt="无人机"
+          unit="架"
+          totalCount={droneStations.length}
+          onlineCount={droneOnline}
+          offlineIconClass="is-offline"
+          sectionLabel="任务统计"
+          statistics={[
+            { iconClass: 'is-blue', label: '待飞任务', value: droneTaskStats.pending, valueClassName: 'is-yellow' },
+            { iconClass: 'is-blue', label: '飞行中', value: droneTaskStats.flying },
+          ]}
+          stations={droneStations.map(station => ({
+            id: station.id,
+            name: station.name,
+            tooltip: getStationTooltip(station),
+          }))}
+          maxStations={5}
+          renderStationStatus={(station) => {
+            const full = droneStations.find(item => item.id === station.id)
+            if (!full) return null
+            return (
+              <span className="shrink-0 flex items-center gap-1.5">
+                <span
+                  className="text-10px font-medium px-1.5 py-0.2 rounded-full inline-flex items-center gap-1 border shrink-0"
+                  style={
+                    full.online
+                      ? {
+                          color: '#00ff88',
+                          backgroundColor: 'rgba(0, 255, 136, 0.15)',
+                          borderColor: 'rgba(0, 255, 136, 0.4)',
+                        }
+                      : {
+                          color: '#94a3b8',
+                          backgroundColor: 'rgba(148, 163, 184, 0.15)',
+                          borderColor: 'rgba(148, 163, 184, 0.3)',
+                        }
+                  }
+                >
+                  <span className={`w-1 h-1 rounded-full ${full.online ? 'bg-[#00ff88] shadow-[0_0_4px_#00ff88]' : 'bg-[#94a3b8]'}`} />
+                  {full.online ? '在线' : '离线'}
                 </span>
-              </div>
-            ))}
-            {!droneStations.length && <div className="text-10px text-[#7088a8]">暂无站点数据</div>}
-          </div>
-
-          <button
-            type="button"
-            onClick={() => navigate('/drone')}
-            className="status-card__button mt-auto text-11px transition-all cursor-pointer"
-          >
-            详情
-          </button>
-        </section>
+                {full.modeLabel && (
+                  <span
+                    className="text-10px font-medium px-1 py-0.2 rounded border shrink-0"
+                    style={{
+                      color: getDockModeColor(full.modeCode),
+                      borderColor: `${getDockModeColor(full.modeCode)}55`,
+                      backgroundColor: `${getDockModeColor(full.modeCode)}20`,
+                    }}
+                  >
+                    {full.modeLabel}
+                  </span>
+                )}
+              </span>
+            )
+          }}
+          onNavigate={() => navigate('/drone')}
+        />
 
         {/* 光量子雷达 */}
-        <section className="status-card status-card--radar flex-1 flex flex-col overflow-hidden rounded-10px p-3.5" style={sidePanelStyle}>
-          <div className="status-card__title flex items-center gap-2 mb-2">
-            <span className="w-3px h-15px bg-[#c17cff] rounded-xs shadow-[0_0_8px_#c17cff]" />
-            <span className="text-white text-14px font-bold">光量子雷达</span>
-          </div>
-
-          <div className="status-card__overview">
-            <DialGraphic gifSrc={radarSpinGif} alt="光量子雷达" />
-            <div className="status-card__headline">
-              <div className="status-card__value">
-                <strong>{radarStations.length}</strong>
-                <span>个</span>
-              </div>
-              <div className="status-card__availability">
-                <div><i className="is-online" /><span>在线</span><b>{radarOnline}</b></div>
-                <div><i className="is-warning-dot" /><span>离线</span><b className="is-warning">{radarStations.length - radarOnline}</b></div>
-              </div>
-            </div>
-          </div>
-
-          <div className="status-card__statistics">
-            <div className="status-card__section-label">告警统计</div>
-            <div className="status-card__row">
-              <span><i className="is-orange" />近1小时</span>
-              <b className="is-yellow">{radarAlarmStats.oneHour}</b>
-            </div>
-            <div className="status-card__row">
-              <span><i className="is-orange" />近3小时</span>
-              <b>{radarAlarmStats.threeHours}</b>
-            </div>
-            <div className="status-card__row">
-              <span><i className="is-orange" />近24小时</span>
-              <b>{radarAlarmStats.day}</b>
-            </div>
-          </div>
-
-          <div className="mt-2 max-h-120px overflow-y-auto space-y-1 pr-1">
-            {radarStations.map(station => (
-              <div key={station.id} className="flex items-center justify-between text-10px text-[#b2d9ff] hover:bg-white/5 px-1 py-0.5 rounded transition-colors">
-                <span className="truncate pr-2 cursor-pointer" title={getStationTooltip(station)}>{station.name}</span>
-                <span className={station.online ? 'text-[#22f0a2] shrink-0' : 'text-[#8ca3bd] shrink-0'}>{station.online ? '在线' : '离线'}</span>
-              </div>
-            ))}
-            {!radarStations.length && <div className="text-10px text-[#7088a8]">暂无站点数据</div>}
-          </div>
-
-          <button
-            type="button"
-            onClick={() => navigate('/radar')}
-            className="status-card__button mt-auto text-11px transition-all cursor-pointer"
-          >
-            详情
-          </button>
-        </section>
+        <StationStatusCard
+          modifier="radar"
+          title="光量子雷达"
+          accentColor="#c17cff"
+          gifSrc={radarSpinGif}
+          alt="光量子雷达"
+          unit="个"
+          totalCount={radarStations.length}
+          onlineCount={radarOnline}
+          offlineIconClass="is-warning-dot"
+          sectionLabel="告警统计"
+          statistics={[
+            { iconClass: 'is-orange', label: '近1小时', value: radarAlarmStats.oneHour, valueClassName: 'is-yellow' },
+            { iconClass: 'is-orange', label: '近3小时', value: radarAlarmStats.threeHours },
+            { iconClass: 'is-orange', label: '近24小时', value: radarAlarmStats.day },
+          ]}
+          stations={radarStations.map(station => ({
+            id: station.id,
+            name: station.name,
+            tooltip: getStationTooltip(station),
+          }))}
+          rowHoverClass="hover:bg-white/5 transition-colors"
+          renderStationStatus={(station) => {
+            const full = radarStations.find(item => item.id === station.id)
+            if (!full) return null
+            return (
+              <span className={full.online ? 'text-[#22f0a2] shrink-0' : 'text-[#8ca3bd] shrink-0'}>
+                {full.online ? '在线' : '离线'}
+              </span>
+            )
+          }}
+          onNavigate={() => navigate('/radar')}
+        />
       </aside>
 
       {/* 空气质量打点详情弹窗（全局最高 z-index 浮层，锚定在图标点击位置） */}

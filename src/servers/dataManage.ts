@@ -22,11 +22,17 @@ const API_PREFIX = '/data-manage'
 /**
  * 拆包：request.get<T> 返回 ServerResult<T>（{ resultCode, message, data }），
  * 本模块后端以 resultCode=0 表示成功，其余按失败抛出交由页面提示。
+ *
+ * 注意：该模块成功响应为 resultCode/message，但异常时按**若依风格**返回 code/msg
+ * （实测：/data-manage/mobile-monitor/detail 缺 deviceId 时返回 500 且体为 {"msg":"无权访问该设备数据","code":500}），
+ * 故错误文案需同时兼容 message 与 msg。
  */
-async function unwrap<T>(promise: Promise<{ resultCode: number; message: string; data: T }>): Promise<T> {
+async function unwrap<T>(
+  promise: Promise<{ resultCode?: number; message?: string; msg?: string; data: T }>,
+): Promise<T> {
   const res = await promise
   if (!res || res.resultCode !== 0) {
-    throw new Error(res?.message || '接口请求失败')
+    throw new Error(res.message || res.msg || '接口请求失败')
   }
   return res.data
 }
