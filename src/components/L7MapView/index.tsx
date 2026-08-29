@@ -56,12 +56,36 @@ export default function L7MapView({
     iconUrl?: string,
   ) => {
     const renderVersion = ++markerRenderVersionRef.current
-    await Promise.all(markerLayersRef.current.map(layer => scene.removeLayer(layer)))
-    markerLayersRef.current = []
-    if (!data.length || sceneRef.current !== scene || renderVersion !== markerRenderVersionRef.current) return
+    if (!data.length) {
+      // 数据清空时移除所有 marker 图层
+      await Promise.all(markerLayersRef.current.map(layer => scene.removeLayer(layer)))
+      markerLayersRef.current = []
+      return
+    }
+    if (sceneRef.current !== scene || renderVersion !== markerRenderVersionRef.current) return
 
-    if (iconUrl) {
-      if (!scene.hasImage('marker-icon')) await scene.addImage('marker-icon', iconUrl)
+    // 增量更新：图标模式（icon）切换才需要重建图层；同 shape 下用 setData 原地刷新
+    const existingLayers = markerLayersRef.current
+    const useIcon = !!iconUrl
+    if (existingLayers.length === 2) {
+      const dataArgs = { parser: { type: 'json', x: 'lng', y: 'lat' } } as const
+      try {
+        existingLayers[0].setData(data, dataArgs)
+        existingLayers[1].setData(data, dataArgs)
+        if (sceneRef.current !== scene || renderVersion !== markerRenderVersionRef.current) return
+        return
+      } catch {
+        // setData 失败（极端情况）→ 退化到全量重建
+      }
+    }
+
+    // 全量重建路径
+    await Promise.all(existingLayers.map(layer => scene.removeLayer(layer)))
+    markerLayersRef.current = []
+    if (sceneRef.current !== scene || renderVersion !== markerRenderVersionRef.current) return
+
+    if (useIcon) {
+      if (!scene.hasImage('marker-icon')) await scene.addImage('marker-icon', iconUrl!)
       if (sceneRef.current !== scene || renderVersion !== markerRenderVersionRef.current) return
       const pointLayer = new PointLayer({ zIndex: 10 })
         .source(data, {

@@ -5,12 +5,11 @@ import type { TableColumnsType } from 'antd'
 import type { UploadProps } from 'antd'
 import { PlusOutlined, ArrowLeftOutlined, UploadOutlined, ExclamationCircleOutlined } from '@ant-design/icons'
 import { wuranyuanPage, wuranyuanAdd, wuranyuanEdit, wuranyuanDelete } from '@/servers/api'
+import { request } from '@/servers/request'
 import { useAppStore } from '@/stores'
 import { toRegionQuery } from '@/utils/region'
 import { cities, districts } from '@/utils/city'
 import RegionSelector from '@/components/RegionSelector'
-import { getLocalInfo } from '@/utils/storage'
-import { TOKEN } from '@/utils/enum'
 
 const { Option } = Select
 
@@ -124,18 +123,29 @@ export default function Pollution() {
   }
 
   // 批量导入（对齐原项目：xlsx 上传到 /hbdp/wuranyuan/load，成功后刷新列表）
+  // 走 axios 拦截器以复用 baseURL / token 注入 / 401 跳转；之前用 antd Upload 自带的
+  // action + headers 直接发 XHR，会绕过拦截器，401 时不跳登录页。
   const uploadProps: UploadProps = {
     name: 'file',
-    action: '/dpSys/hbdp/wuranyuan/load',
     accept: '.xlsx',
-    headers: { Authorization: `Bearer ${getLocalInfo<string>(TOKEN) || ''}` },
     showUploadList: false,
-    onChange(info) {
-      if (info.file.status === 'done') {
-        message.success(`${info.file.name} 批量导入成功`)
+    customRequest: async (options) => {
+      const { file, onSuccess, onError } = options as {
+        file: File | Blob
+        onSuccess: (response: unknown) => void
+        onError: (error: Error) => void
+      }
+      const fd = new FormData()
+      fd.append('file', file)
+      const fileName = (file as File).name ?? '文件'
+      try {
+        const res = await request.post('/dpSys/hbdp/wuranyuan/load', fd)
+        onSuccess(res)
+        message.success(`${fileName} 批量导入成功`)
         void loadList()
-      } else if (info.file.status === 'error') {
-        message.error(`${info.file.name} 批量导入失败`)
+      } catch (err) {
+        onError(err as Error)
+        message.error(`${fileName} 批量导入失败`)
       }
     },
   }

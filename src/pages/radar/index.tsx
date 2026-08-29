@@ -1,6 +1,6 @@
-import { useState, useEffect, useCallback, useRef, type CSSProperties } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef, type CSSProperties } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Button, Select, Modal, Popover, QRCode, Spin, Form, Input, message, Tag } from 'antd'
+import { Button, Select, Modal, Popover, QRCode, Spin, Form, Input, message } from 'antd'
 import { ArrowLeftOutlined, EnvironmentOutlined, ExclamationCircleOutlined, InboxOutlined, SendOutlined, WarningFilled } from '@ant-design/icons'
 import L7MapView from '@/components/L7MapView'
 import FlyListModel from '@/components/MapBox/FlyListModel'
@@ -327,7 +327,6 @@ export default function Radar() {
     const loadData = async () => {
       if (!querySelection) return
       const params = toRegionQuery(querySelection)
-      const isHangzhouScope = !querySelection.cityName || querySelection.cityName === '杭州市'
       let list: NormalizedDock[] = []
       try {
         const dockRes = await dockList(params)
@@ -525,7 +524,7 @@ export default function Radar() {
     message.info(`定位到: ${obj.address}`)
   }
 
-  const showConfirm = (dockName: string, dockCode: string, obj: AlarmItem) => {
+  const showConfirm = (dockName: string, _dockCode: string, obj: AlarmItem) => {
     modal.confirm({
       title: '请确认派遣任务', icon: <ExclamationCircleOutlined className="!text-[#faad14]" />,
       content: `派遣无人机[${dockName}]前往[${obj.address}]？`, okText: '确认', cancelText: '取消',
@@ -681,10 +680,29 @@ export default function Radar() {
     scene.setZoomAndCenter(14, [item.lng, item.lat])
   }
 
-  const markers = [
-    ...tfList.map(i => ({ lng: i.dapLng, lat: i.dapLat, name: i.address, color: '#FF3936', size: 11, times: i.times, alarmType: i.type })),
-    ...cgList.map(i => ({ lng: i.dapLng, lat: i.dapLat, name: i.address, color: '#FFB024', size: 10, times: i.times, alarmType: i.type })),
-  ]
+  const markers = useMemo(
+    () => [
+      ...tfList.map((i) => ({
+        lng: i.dapLng,
+        lat: i.dapLat,
+        name: i.address,
+        color: '#FF3936',
+        size: 11,
+        times: i.times,
+        alarmType: i.type,
+      })),
+      ...cgList.map((i) => ({
+        lng: i.dapLng,
+        lat: i.dapLat,
+        name: i.address,
+        color: '#FFB024',
+        size: 10,
+        times: i.times,
+        alarmType: i.type,
+      })),
+    ],
+    [tfList, cgList],
+  )
   const mapCounty = districts.find(item => String(item.adcode) === mapSelection?.countyCode)
   const mapCity = cities.find(item => item.adcode === mapSelection?.cityCode)
   const mapCenter: [number, number] = mapCounty

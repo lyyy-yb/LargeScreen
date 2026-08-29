@@ -61,11 +61,11 @@ export default function Drone() {
   const navigate = useNavigate()
   const [docks, setDocks] = useState<NormalizedDock[]>([])
   const [dockCode, setDockCode] = useState<string | null>(null)
-  const [sensorData, setSensorData] = useState<SensorData | null>(null)
+  // sensorData 仅作为展示用读数，setter 未在写路径上触发（依赖后端 SSE 后续接入）
+  const [sensorData] = useState<SensorData | null>(null)
   const regionContext = useAppStore(state => state.regionContext)
   const querySelection = regionContext?.querySelection
   const mapSelection = regionContext?.mapSelection
-  const [refreshStatus, setRefreshStatus] = useState<string | null>(null)
 
   // 飞行任务 / 待执飞任务
   const [jobs, setJobs] = useState<TaskItem[]>([])
@@ -77,9 +77,6 @@ export default function Drone() {
   const [curJobID, setCurJobID] = useState('')
   const [jobResults, setJobResults] = useState<FlyResultItem[]>([])
   const [resultsLoading, setResultsLoading] = useState(false)
-
-  // 在线视频播放弹窗
-  const [videoModalUrl, setVideoModalUrl] = useState<string | null>(null)
 
   // 搜索关键字
   const [jobSearchText, setJobSearchText] = useState('')
@@ -209,13 +206,6 @@ export default function Drone() {
     )
   }, [plans, planSearchText])
 
-  const handleRefresh = (code: string) => {
-    setRefreshStatus(code)
-    setTimeout(() => {
-      setDocks(prev => prev.map(i => i.dockCode === code ? normalizeDock({ ...i, status: Math.random() > 0.5 }) : i))
-      setRefreshStatus(null)
-    }, 1000)
-  }
   const flyTo = (item: NormalizedDock) => {
     if (dockCode !== item.dockCode) {
       setJobs([])

@@ -6,7 +6,6 @@ import { dataSourceApi } from '@/servers/business'
 import { useAppStore, useAuthStore } from '@/stores'
 import { addOption, buildDeptRegionOptions, nameEquals } from '@/utils/deptRegion'
 import type { DataSourceDTO } from '@/types/business'
-import type { DeptInfo } from '@/types/auth'
 
 const { Option } = Select
 
@@ -366,9 +365,9 @@ export default function DataSource() {
     },
     { title: '创建时间', dataIndex: 'createTime', key: 'createTime', width: 150 },
     {
-      title: '操作', key: 'actions', width: 160, align: 'center' as const,
+      title: '操作', key: 'actions', width: 140, align: 'center' as const, fixed: 'right' as const,
       render: (_: unknown, record: DataSourceDTO) => (
-        <div className="flex items-center gap-1 justify-center">
+        <div className="flex items-center gap-1 justify-center whitespace-nowrap">
           <Button type="link" size="small" icon={<EyeOutlined />} className="!text-[#03FBFD] !p-0 hover:!text-white" onClick={() => showDetailModal(record)}>详情</Button>
           <Button type="link" size="small" icon={<EditOutlined />} className="!text-[#03FBFD] !p-0 hover:!text-white" onClick={() => showEditModal(record)}>编辑</Button>
           <Button type="link" size="small" danger icon={<DeleteOutlined />} className="!p-0" onClick={() => handleDelete(record.id)}>删除</Button>

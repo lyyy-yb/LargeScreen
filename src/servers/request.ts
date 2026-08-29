@@ -35,7 +35,14 @@ interface CreateRequestConfig {
 class AxiosRequest {
   instance: AxiosInstance
   interceptorsObj?: RequestInterceptors<AxiosResponse>
-  abortControllerMap: Map<string, AbortController>
+  /**
+   * URL → 该 URL 当前在飞请求的 controller 集合。
+   * 用 Set 而非单值：避免并发同 URL 请求的 controller 互相覆盖。
+   * 修复前 P0 bug：第二个同 URL 请求的 `set(url, controller)` 会把第一个挤掉，
+   * 第一个响应回来时 `delete(url)` 又会误删第二个；`cancelRequest(url)` 也无法
+   * 可靠取消所有在飞请求。
+   */
+  abortControllerMap: Map<string, Set<AbortController>>
 
   constructor(config: CreateRequestConfig) {
     this.instance = axios.create(config)
@@ -46,7 +53,15 @@ class AxiosRequest {
       (res: InternalAxiosRequestConfig) => {
         const controller = new AbortController()
         res.signal = controller.signal
-        if (res.url) this.abortControllerMap.set(res.url, controller)
+        if (res.url) {
+          const set =
+            this.abortControllerMap.get(res.url) ?? new Set<AbortController>()
+          set.add(controller)
+          this.abortControllerMap.set(res.url, set)
+          // 把 controller 挂在 config 上，response 拦截器按引用移除，避免误删同 URL 其他请求
+          ;(res as InternalAxiosRequestConfig & { __abortController?: AbortController }).__abortController =
+            controller
+        }
         return res
       },
       (err: unknown) => Promise.reject(err)
@@ -65,7 +80,10 @@ class AxiosRequest {
     this.instance.interceptors.response.use(
       (res: AxiosResponse) => {
         const url = res.config.url || ''
-        this.abortControllerMap.delete(url)
+        const controller = (res.config as InternalAxiosRequestConfig & {
+          __abortController?: AbortController
+        }).__abortController
+        this.removeController(url, controller)
         if (res?.status === 401) {
           clearLocalInfo()
           window.location.href = '/login'
@@ -75,7 +93,10 @@ class AxiosRequest {
       (err: unknown) => {
         if (axios.isAxiosError(err)) {
           const url = err.config?.url || ''
-          this.abortControllerMap.delete(url)
+          const controller = err.config as
+            | (InternalAxiosRequestConfig & { __abortController?: AbortController })
+            | undefined
+          this.removeController(url, controller?.__abortController)
           if (err.response?.status === 401) {
             clearLocalInfo()
             window.location.href = '/login'
@@ -86,9 +107,17 @@ class AxiosRequest {
     )
   }
 
+  private removeController(url: string, controller?: AbortController) {
+    if (!url || !controller) return
+    const set = this.abortControllerMap.get(url)
+    if (!set) return
+    set.delete(controller)
+    if (set.size === 0) this.abortControllerMap.delete(url)
+  }
+
   cancelAllRequest() {
-    for (const [, controller] of this.abortControllerMap) {
-      controller.abort()
+    for (const [, set] of this.abortControllerMap) {
+      for (const controller of set) controller.abort()
     }
     this.abortControllerMap.clear()
   }
@@ -96,7 +125,9 @@ class AxiosRequest {
   cancelRequest(url: string | string[]) {
     const urlList = Array.isArray(url) ? url : [url]
     for (const _url of urlList) {
-      this.abortControllerMap.get(_url)?.abort()
+      const set = this.abortControllerMap.get(_url)
+      if (!set) continue
+      for (const controller of set) controller.abort()
       this.abortControllerMap.delete(_url)
     }
   }
