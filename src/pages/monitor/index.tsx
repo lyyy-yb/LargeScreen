@@ -1,7 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Select, Spin, Switch } from 'antd'
-import { CloseOutlined, SearchOutlined } from '@ant-design/icons'
 import CityDistrictMap from '@/components/CityDistrictMap'
 import CountyBoundaryMap from '@/components/CountyBoundaryMap'
 import ZJ3DMap from '@/components/ZJ3DMap'
@@ -41,6 +39,12 @@ import AirStationRangeCard from './cards/AirStationRangeCard'
 import AlertStatCard from './cards/AlertStatCard'
 import AlertLatestCarousel from './cards/AlertLatestCarousel'
 import StationDataModal from './modals/StationDataModal'
+import { usePolling } from './hooks/usePolling'
+import MapLegendGroup from './overlays/MapLegendGroup'
+import RegionControls from './overlays/RegionControls'
+import MapPointDisplayBar from './overlays/MapPointDisplayBar'
+import SourceSummary, { DistributionSummary } from './overlays/MonitorSummaryOverlays'
+import GlobalMapSearch from './overlays/GlobalMapSearch'
 import './index.less'
 
 interface MonitorStation {
@@ -332,17 +336,11 @@ export default function Monitor() {
   }, [])
 
   // 预警处置：dashboard 接口（统计 + 最新预警），5 分钟静默轮询
-  useEffect(() => {
-    let cancelled = false
-    const load = () => {
-      alertEventApi.dashboard()
-        .then(res => { if (!cancelled) setAlertDashboard(res.data ?? null) })
-        .catch(() => { if (!cancelled) setAlertDashboard(null) })
-    }
-    load()
-    const timer = window.setInterval(load, 5 * 60 * 1000)
-    return () => { cancelled = true; window.clearInterval(timer) }
-  }, [])
+  usePolling(() => {
+    alertEventApi.dashboard()
+      .then(res => setAlertDashboard(res.data ?? null))
+      .catch(() => setAlertDashboard(null))
+  }, 5 * 60 * 1000)
 
   // 地图打点（数据源列表 needAqi=1）：仅打空气质量站微站（AQI 六级图标）；
   // 雷达/无人机场由 leida/list、wurenji/dockList 独立接口打点，不在此处增量补充
@@ -395,49 +393,42 @@ export default function Monitor() {
     return () => { cancelled = true }
   }, [allDepts, selection])
 
-  // 预警点位打点（alertEvent/list）：按区域 deptId 过滤，同经纬度聚合计数；1 分钟静默轮询（与 dashboard 同节奏）
-  useEffect(() => {
-    const cityDeptId = findCityDeptId(allDepts, selection?.cityName)
-    const districtDeptId = selection?.countyName
-      ? findDistrictDeptId(allDepts, selection.countyName, selection.cityName)
-      : undefined
-    let cancelled = false
-    const load = () => {
-      const params: AlertEventQuery = { pageNum: 1, pageSize: 999 }
-      if (districtDeptId != null) params.districtId = Number(districtDeptId)
-      else if (cityDeptId != null) params.cityId = Number(cityDeptId)
-      alertEventApi.list(params)
-        .then(res => {
-          if (cancelled) return
-          const records = res.data?.records ?? []
-          // 同经纬度多条预警聚合为一个点，图标上方显示个数
-          const aggregated = new Map<string, AlertMapPoint>()
-          records.forEach(item => {
-            if (typeof item.lng !== 'number' || typeof item.lat !== 'number'
-              || !Number.isFinite(item.lng) || !Number.isFinite(item.lat)) return
-            const key = `${item.lng.toFixed(6)}-${item.lat.toFixed(6)}`
-            const existing = aggregated.get(key)
-            if (existing) {
-              existing.count = (existing.count ?? 1) + 1
-              return
-            }
-            aggregated.set(key, {
-              id: item.id,
-              name: item.deviceName || item.location || item.ruleName,
-              level: resolveAlertLevel(item.alertLevel),
-              lng: item.lng,
-              lat: item.lat,
-              count: 1,
-            })
+  // 预警点位打点（alertEvent/list）：按区域 deptId 过滤，同经纬度聚合计数；5 分钟静默轮询（与 dashboard 同节奏）
+  const cityDeptId = findCityDeptId(allDepts, selection?.cityName)
+  const districtDeptId = selection?.countyName
+    ? findDistrictDeptId(allDepts, selection.countyName, selection.cityName)
+    : undefined
+  usePolling(() => {
+    const params: AlertEventQuery = { pageNum: 1, pageSize: 999 }
+    if (districtDeptId != null) params.districtId = Number(districtDeptId)
+    else if (cityDeptId != null) params.cityId = Number(cityDeptId)
+    alertEventApi.list(params)
+      .then(res => {
+        const records = res.data?.records ?? []
+        // 同经纬度多条预警聚合为一个点，图标上方显示个数
+        const aggregated = new Map<string, AlertMapPoint>()
+        records.forEach(item => {
+          if (typeof item.lng !== 'number' || typeof item.lat !== 'number'
+            || !Number.isFinite(item.lng) || !Number.isFinite(item.lat)) return
+          const key = `${item.lng.toFixed(6)}-${item.lat.toFixed(6)}`
+          const existing = aggregated.get(key)
+          if (existing) {
+            existing.count = (existing.count ?? 1) + 1
+            return
+          }
+          aggregated.set(key, {
+            id: item.id,
+            name: item.deviceName || item.location || item.ruleName,
+            level: resolveAlertLevel(item.alertLevel),
+            lng: item.lng,
+            lat: item.lat,
+            count: 1,
           })
-          setAlertPoints([...aggregated.values()])
         })
-        .catch(() => { if (!cancelled) setAlertPoints([]) })
-    }
-    load()
-    const timer = window.setInterval(load, 5 * 60 * 1000)
-    return () => { cancelled = true; window.clearInterval(timer) }
-  }, [allDepts, selection])
+        setAlertPoints([...aggregated.values()])
+      })
+      .catch(() => setAlertPoints([]))
+  }, 5 * 60 * 1000, [allDepts, selection])
 
   // 企业排口打点（hbdp/emissionOutlet/list）：全量加载，不按区域过滤；zoom>=13 才显示图标、>=15 才显示两行文字
   useEffect(() => {
@@ -757,190 +748,101 @@ export default function Monitor() {
         )}
 
         {/* 左上图例组：空气质量检测站 + 无人机场 */}
-        <div className="map-legend-deck map-legend-deck--left absolute top-3 left-3 z-20 flex items-start gap-3 text-11px">
-          {/* 空气质量检测站 */}
-          <div className="map-legend-card map-legend-card--air">
-            <div className="text-[#7bd7ff] font-bold mb-1.5 flex items-center gap-1.5">
-              <span className="w-3px h-11px bg-[#00f0ff]" />
-              <span>空气质量检测站</span>
-            </div>
-            <div className="flex flex-col gap-1 text-[#d2ecff] text-10px">
-              <div className="flex items-center gap-1"><img src="/marker/aq-good.png" className="w-14px h-14px" alt="" /><span>优(1~50)</span></div>
-              <div className="flex items-center gap-1"><img src="/marker/aq-moderate.png" className="w-14px h-14px" alt="" /><span>良(51~100)</span></div>
-              <div className="flex items-center gap-1"><img src="/marker/aq-light.png" className="w-14px h-14px" alt="" /><span>轻度污染(101~150)</span></div>
-              <div className="flex items-center gap-1"><img src="/marker/aq-medium.png" className="w-14px h-14px" alt="" /><span>中度污染(151~200)</span></div>
-              <div className="flex items-center gap-1"><img src="/marker/aq-heavy.png" className="w-14px h-14px" alt="" /><span>重度污染(201~300)</span></div>
-              <div className="flex items-center gap-1"><img src="/marker/aq-severe.png" className="w-14px h-14px" alt="" /><span>严重污染(&gt;300)</span></div>
-              <div className="mt-1 pt-1 border-t border-[#2f7fd6]/30 flex items-center gap-1"><img src="/marker/aq-good.png" className="w-14px h-14px" alt="" /><span>移动站</span></div>
-              <div className="flex items-center gap-1"><img src="/marker/aq-fixed-good.png" className="w-14px h-14px" alt="" /><span>固定站</span></div>
-            </div>
-          </div>
-
-          {/* 无人机场 */}
-          <div className="map-legend-card map-legend-card--drone">
-            <div className="text-[#7bd7ff] font-bold mb-1.5 flex items-center gap-1.5">
-              <span className="w-3px h-11px bg-[#1ad4ef]" />
-              <span>无人机场</span>
-            </div>
-            <div className="flex flex-col gap-1 text-[#d2ecff] text-10px">
-              <div className="flex items-center gap-1"><img src="/marker/drone-on.png" className="w-14px h-14px" alt="" /><span>在线</span></div>
-              <div className="flex items-center gap-1"><img src="/marker/drone-off.png" className="w-14px h-14px" alt="" /><span>离线</span></div>
-              <div className="flex items-center gap-1"><span className="w-10px h-2px bg-[#00d4ff]" /><span>飞行路线</span></div>
-              <div className="flex items-center gap-1"><img src="/marker/drone-fly.png" className="w-14px h-14px" alt="" /><span>飞行中无人机</span></div>
-            </div>
-          </div>
-        </div>
+        <MapLegendGroup
+          position="left"
+          cards={[
+            {
+              title: '空气质量检测站',
+              accentColor: '#00f0ff',
+              modifier: 'air',
+              items: [
+                { icon: '/marker/aq-good.png', label: '优(1~50)' },
+                { icon: '/marker/aq-moderate.png', label: '良(51~100)' },
+                { icon: '/marker/aq-light.png', label: '轻度污染(101~150)' },
+                { icon: '/marker/aq-medium.png', label: '中度污染(151~200)' },
+                { icon: '/marker/aq-heavy.png', label: '重度污染(201~300)' },
+                { icon: '/marker/aq-severe.png', label: '严重污染(>300)' },
+                { icon: '/marker/aq-good.png', label: '移动站' },
+                { icon: '/marker/aq-fixed-good.png', label: '固定站' },
+              ],
+            },
+            {
+              title: '无人机场',
+              accentColor: '#1ad4ef',
+              modifier: 'drone',
+              items: [
+                { icon: '/marker/drone-on.png', label: '在线' },
+                { icon: '/marker/drone-off.png', label: '离线' },
+                { placeholderClassName: 'w-10px h-2px bg-[#00d4ff]', label: '飞行路线' },
+                { icon: '/marker/drone-fly.png', label: '飞行中无人机' },
+              ],
+            },
+          ]}
+        />
 
         {/* 底部全局搜索：结果仅展示名称，点击后定位地图并短暂高亮 */}
-        <div className="global-map-search absolute bottom-94px left-1/2 -translate-x-1/2 z-30 w-460px">
-          {searchOpen && (
-            <div className="global-map-search__results">
-              {searchResults.length ? searchResults.map((item, index) => {
-                const lng = Number(item.longitude)
-                const lat = Number(item.latitude)
-                return (
-                  <button
-                    type="button"
-                    key={`${item.type ?? 'item'}-${item.sourceId ?? index}-${lng}-${lat}`}
-                    className="global-map-search__option"
-                    onMouseDown={event => event.preventDefault()}
-                    onClick={() => handleSearchLocate(item)}
-                  >
-                    <span className="global-map-search__name">{item.name?.trim() || '未命名地址'}</span>
-                  </button>
-                )
-              }) : (
-                <div className="global-map-search__empty">未找到匹配位置</div>
-              )}
-            </div>
-          )}
-          <div className="global-map-search__input-wrap">
-            <SearchOutlined className="global-map-search__icon" />
-            <input
-              value={searchKeyword}
-              className="global-map-search__input"
-              placeholder="请输入要搜索的名称"
-              aria-label="全局地图搜索"
-              onChange={event => handleSearchChange(event.target.value)}
-              onFocus={() => { if (searchKeyword.trim() && !searchLoading) setSearchOpen(true) }}
-              onKeyDown={event => {
-                if (event.key === 'Enter') handleSearchSubmit()
-                if (event.key === 'Escape') setSearchOpen(false)
-              }}
-            />
-            {searchLoading ? (
-              <Spin size="small" />
-            ) : searchKeyword ? (
-              <button type="button" className="global-map-search__clear" aria-label="清空搜索" onClick={handleSearchClear}>
-                <CloseOutlined />
-              </button>
-            ) : null}
-          </div>
-        </div>
+        <GlobalMapSearch
+          keyword={searchKeyword}
+          results={searchResults}
+          loading={searchLoading}
+          open={searchOpen}
+          onChange={handleSearchChange}
+          onSubmit={handleSearchSubmit}
+          onClear={handleSearchClear}
+          onSelect={handleSearchLocate}
+          onFocus={() => { if (searchKeyword.trim() && !searchLoading) setSearchOpen(true) }}
+          onClose={() => setSearchOpen(false)}
+        />
 
         {/* 底部水平居中：打点显示控件条（预警↔空气互斥按钮组 + 无人机/雷达 Switch），位于底部导航条正上方不被遮挡 */}
-        <div className="point-display-bar absolute bottom-52px left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 rounded-8px bg-[rgba(4,22,52,0.85)] px-2 py-1.5 border border-[#00d4ff]/30 shadow-[0_4px_12px_rgba(0,0,0,0.3)]">
-          {/* 预警点位 ↔ 空气质量监测站：互斥单选（页面 state 保证同刻只显一类） */}
-          <button
-            type="button"
-            onClick={() => setPointMode('alert')}
-            className={`text-11px px-3 py-1 rounded-4px border cursor-pointer transition-all bg-transparent ${pointMode === 'alert'
-              ? 'border-[#00f0ff] text-white bg-[#1890ff]/35 shadow-[0_0_8px_rgba(0,240,255,0.35)]'
-              : 'border-[#2f9bff]/60 text-[#7bd7ff] hover:text-white hover:border-[#00f0ff]'}`}
-          >
-            预警点位
-          </button>
-          <button
-            type="button"
-            onClick={() => setPointMode('air')}
-            className={`text-11px px-3 py-1 rounded-4px border cursor-pointer transition-all bg-transparent ${pointMode === 'air'
-              ? 'border-[#00f0ff] text-white bg-[#1890ff]/35 shadow-[0_0_8px_rgba(0,240,255,0.35)]'
-              : 'border-[#2f9bff]/60 text-[#7bd7ff] hover:text-white hover:border-[#00f0ff]'}`}
-          >
-            空气质量监测站
-          </button>
-          <span className="w-1px h-16px bg-[#2f9bff]/40 mx-1" />
-          {/* 无人机 / 雷达 / 排口：独立开关（图层 show/hide，不重建） */}
-          <div className="flex items-center gap-1.5 text-[#d2ecff] text-11px">
-            <span>无人机</span>
-            <Switch size="small" checked={showDronePoints} onChange={setShowDronePoints} />
-          </div>
-          <div className="flex items-center gap-1.5 text-[#d2ecff] text-11px">
-            <span>雷达</span>
-            <Switch size="small" checked={showRadarPoints} onChange={setShowRadarPoints} />
-          </div>
-          <div className="flex items-center gap-1.5 text-[#d2ecff] text-11px">
-            <span>排口</span>
-            <Switch size="small" checked={showEmissionOutletPoints} onChange={setShowEmissionOutletPoints} />
-          </div>
-        </div>
+        <MapPointDisplayBar
+          pointMode={pointMode}
+          onPointModeChange={setPointMode}
+          showDronePoints={showDronePoints}
+          onShowDroneChange={setShowDronePoints}
+          showRadarPoints={showRadarPoints}
+          onShowRadarChange={setShowRadarPoints}
+          showEmissionOutletPoints={showEmissionOutletPoints}
+          onShowEmissionOutletChange={setShowEmissionOutletPoints}
+        />
 
         {/* 右上图例组：光量子雷达站 + 预警点位（位于省/市控制组下方） */}
-        <div className="map-legend-deck map-legend-deck--right absolute top-44px right-3 z-20 flex items-start gap-3 text-11px">
-          {/* 光量子雷达站 */}
-          <div className="map-legend-card map-legend-card--radar">
-            <div className="text-[#7bd7ff] font-bold mb-1.5 flex items-center gap-1.5">
-              <span className="w-3px h-11px bg-[#c17cff]" />
-              <span>光量子雷达站</span>
-            </div>
-            <div className="flex flex-col gap-1 text-[#d2ecff] text-10px">
-              <div className="flex items-center gap-1"><img src="/marker/radar-on.png" className="w-14px h-14px" alt="" /><span>在线</span></div>
-              <div className="flex items-center gap-1"><img src="/marker/radar-off.png" className="w-14px h-14px" alt="" /><span>离线</span></div>
-            </div>
-          </div>
-
-          {/* 预警点位 */}
-          <div className="map-legend-card map-legend-card--warning">
-            <div className="text-[#7bd7ff] font-bold mb-1.5 flex items-center gap-1.5">
-              <span className="w-3px h-11px bg-[#ff6868]" />
-              <span>预警点位</span>
-            </div>
-            <div className="flex flex-col gap-1 text-[#d2ecff] text-10px">
-              <div className="flex items-center gap-1"><img src="/marker/warn-l1.png" className="w-14px h-14px" alt="" /><span>一级预警</span></div>
-              <div className="flex items-center gap-1"><img src="/marker/warn-l2.png" className="w-14px h-14px" alt="" /><span>二级预警</span></div>
-              <div className="flex items-center gap-1"><img src="/marker/warn-l3.png" className="w-14px h-14px" alt="" /><span>三级预警</span></div>
-            </div>
-          </div>
-        </div>
+        <MapLegendGroup
+          position="right"
+          cards={[
+            {
+              title: '光量子雷达站',
+              accentColor: '#c17cff',
+              modifier: 'radar',
+              items: [
+                { icon: '/marker/radar-on.png', label: '在线' },
+                { icon: '/marker/radar-off.png', label: '离线' },
+              ],
+            },
+            {
+              title: '预警点位',
+              accentColor: '#ff6868',
+              modifier: 'warning',
+              items: [
+                { icon: '/marker/warn-l1.png', label: '一级预警' },
+                { icon: '/marker/warn-l2.png', label: '二级预警' },
+                { icon: '/marker/warn-l3.png', label: '三级预警' },
+              ],
+            },
+          ]}
+        />
 
         {/* 右上浮层：省/市/区控制组 */}
-        <div className="region-controls absolute top-3 right-3 z-20 flex items-center gap-2 rounded-8px bg-[rgba(4,22,52,0.85)] p-1.5 border border-[#00d4ff]/30 shadow-[0_4px_12px_rgba(0,0,0,0.3)]">
-          <Select value="浙江省" disabled className="w-88px screen-select" classNames={{ popup: { root: 'screen-select-popup' } }} size="small" options={[{ value: '浙江省', label: '浙江省' }]} />
-          <Select
-            value={selection?.cityCode}
-            onChange={selectCity}
-            disabled={roleLevel !== 'admin'}
-            allowClear={roleLevel === 'admin'}
-            placeholder="全省"
-            className="w-92px screen-select"
-            classNames={{ popup: { root: 'screen-select-popup' } }}
-            size="small"
-            options={cities.map(city => ({ value: city.adcode, label: city.name }))}
-          />
-          {selection?.cityCode && roleLevel !== 'admin' && (
-            <Select
-              value={selection.countyName}
-              onChange={selectDistrict}
-              disabled={roleLevel === 'county' || roleLevel === 'town'}
-              allowClear={roleLevel === 'city'}
-              placeholder="全市"
-              className="w-100px screen-select"
-              classNames={{ popup: { root: 'screen-select-popup' } }}
-              size="small"
-              options={cityDistricts.map(item => ({ value: item.name, label: item.name }))}
-            />
-          )}
-          {roleLevel === 'town' && (
-            <Select
-              value={selection?.townName}
-              disabled
-              className="w-150px screen-select"
-              classNames={{ popup: { root: 'screen-select-popup' } }}
-              size="small"
-              options={selection?.townName ? [{ value: selection.townName, label: selection.townName }] : []}
-            />
-          )}
-        </div>
+        <RegionControls
+          roleLevel={roleLevel}
+          cityOptions={cities.map(city => ({ adcode: city.adcode, name: city.name }))}
+          districtOptions={cityDistricts}
+          selectedCityCode={selection?.cityCode}
+          selectedDistrictName={selection?.countyName}
+          townName={selection?.townName}
+          onCityChange={selectCity}
+          onDistrictChange={selectDistrict}
+        />
 
         {/* 地图 Hover 提示 */}
         {hoverRegion && hoverRegion !== selectedRegionName && (
@@ -949,21 +851,16 @@ export default function Monitor() {
           </div>
         )}
 
-        {/* 左下浮层：数据源概况（在线数据源取 dataSource/list 的 total，其余暂无数据源先显示 0） */}
-        <div className="source-summary absolute bottom-56px left-3 z-20 text-11px text-[#b2d9ff]/90 space-y-1 font-mono p-2.5 rounded-6px bg-[rgba(4,22,52,0.45)] border border-[#00d4ff]/25">
-          <div>在线数据源：<span className="text-[#00ffff] font-bold">{sourceTotal}</span></div>
-          <div>数据总量：<span className="text-[#00ffff] font-bold">0</span></div>
-          <div>数据准确性：<span className="text-[#00ffff] font-bold">0%</span></div>
-        </div>
+        {/* 左下浮层：数据源概况 */}
+        <SourceSummary onlineSourceCount={sourceTotal} />
 
         {/* 右下浮层：监测分布总结 */}
-        <div className="distribution-summary absolute bottom-56px right-3 z-20 p-3 rounded-8px border border-[#00d4ff]/35 bg-[rgba(4,22,52,0.9)] shadow-lg max-w-340px">
-          <div className="text-[#00f0ff] text-13px font-bold mb-1">{selectedRegionName}环境监测分布</div>
-          <div className="text-[#b2d9ff]/80 text-11px leading-relaxed">
-            共 <span className="text-[#00f0ff] font-bold font-mono">{airPoints.length}</span> 个空气质量检测站<br />
-            <span className="text-[#00f0ff] font-bold font-mono">{radarStations.length}</span> 个光量子雷达站 | <span className="text-[#00f0ff] font-bold font-mono">{droneStations.length}</span> 个无人机场
-          </div>
-        </div>
+        <DistributionSummary
+          regionName={selectedRegionName}
+          airStationCount={airPoints.length}
+          radarStationCount={radarStations.length}
+          droneStationCount={droneStations.length}
+        />
       </main>
 
       {/* 右侧面板：无人机场 & 光量子雷达 (完全对齐原型图) */}
