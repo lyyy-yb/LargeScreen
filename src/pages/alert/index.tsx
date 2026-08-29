@@ -6,6 +6,7 @@ import RegionSelector from '@/components/RegionSelector'
 import './index.less'
 import { useAppStore, useAuthStore } from '@/stores'
 import { addOption, buildDeptRegionOptions, nameEquals } from '@/utils/deptRegion'
+import { disabledFutureDate } from '@/utils/helpers'
 import { getVisibleAlertTabs, type AlertTab } from '@/utils/region'
 import dayjs from 'dayjs'
 import type { Dayjs } from 'dayjs'
@@ -1383,6 +1384,7 @@ export default function AlertPage() {
               value={alertTimeRange}
               onChange={v => { setAlertTimeRange(v); setAlertsPage(1) }}
               allowClear
+              disabledDate={disabledFutureDate}
             />
           </div>
         )}
@@ -1901,6 +1903,7 @@ export default function AlertPage() {
               showTime
               format="YYYY-MM-DD HH:mm:ss"
               placeholder="请选择完成时间"
+              disabledDate={disabledFutureDate}
             />
           </Form.Item>
         </Form>

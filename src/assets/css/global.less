@@ -634,6 +634,13 @@ textarea.ant-input {
     border-color: #03FBFD !important;
     box-shadow: 0 0 6px rgba(3, 251, 253, 0.3) !important;
   }
+
+  // 修复带 allowClear/suffix 的 Input 出现「外边框 + 内 input 边框」双重边框
+  // 只让外层 .model_from_input 显示边框，内部 .ant-input 不显示边框
+  .ant-input {
+    border: none !important;
+    box-shadow: none !important;
+  }
 }
 
 // 禁用态输入/选择框
@@ -770,6 +777,36 @@ textarea.ant-input {
     left: 50%;
     transform: translateX(-50%);
     pointer-events: none;
+  }
+
+  // 标题 + Tabs + 右侧按钮 同一行（与 alert 页保持一致，全站可用）
+  .alert-title-tabs-row {
+    display: flex;
+    align-items: center;
+    margin-bottom: 10px;
+    gap: 16px;
+    flex-shrink: 0;
+    min-height: 38px;
+    position: relative;
+
+    .alert-center-title {
+      position: absolute;
+      left: 50%;
+      transform: translateX(-50%);
+      pointer-events: none;
+    }
+
+    .tech-tabs-bar {
+      flex: 1;
+    }
+
+    .header-right-btn {
+      display: flex;
+      align-items: center;
+      margin-left: auto;
+      flex-shrink: 0;
+      gap: 12px;
+    }
   }
 
   .tech-tabs-bar {
