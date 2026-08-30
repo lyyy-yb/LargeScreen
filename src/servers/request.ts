@@ -206,3 +206,56 @@ export function redirectToLoginOnExpired() {
   clearLocalInfo()
   window.location.href = '/login'
 }
+
+/** 登录过期统一处理：提示并清除本地信息后跳转登录页（指定 message 实例，避免 hooks 上下文外报错） */
+export function redirectToLoginOnExpiredWithMsg(msgApi: { warning: (s: string) => void }) {
+  msgApi.warning('用户信息过期，需要重新登录')
+  clearLocalInfo()
+  window.location.href = '/login'
+}
+
+// ---------------- 全局网络错误提示 ----------------
+
+/** 错误频率限制：同一类型错误 3s 内只提示一次 */
+const errorThrottleMap = new Map<string, number>()
+const ERROR_THROTTLE_MS = 3000
+
+function shouldThrottle(key: string): boolean {
+  const now = Date.now()
+  const last = errorThrottleMap.get(key) ?? 0
+  if (now - last < ERROR_THROTTLE_MS) return true
+  errorThrottleMap.set(key, now)
+  return false
+}
+
+/**
+ * 全局网络/业务错误提示：
+ * - 5xx 服务器错误 → 红色 error 提示
+ * - 网络断开/超时 → 红色 error 提示
+ * - 业务码非 0（且非 401 登录过期）→ 红色 error 提示
+ *
+ * 通过节流避免 5min 轮询疯狂弹窗
+ */
+export function notifyResponseError(error: unknown, url?: string) {
+  if (axios.isAxiosError(error)) {
+    if (error.response?.status === 401) return // 401 走 redirectToLoginOnExpired
+    const status = error.response?.status
+    if (error.code === 'ERR_NETWORK' || error.message.includes('Network Error')) {
+      if (shouldThrottle('network')) return
+      message.error('网络异常，请检查网络连接')
+      return
+    }
+    if (status && status >= 500) {
+      if (shouldThrottle(`5xx-${status}`)) return
+      message.error(`服务器异常（${status}），请稍后重试`)
+      return
+    }
+    if (status === 404) {
+      if (shouldThrottle(`404-${url ?? ''}`)) return
+      message.error(`接口不存在（404）: ${url ?? ''}`)
+      return
+    }
+  }
+  // 业务码错误（由各 page 在 .then 里手动调用）
+  // 这里只处理网络层，page 级业务错误各自处理
+}
