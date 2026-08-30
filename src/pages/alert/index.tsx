@@ -13,6 +13,7 @@ import type { AlertEventDTO, DisposalTaskDTO } from '@/types/business'
 import { type RoleLevel } from './modals/RuleModal'
 import AlertDetailModal, { type AlertEvent } from './modals/AlertDetailModal'
 import TaskDetailModal, { type DisposalTask } from './modals/TaskDetailModal'
+import { usePolling } from '@/pages/monitor/hooks/usePolling'
 import DisposalViewModal from './modals/DisposalViewModal'
 import CommitModal from './modals/CommitModal'
 import DispatchModal from './modals/DispatchModal'
@@ -247,15 +248,12 @@ export default function AlertPage() {
     queueMicrotask(() => void loadTasks())
   }, [loadTasks])
 
-  // 区域预警实时动向：进入该 tab 后立即刷新，并按 30s 间隔轮询实时预警数据
-  useEffect(() => {
+  // 区域预警实时动向：进入该 tab 后按 30s 间隔轮询实时预警数据
+  // 非 trends tab 时 fn 内部 early return（activeTab 变化触发 deps 重新调度）
+  usePolling(() => {
     if (activeTab !== 'trends') return
-    // 标准的列表数据拉取模式，忽略 set-state-in-effect 规则
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadAlerts(true)
-    const timer = window.setInterval(() => void loadAlerts(true), 30_000)
-    return () => window.clearInterval(timer)
-  }, [activeTab, loadAlerts])
+  }, 30_000, [activeTab, loadAlerts])
 
   const applyAlertSearch = (value?: string) => {
     setAlertAppliedDevice((value ?? alertSearchDevice).trim())
