@@ -4,8 +4,7 @@ import CityDistrictMap from '@/components/CityDistrictMap'
 import CountyBoundaryMap from '@/components/CountyBoundaryMap'
 import ZJ3DMap from '@/components/ZJ3DMap'
 import { useAppStore } from '@/stores'
-import { cities, districts } from '@/utils/city'
-import type { RegionSelection } from '@/types/region'
+import { cities } from '@/utils/city'
 import { toRegionQuery } from '@/utils/region'
 import {
   dockList,
@@ -13,8 +12,6 @@ import {
   listFlyJob,
   alarmPointTop5,
   emissionOutletList,
-  globalSearch,
-  type GlobalSearchItem,
 } from '@/servers/mapBox'
 import { leiDaBaojingTongji } from '@/servers/api'
 import { getDockModeLabel, getDockModeColor, getDockOnlineStatus } from '@/utils/dock'
@@ -39,6 +36,8 @@ import AlertHandlingPanel from './cards/AlertHandlingPanel'
 import StationStatusCard from './cards/StationStatusCard'
 import StationDataModal from './modals/StationDataModal'
 import { usePolling } from './hooks/usePolling'
+import { useGlobalSearch } from './hooks/useGlobalSearch'
+import { useRegionSelection } from './hooks/useRegionSelection'
 import MapLegendGroup from './overlays/MapLegendGroup'
 import RegionControls from './overlays/RegionControls'
 import MapPointDisplayBar from './overlays/MapPointDisplayBar'
@@ -161,17 +160,22 @@ function getStationTooltip(station: MonitorStation) {
  * 站点/预警/排口数据层 + 3 个内嵌弹窗（空气质量站、排口、站点数据）+ 侧栏数据卡片。 */
 export default function Monitor() {
   const navigate = useNavigate()
+  // regionContext 仅用于读取 departments（构建 deptId 索引），区域选择逻辑已下沉到 useRegionSelection
+  const { regionContext } = useAppStore()
   const {
-    regionContext,
-    setRegionSelection,
-  } = useAppStore()
-  const roleLevel = regionContext?.roleLevel || 'town'
-  const selection = regionContext?.selection
-  const mapSelection = regionContext?.mapSelection
-  const isProvinceView = !mapSelection?.cityCode
-  const activeCity = cities.find(city => city.adcode === mapSelection?.cityCode)
-  const activeCounty = districts.find(item => String(item.adcode) === mapSelection?.countyCode)
-  const [hoverRegion, setHoverRegion] = useState<string | null>(null)
+    selection,
+    roleLevel,
+    isProvinceView,
+    activeCity,
+    activeCounty,
+    cityDistricts,
+    selectedRegionName,
+    hoverRegion,
+    selectCity,
+    selectDistrict,
+    handleCityClick,
+    setHoverRegion,
+  } = useRegionSelection()
   const [droneStations, setDroneStations] = useState<MonitorStation[]>([])
   const [radarStations, setRadarStations] = useState<MonitorStation[]>([])
   const [droneTaskStats, setDroneTaskStats] = useState({ pending: 0, flying: 0 })
@@ -193,13 +197,7 @@ export default function Monitor() {
   const [showDronePoints, setShowDronePoints] = useState(true)
   const [showRadarPoints, setShowRadarPoints] = useState(true)
   const [showEmissionOutletPoints, setShowEmissionOutletPoints] = useState(true)
-  const [searchKeyword, setSearchKeyword] = useState('')
-  const [searchResults, setSearchResults] = useState<GlobalSearchItem[]>([])
-  const [searchLoading, setSearchLoading] = useState(false)
-  const [searchOpen, setSearchOpen] = useState(false)
   const [mapFocusTarget, setMapFocusTarget] = useState<MapFocusTarget | null>(null)
-  const searchTimerRef = useRef<number | null>(null)
-  const searchRequestRef = useRef(0)
   const focusRequestRef = useRef(0)
   // 数据源列表总数（左下“在线数据源”展示）
   const [sourceTotal, setSourceTotal] = useState(0)
@@ -311,11 +309,6 @@ export default function Monitor() {
       }]
     })
   }, [droneStations, radarStations])
-
-  const cityDistricts = useMemo(() => {
-    if (!activeCity) return []
-    return districts.filter(item => item.parent === Number(activeCity.adcode))
-  }, [activeCity])
 
   // 近一小时污染物值区间（stationAirRange）：全域统计，不随区域切换
   useEffect(() => {
@@ -488,123 +481,17 @@ export default function Monitor() {
 
   // 最新预警：AlertHandlingPanel 内部处理裁剪
 
-  const selectedRegionName = selection?.countyName || selection?.cityName || selection?.provinceName || '浙江省'
-
-  const selectCity = (adcode?: string) => {
-    if (roleLevel !== 'admin') return
-    const city = cities.find(item => item.adcode === adcode)
-    const nextSelection: RegionSelection = city
-      ? {
-          provinceCode: '330000',
-          provinceName: '浙江省',
-          cityCode: city.adcode,
-          cityName: city.name,
-        }
-      : { provinceCode: '330000', provinceName: '浙江省' }
-    setRegionSelection(nextSelection)
-    setHoverRegion(null)
-  }
-
-  const selectDistrict = (name?: string) => {
-    if (!name && activeCity && (roleLevel === 'admin' || roleLevel === 'city')) {
-      setRegionSelection({
-        provinceCode: '330000',
-        provinceName: '浙江省',
-        cityCode: activeCity.adcode,
-        cityName: activeCity.name,
-      })
-      setHoverRegion(null)
-      return
-    }
-    const item = cityDistricts.find(district => district.name === name)
-    if (!item || !activeCity || (roleLevel !== 'admin' && roleLevel !== 'city')) return
-    setRegionSelection({
-      provinceCode: '330000',
-      provinceName: '浙江省',
-      cityCode: activeCity.adcode,
-      cityName: activeCity.name,
-      countyCode: String(item.adcode),
-      countyName: item.name,
-    })
-    setHoverRegion(null)
-  }
-
-  const handleCityClick = (cityName: string, adcode: number) => {
-    const city = cities.find(item => item.name === cityName || Number(item.adcode) === Number(adcode))
-    if (city) selectCity(city.adcode)
-  }
-
-  const runGlobalSearch = async (value: string) => {
-    const keyword = value.trim()
-    if (!keyword) return
-    const requestId = ++searchRequestRef.current
-    setSearchLoading(true)
-    try {
-      const res = await globalSearch(keyword)
-      if (requestId !== searchRequestRef.current) return
-      const results = Array.isArray(res.data)
-        ? res.data.filter(item => {
-            const lng = Number(item.longitude)
-            const lat = Number(item.latitude)
-            return Number.isFinite(lng) && Number.isFinite(lat)
-          })
-        : []
-      setSearchResults(results)
-      setSearchOpen(true)
-    } catch {
-      if (requestId !== searchRequestRef.current) return
-      setSearchResults([])
-      setSearchOpen(true)
-    } finally {
-      if (requestId === searchRequestRef.current) setSearchLoading(false)
-    }
-  }
-
-  const handleSearchChange = (value: string) => {
-    setSearchKeyword(value)
-    if (searchTimerRef.current != null) window.clearTimeout(searchTimerRef.current)
-    searchRequestRef.current += 1
-    if (!value.trim()) {
-      setSearchResults([])
-      setSearchOpen(false)
-      setSearchLoading(false)
-      return
-    }
-    setSearchLoading(true)
-    searchTimerRef.current = window.setTimeout(() => {
-      void runGlobalSearch(value)
-    }, 800)
-  }
-
-  const handleSearchSubmit = () => {
-    if (searchTimerRef.current != null) window.clearTimeout(searchTimerRef.current)
-    void runGlobalSearch(searchKeyword)
-  }
-
-  const handleSearchClear = () => {
-    if (searchTimerRef.current != null) window.clearTimeout(searchTimerRef.current)
-    searchRequestRef.current += 1
-    setSearchKeyword('')
-    setSearchResults([])
-    setSearchOpen(false)
-    setSearchLoading(false)
-  }
-
-  const handleSearchLocate = (item: GlobalSearchItem) => {
-    const lng = Number(item.longitude)
-    const lat = Number(item.latitude)
-    if (!Number.isFinite(lng) || !Number.isFinite(lat)) return
-    setMapFocusTarget({ lng, lat, zoom: 17, requestId: ++focusRequestRef.current })
-    setSearchKeyword(item.name?.trim() || '未命名地址')
-    setSearchOpen(false)
-    setAirDetail(null)
-    setOutletDetail(null)
-  }
-
-  useEffect(() => () => {
-    if (searchTimerRef.current != null) window.clearTimeout(searchTimerRef.current)
-    searchRequestRef.current += 1
-  }, [])
+  // 全局搜索（800ms 防抖 + 竞态保护 + 卸载清理）
+  const search = useGlobalSearch({
+    onLocate: (item) => {
+      const lng = Number(item.longitude)
+      const lat = Number(item.latitude)
+      if (!Number.isFinite(lng) || !Number.isFinite(lat)) return
+      setMapFocusTarget({ lng, lat, zoom: 17, requestId: ++focusRequestRef.current })
+      setAirDetail(null)
+      setOutletDetail(null)
+    },
+  })
 
   return (
     <div className="monitor-screen w-full h-full flex overflow-hidden text-[#e7f7ff]">
@@ -736,16 +623,16 @@ export default function Monitor() {
 
         {/* 底部全局搜索：结果仅展示名称，点击后定位地图并短暂高亮 */}
         <GlobalMapSearch
-          keyword={searchKeyword}
-          results={searchResults}
-          loading={searchLoading}
-          open={searchOpen}
-          onChange={handleSearchChange}
-          onSubmit={handleSearchSubmit}
-          onClear={handleSearchClear}
-          onSelect={handleSearchLocate}
-          onFocus={() => { if (searchKeyword.trim() && !searchLoading) setSearchOpen(true) }}
-          onClose={() => setSearchOpen(false)}
+          keyword={search.keyword}
+          results={search.results}
+          loading={search.loading}
+          open={search.open}
+          onChange={search.onChange}
+          onSubmit={search.onSubmit}
+          onClear={search.onClear}
+          onSelect={search.onSelect}
+          onFocus={search.onFocus}
+          onClose={search.onClose}
         />
 
         {/* 底部水平居中：打点显示控件条（预警↔空气互斥按钮组 + 无人机/雷达 Switch），位于底部导航条正上方不被遮挡 */}
