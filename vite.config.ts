@@ -1,7 +1,6 @@
 import { defineConfig, PluginOption } from 'vite'
 import react from '@vitejs/plugin-react'
 import unocss from 'unocss/vite'
-import legacy from '@vitejs/plugin-legacy'
 import viteCompression from 'vite-plugin-compression'
 
 export default defineConfig(({ mode }) => {
@@ -11,15 +10,19 @@ export default defineConfig(({ mode }) => {
   ]
 
   if (mode === 'production') {
+    // 删除 legacy 输出：target 已 Chrome >= 88（2021），部署在控制中心固定硬件
+    // 每个 chunk 减半（如 antv-l7 4.4MB → 2.2MB）
     vitePlugins.push(
-      legacy({
-        targets: [
-          'Chrome >= 88',
-          'Firefox >= 74',
-        ],
-        additionalLegacyPolyfills: ['regenerator-runtime/runtime'],
+      viteCompression({
+        algorithm: 'gzip',
+        ext: '.gz',
+        threshold: 1024,
       }),
-      viteCompression()
+      viteCompression({
+        algorithm: 'brotliCompress',
+        ext: '.br',
+        threshold: 1024,
+      })
     )
   }
 
