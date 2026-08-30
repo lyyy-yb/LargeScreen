@@ -1,12 +1,18 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 
 interface ScaleOptions {
   designWidth?: number
   designHeight?: number
+  /** resize 事件防抖延迟（ms），默认 150；可设 0 关闭 */
+  resizeDebounceMs?: number
 }
 
 export function useScreenScale(options: ScaleOptions = {}) {
-  const { designWidth = 1600, designHeight = 900 } = options
+  const {
+    designWidth = 1600,
+    designHeight = 900,
+    resizeDebounceMs = 150,
+  } = options
 
   const calculateScale = useCallback(() => {
     const screenWidth = window.innerWidth
@@ -19,12 +25,27 @@ export function useScreenScale(options: ScaleOptions = {}) {
   }, [designWidth, designHeight])
 
   const [scale, setScale] = useState(calculateScale)
+  const timerRef = useRef<number | null>(null)
 
   useEffect(() => {
-    const handleResize = () => setScale(calculateScale())
+    const update = () => setScale(calculateScale())
+    const handleResize = () => {
+      if (resizeDebounceMs <= 0) {
+        update()
+        return
+      }
+      if (timerRef.current != null) window.clearTimeout(timerRef.current)
+      timerRef.current = window.setTimeout(update, resizeDebounceMs)
+    }
     window.addEventListener('resize', handleResize)
-    return () => window.removeEventListener('resize', handleResize)
-  }, [calculateScale])
+    return () => {
+      window.removeEventListener('resize', handleResize)
+      if (timerRef.current != null) {
+        window.clearTimeout(timerRef.current)
+        timerRef.current = null
+      }
+    }
+  }, [calculateScale, resizeDebounceMs])
 
   return { scaleX: scale.scaleX, scaleY: scale.scaleY, designWidth, designHeight }
 }
