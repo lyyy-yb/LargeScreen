@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useAsyncEffect } from '@/hooks/useAsyncEffect'
 import CityDistrictMap from '@/components/CityDistrictMap'
 import CountyBoundaryMap from '@/components/CountyBoundaryMap'
 import ZJ3DMap from '@/components/ZJ3DMap'
@@ -207,15 +208,15 @@ export default function Monitor() {
   // 扁平化部门树（用于按区域名匹配 deptId）
   const allDepts = useMemo(() => flattenDepts(regionContext?.departments ?? []), [regionContext?.departments])
 
-  useEffect(() => {
+  useAsyncEffect((cancelled) => {
     const params = selection ? toRegionQuery(selection) : {}
-    let cancelled = false
     Promise.allSettled([
       dockList(params),
       leidaList(params),
       listFlyJob({ ...params, pageNum: 1, pageSize: 100 }),
       leiDaBaojingTongji(params),
     ]).then(([dockResult, radarResult, taskResult, alarmResult]) => {
+      if (cancelled()) return
       if (dockResult.status === 'fulfilled') {
         const norm = normalizeStations(dockResult.value?.data, 'drone')
         setDroneStations(norm)
@@ -245,12 +246,12 @@ export default function Monitor() {
           .filter(Boolean)
         : []
       if (!radarBsiIds.length) {
-        if (!cancelled) setRadarAlarmPoints([])
+        if (!cancelled()) setRadarAlarmPoints([])
         return
       }
       Promise.all(radarBsiIds.map(bsiId => alarmPointTop5({ BsiId: bsiId, hour: 24 }).catch(() => null)))
         .then(results => {
-          if (cancelled) return
+          if (cancelled()) return
           const merged = new Map<string, RadarAlarmPoint>()
           results.forEach(res => {
             if (res?.resultCode !== 0 || !res.data || typeof res.data !== 'object') return
@@ -274,7 +275,6 @@ export default function Monitor() {
           setRadarAlarmPoints([...merged.values()])
         })
     })
-    return () => { cancelled = true }
   }, [selection])
 
   const droneOnline = droneStations.filter(item => item.online).length
@@ -311,12 +311,10 @@ export default function Monitor() {
   }, [droneStations, radarStations])
 
   // 近一小时污染物值区间（stationAirRange）：全域统计，不随区域切换
-  useEffect(() => {
-    let cancelled = false
+  useAsyncEffect((cancelled) => {
     airDataStationAirRange()
       .then(res => { if (!cancelled) setAirRanges(Array.isArray(res.data) ? res.data : []) })
       .catch(() => { if (!cancelled) setAirRanges([]) })
-    return () => { cancelled = true }
   }, [])
 
   // 预警处置：dashboard 接口（统计 + 最新预警），5 分钟静默轮询
@@ -328,7 +326,7 @@ export default function Monitor() {
 
   // 地图打点（数据源列表 needAqi=1）：仅打空气质量站微站（AQI 六级图标）；
   // 雷达/无人机场由 leida/list、wurenji/dockList 独立接口打点，不在此处增量补充
-  useEffect(() => {
+  useAsyncEffect((cancelled) => {
     const cityDeptId = findCityDeptId(allDepts, selection?.cityName)
     const districtDeptId = selection?.countyName
       ? findDistrictDeptId(allDepts, selection.countyName, selection.cityName)
@@ -337,10 +335,9 @@ export default function Monitor() {
     if (districtDeptId != null) params.districtId = Number(districtDeptId)
     else if (cityDeptId != null) params.cityId = Number(cityDeptId)
 
-    let cancelled = false
     dataSourceApi.list(params)
       .then(res => {
-        if (cancelled) return
+        if (cancelled()) return
         const records = (res.data?.records ?? []).filter(
           item => Number.isFinite(item.lng) && Number.isFinite(item.lat),
         )
@@ -369,12 +366,11 @@ export default function Monitor() {
         setAirPoints(airStations)
       })
       .catch(() => {
-        if (!cancelled) {
+        if (!cancelled()) {
           setAirPoints([])
           setSourceTotal(0)
         }
       })
-    return () => { cancelled = true }
   }, [allDepts, selection])
 
   // 预警点位打点（alertEvent/list）：按区域 deptId 过滤，同经纬度聚合计数；5 分钟静默轮询（与 dashboard 同节奏）
@@ -415,11 +411,10 @@ export default function Monitor() {
   }, 5 * 60 * 1000, [allDepts, selection])
 
   // 企业排口打点（hbdp/emissionOutlet/list）：全量加载，不按区域过滤；zoom>=13 才显示图标、>=15 才显示两行文字
-  useEffect(() => {
-    let cancelled = false
+  useAsyncEffect((cancelled) => {
     emissionOutletList()
       .then(res => {
-        if (cancelled) return
+        if (cancelled()) return
         const list = res.data ?? []
         const points: EmissionOutletPoint[] = list
           .map(item => ({
@@ -437,8 +432,7 @@ export default function Monitor() {
           .filter(p => Number.isFinite(p.lng) && Number.isFinite(p.lat))
         setEmissionOutletPoints(points)
       })
-      .catch(() => { if (!cancelled) setEmissionOutletPoints([]) })
-    return () => { cancelled = true }
+      .catch(() => { if (!cancelled()) setEmissionOutletPoints([]) })
   }, [])
 
   // 点击地图空气质量打点：弹窗锚定在点击位置，展示综合 AQI 与各污染物分指数 IAQI（数据已随列表返回）
