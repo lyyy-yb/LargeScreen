@@ -9,53 +9,11 @@ import { dockList, listFlyJob, listFlyPlan, listFlyResult } from '@/servers/mapB
 import RegionSelector from '@/components/RegionSelector'
 import { useAppStore } from '@/stores'
 import { toRegionQuery } from '@/utils/region'
-import { cities, districts } from '@/utils/city'
 import FlyListModel from '@/components/MapBox/FlyListModel'
-import type { RegionSelection } from '@/types/region'
 import type { Scene } from '@antv/l7'
 import { normalizeDock, getDockModeColor, type NormalizedDock } from '@/utils/dock'
-
-interface TaskItem { jobID: string; jobName: string; jobTime: string; jobStatus: string; dockCode: string }
-interface PlanItem { planId: string; planName: string; startDate: string; flyTime: string; dockCode: string; lineName: string }
-interface FlyResultItem { resultsID: string; resultsTime: string; resultsType: string; resultsUrl: string }
-
-interface SensorData { pm25: number; pm10: number; altitude: number; battery: number; speed: number; signal: number }
-
-const statusObj: Record<string, { message: string; color: string }> = {
-  '0': { message: '等待中', color: '#ffb024' },
-  '1': { message: '进行中', color: '#399293' },
-  'a': { message: '已完成', color: '#02f8fa' },
-  'f': { message: '失败', color: '#f12a27' },
-  // 兼顾旧枚举值备用
-  '2': { message: '进行中', color: '#399293' },
-  '3': { message: '已完成', color: '#02f8fa' },
-  '4': { message: '取消', color: '#ef6c6a' },
-  '5': { message: '失败', color: '#f12a27' },
-  '6': { message: '任务中断', color: '#f37472' },
-}
-
-const ZHEJIANG_CENTER: [number, number] = [120.582886, 29.991549]
-
-function isValidCoordinate(lng: number, lat: number) {
-  return Number.isFinite(lng) && Number.isFinite(lat) &&
-    lng >= -180 && lng <= 180 && lat >= -90 && lat <= 90
-}
-
-function getRegionCamera(selection?: RegionSelection) {
-  const county = districts.find(item =>
-    String(item.adcode) === selection?.countyCode ||
-    (!!selection?.countyName && item.name === selection.countyName),
-  )
-  if (county) return { center: [county.lng, county.lat] as [number, number], zoom: 11.5 }
-
-  const city = cities.find(item =>
-    item.adcode === selection?.cityCode ||
-    (!!selection?.cityName && item.name === selection.cityName),
-  )
-  if (city) return { center: [city.lng, city.lat] as [number, number], zoom: 9 }
-
-  return { center: ZHEJIANG_CENTER, zoom: 7.5 }
-}
+import type { TaskItem, PlanItem, FlyResultItem, SensorData } from './shared'
+import { isValidCoordinate, getRegionCamera, statusObj } from './shared'
 
 export default function Drone() {
   const navigate = useNavigate()
