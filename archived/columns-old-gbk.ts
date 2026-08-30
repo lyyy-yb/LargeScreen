@@ -1,0 +1,81 @@
+import { Tag } from 'antd'
+import type { TableColumnsType } from 'antd'
+import type { AirDataDetailVO, AirDataLevel, DroneTaskDataSource, DroneTaskVO, MobileMonitorDetailVO } from '@/types/dataManage'
+import { DATA_SOURCE_MAP, LEVEL_COLOR, LEVEL_LABEL, fmt, renderTaskStatus } from './shared'
+
+/** 微站数据列定义（分钟级/小时级/日级通用） */
+export const stationColumns: TableColumnsType<AirDataDetailVO> = [
+  { title: '监测时间', dataIndex: 'dataTime', key: 'dataTime', width: 170 },
+  {
+    title: '数据级别',
+    dataIndex: 'dataLevel',
+    key: 'dataLevel',
+    width: 110,
+    align: 'center' as const,
+    render: (v: AirDataLevel) => <Tag color={LEVEL_COLOR[v]}>{LEVEL_LABEL[v] ?? v}</Tag>,
+  },
+  { title: 'PM2.5(μg/m³)', dataIndex: 'pm25', key: 'pm25', width: 110, align: 'center' as const, render: (v: number | null) => fmt(v) },
+  { title: 'PM10(μg/m³)', dataIndex: 'pm10', key: 'pm10', width: 110, align: 'center' as const, render: (v: number | null) => fmt(v) },
+  { title: 'SO₂(μg/m³)', dataIndex: 'so2', key: 'so2', width: 110, align: 'center' as const, render: (v: number | null) => fmt(v) },
+  { title: 'NO₂(μg/m³)', dataIndex: 'no2', key: 'no2', width: 110, align: 'center' as const, render: (v: number | null) => fmt(v) },
+  { title: 'O₃(μg/m³)', dataIndex: 'o3', key: 'o3', width: 110, align: 'center' as const, render: (v: number | null) => fmt(v) },
+  { title: 'CO(mg/m³)', dataIndex: 'co', key: 'co', width: 110, align: 'center' as const, render: (v: number | null) => fmt(v) },
+  { title: 'VOCs(μg/m³)', dataIndex: 'vocs', key: 'vocs', width: 110, align: 'center' as const, render: (v: number | null) => fmt(v) },
+  { title: 'TSP(μg/m³)', dataIndex: 'tsp', key: 'tsp', width: 110, align: 'center' as const, render: (v: number | null) => fmt(v) },
+  { title: '温度(℃)', dataIndex: 'temperature', key: 'temperature', width: 90, align: 'center' as const, render: (v: number | null) => fmt(v) },
+  { title: '湿度(%)', dataIndex: 'humidity', key: 'humidity', width: 90, align: 'center' as const, render: (v: number | null) => fmt(v) },
+  { title: '气压(KPa)', dataIndex: 'pressure', key: 'pressure', width: 100, align: 'center' as const, render: (v: number | null) => fmt(v) },
+  { title: '风速(m/s)', dataIndex: 'windSpeed', key: 'windSpeed', width: 100, align: 'center' as const, render: (v: number | null) => fmt(v) },
+  { title: '风向(°)', dataIndex: 'windDirection', key: 'windDirection', width: 100, align: 'center' as const, render: (v: number | null) => fmt(v) },
+  { title: '样本数', dataIndex: 'sampleCount', key: 'sampleCount', width: 90, align: 'center' as const, render: (v: number | null) => fmt(v) },
+]
+
+/** 无人机任务列定义 */
+export const droneColumns: TableColumnsType<DroneTaskVO> = [
+  { title: '任务ID', dataIndex: 'taskId', key: 'taskId', width: 160 },
+  { title: '任务名称', dataIndex: 'taskName', key: 'taskName', width: 180 },
+  { title: '机场编码', dataIndex: 'dockCode', key: 'dockCode', width: 140 },
+  {
+    title: '任务状态',
+    dataIndex: 'taskStatus',
+    key: 'taskStatus',
+    width: 100,
+    align: 'center' as const,
+    render: renderTaskStatus,
+  },
+  { title: '执行时间', dataIndex: 'taskTime', key: 'taskTime', width: 170 },
+  { title: '结果数', dataIndex: 'resultCount', key: 'resultCount', width: 90, align: 'center' as const },
+  {
+    title: '数据来源',
+    dataIndex: 'dataSource',
+    key: 'dataSource',
+    width: 110,
+    align: 'center' as const,
+    render: (v: DroneTaskDataSource) => DATA_SOURCE_MAP[v] ?? v,
+  },
+  { title: '失败原因', dataIndex: 'failReason', key: 'failReason', width: 180, render: (v: string) => v || '-' },
+  { title: '创建人', dataIndex: 'createBy', key: 'createBy', width: 110 },
+]
+
+/**
+ * 走航任务表格列定义：
+ * 后端只返回有数据的日期数组，车辆编码/车辆名称在查询时已知，需逐行重复展示。
+ */
+export const carColumns: TableColumnsType<{ mnCode: string; mnName: string; date: string }> = [
+  { title: '车辆编码', dataIndex: 'mnCode', key: 'mnCode', width: 180 },
+  { title: '车辆名称', dataIndex: 'mnName', key: 'mnName', width: 220 },
+  { title: '数据日期', dataIndex: 'date', key: 'date', width: 180 },
+]
+
+/** 走航任务派生行：把后端返回的 date 数组展开成表格行（编码/名称逐行重复） */
+export function buildCarRows(
+  carDetail: MobileMonitorDetailVO | null,
+  fallbackCode: string,
+  carName: string,
+) {
+  return (carDetail?.dataDates ?? []).map(d => ({
+    date: d,
+    mnCode: carDetail?.deviceId ?? carDetail?.mnCode ?? fallbackCode ?? '-',
+    mnName: carName,
+  }))
+}

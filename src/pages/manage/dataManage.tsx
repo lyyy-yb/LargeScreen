@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { App, Button, Checkbox, DatePicker, Input, Select, Table, Tag, Upload } from 'antd'
+import { App, Button, Checkbox, DatePicker, Input, Select, Table, Upload } from 'antd'
 import { ArrowLeftOutlined, DownloadOutlined, UploadOutlined } from '@ant-design/icons'
-import dayjs, { type Dayjs } from 'dayjs'
+import { type Dayjs } from 'dayjs'
 import { dataManageApi } from '@/servers/dataManage'
 import { dataSourceApi } from '@/servers/business'
 import { dockList } from '@/servers/mapBox'
@@ -13,120 +13,25 @@ import { toRegionQuery } from '@/utils/region'
 import type {
   AirDataDetailVO,
   AirDataLevel,
-  DroneTaskDataSource,
   DroneTaskStatus,
   DroneTaskVO,
   MobileMonitorDetailVO,
 } from '@/types/dataManage'
 import type { DataSourceDTO } from '@/types/business'
+import {
+  type TabKey,
+  DATE_FMT,
+  DATE_TIME_FMT,
+  LEVEL_OPTIONS,
+  TASK_STATUS_OPTIONS,
+  defaultDayRange,
+  downloadBlob,
+  isJsonErrorBlob,
+  useDebouncedQuery,
+} from './shared'
+import { buildCarRows, carColumns, droneColumns, stationColumns } from './columns'
 
 const { RangePicker } = DatePicker
-
-type TabKey = 'station' | 'mobile' | 'drone'
-
-/** 查询条件变更后防抖触发接口查询的时长（项目 debounce 工具默认 300ms，此处按需用 500ms） */
-const QUERY_DEBOUNCE = 500
-
-/** 默认时间范围：昨天 00:00:00 ~ 今天 00:00:00（默认查一天） */
-function defaultDayRange(): [Dayjs, Dayjs] {
-  return [dayjs().subtract(1, 'day').startOf('day'), dayjs().startOf('day')]
-}
-
-/**
- * 查询条件变化后防抖自动查询（无需查询/重置按钮）
- * 用 effect + setTimeout 实现：条件变化即重置定时器，停止输入 500ms 后才真正请求
- * @param enabled 是否启用（仅当前页签激活时查询）
- * @param query 查询条件（需为稳定引用，用 useMemo 包装）
- * @param run 实际执行的查询函数
- */
-function useDebouncedQuery(enabled: boolean, query: unknown, run: () => void, delay = QUERY_DEBOUNCE) {
-  useEffect(() => {
-    if (!enabled) return
-    const timer = setTimeout(run, delay)
-    return () => clearTimeout(timer)
-    // run 随 state 变化产生新引用，此处只依赖查询条件本身，故忽略
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, query, delay])
-}
-
-/** 数据级别：'' 表示全部（后端不传 level） */
-const LEVEL_OPTIONS: { value: AirDataLevel | ''; label: string }[] = [
-  { value: '', label: '全部' },
-  { value: 'minute', label: '分钟级' },
-  { value: 'hourly', label: '小时级汇总' },
-  { value: 'daily', label: '日级汇总' },
-]
-
-const LEVEL_LABEL: Record<AirDataLevel, string> = {
-  minute: '分钟级',
-  hourly: '小时级汇总',
-  daily: '日级汇总',
-}
-
-const LEVEL_COLOR: Record<AirDataLevel, string> = {
-  minute: 'blue',
-  hourly: 'orange',
-  daily: 'purple',
-}
-
-/**
- * 无人机任务状态：与 /drone 飞行任务（listFlyJob.jobStatus）同一套字符串枚举，仅四个值
- * 0-等待中 1-进行中 a-已完成 f-失败
- * 来源：src/pages/drone/index.tsx 的 statusObj
- */
-const TASK_STATUS_MAP: Record<DroneTaskStatus, { label: string; color: string }> = {
-  '0': { label: '等待中', color: 'default' },
-  '1': { label: '进行中', color: 'processing' },
-  'a': { label: '已完成', color: 'success' },
-  'f': { label: '失败', color: 'error' },
-}
-
-const TASK_STATUS_OPTIONS: { value: DroneTaskStatus; label: string }[] = [
-  { value: '0', label: '等待中' },
-  { value: '1', label: '进行中' },
-  { value: 'a', label: '已完成' },
-  { value: 'f', label: '失败' },
-]
-
-/** 表格状态渲染：后端可能返回数字或字符串，统一转字符串后再查表 */
-function renderTaskStatus(v: unknown) {
-  const meta = TASK_STATUS_MAP[String(v) as DroneTaskStatus]
-  return <Tag color={meta?.color}>{meta?.label ?? String(v ?? '-')}</Tag>
-}
-
-const DATA_SOURCE_MAP: Record<DroneTaskDataSource, string> = {
-  api: '第三方接口',
-  import: '本地导入',
-}
-
-const DATE_TIME_FMT = 'YYYY-MM-DD HH:mm:ss'
-const DATE_FMT = 'YYYY-MM-DD'
-
-/** 数值格式化：分钟级/小时级部分污染物为 null，统一渲染为 - */
-const fmt = (v: number | null | undefined) => (v == null ? '-' : v)
-
-/** 下载 Blob 文件（模板下载/导出共用） */
-function downloadBlob(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob)
-  const anchor = document.createElement('a')
-  anchor.href = url
-  anchor.download = filename
-  document.body.appendChild(anchor)
-  anchor.click()
-  anchor.remove()
-  URL.revokeObjectURL(url)
-}
-
-/** 后端异常时也会返回 JSON 格式的 blob，先识别再提示 */
-async function isJsonErrorBlob(blob: Blob): Promise<boolean> {
-  if (!blob.type.includes('application/json')) return false
-  try {
-    const body = JSON.parse(await blob.text()) as { msg?: string; message?: string }
-    return !(body == null)
-  } catch {
-    return true
-  }
-}
 
 export default function DataManage() {
   const navigate = useNavigate()
@@ -387,183 +292,13 @@ export default function DataManage() {
     }
   }
 
-  // ---------- 表格列 ----------
-  const stationColumns = [
-    { title: '监测时间', dataIndex: 'dataTime', key: 'dataTime', width: 170 },
-    {
-      title: '数据级别',
-      dataIndex: 'dataLevel',
-      key: 'dataLevel',
-      width: 110,
-      align: 'center' as const,
-      render: (v: AirDataLevel) => <Tag color={LEVEL_COLOR[v]}>{LEVEL_LABEL[v] ?? v}</Tag>,
-    },
-    {
-      title: 'PM2.5(μg/m³)',
-      dataIndex: 'pm25',
-      key: 'pm25',
-      width: 110,
-      align: 'center' as const,
-      render: (v: number | null) => fmt(v),
-    },
-    {
-      title: 'PM10(μg/m³)',
-      dataIndex: 'pm10',
-      key: 'pm10',
-      width: 110,
-      align: 'center' as const,
-      render: (v: number | null) => fmt(v),
-    },
-    {
-      title: 'SO₂(μg/m³)',
-      dataIndex: 'so2',
-      key: 'so2',
-      width: 110,
-      align: 'center' as const,
-      render: (v: number | null) => fmt(v),
-    },
-    {
-      title: 'NO₂(μg/m³)',
-      dataIndex: 'no2',
-      key: 'no2',
-      width: 110,
-      align: 'center' as const,
-      render: (v: number | null) => fmt(v),
-    },
-    {
-      title: 'O₃(μg/m³)',
-      dataIndex: 'o3',
-      key: 'o3',
-      width: 110,
-      align: 'center' as const,
-      render: (v: number | null) => fmt(v),
-    },
-    {
-      title: 'CO(mg/m³)',
-      dataIndex: 'co',
-      key: 'co',
-      width: 110,
-      align: 'center' as const,
-      render: (v: number | null) => fmt(v),
-    },
-    {
-      title: 'VOCs(μg/m³)',
-      dataIndex: 'vocs',
-      key: 'vocs',
-      width: 110,
-      align: 'center' as const,
-      render: (v: number | null) => fmt(v),
-    },
-    {
-      title: 'TSP(μg/m³)',
-      dataIndex: 'tsp',
-      key: 'tsp',
-      width: 110,
-      align: 'center' as const,
-      render: (v: number | null) => fmt(v),
-    },
-    {
-      title: '温度(℃)',
-      dataIndex: 'temperature',
-      key: 'temperature',
-      width: 90,
-      align: 'center' as const,
-      render: (v: number | null) => fmt(v),
-    },
-    {
-      title: '湿度(%)',
-      dataIndex: 'humidity',
-      key: 'humidity',
-      width: 90,
-      align: 'center' as const,
-      render: (v: number | null) => fmt(v),
-    },
-    {
-      title: '气压(KPa)',
-      dataIndex: 'pressure',
-      key: 'pressure',
-      width: 100,
-      align: 'center' as const,
-      render: (v: number | null) => fmt(v),
-    },
-    {
-      title: '风速(m/s)',
-      dataIndex: 'windSpeed',
-      key: 'windSpeed',
-      width: 100,
-      align: 'center' as const,
-      render: (v: number | null) => fmt(v),
-    },
-    {
-      title: '风向(°)',
-      dataIndex: 'windDirection',
-      key: 'windDirection',
-      width: 100,
-      align: 'center' as const,
-      render: (v: number | null) => fmt(v),
-    },
-    {
-      title: '样本数',
-      dataIndex: 'sampleCount',
-      key: 'sampleCount',
-      width: 90,
-      align: 'center' as const,
-      render: (v: number | null) => fmt(v),
-    },
-  ]
-
-  const droneColumns = [
-    { title: '任务ID', dataIndex: 'taskId', key: 'taskId', width: 160 },
-    { title: '任务名称', dataIndex: 'taskName', key: 'taskName', width: 180 },
-    { title: '机场编码', dataIndex: 'dockCode', key: 'dockCode', width: 140 },
-    {
-      title: '任务状态',
-      dataIndex: 'taskStatus',
-      key: 'taskStatus',
-      width: 100,
-      align: 'center' as const,
-      render: renderTaskStatus,
-    },
-    { title: '执行时间', dataIndex: 'taskTime', key: 'taskTime', width: 170 },
-    { title: '结果数', dataIndex: 'resultCount', key: 'resultCount', width: 90, align: 'center' as const },
-    {
-      title: '数据来源',
-      dataIndex: 'dataSource',
-      key: 'dataSource',
-      width: 110,
-      align: 'center' as const,
-      render: (v: DroneTaskDataSource) => DATA_SOURCE_MAP[v] ?? v,
-    },
-    {
-      title: '失败原因',
-      dataIndex: 'failReason',
-      key: 'failReason',
-      width: 180,
-      render: (v: string) => v || '-',
-    },
-    { title: '创建人', dataIndex: 'createBy', key: 'createBy', width: 110 },
-  ]
-
-  /**
-   * 走航任务表格数据：后端只返回有数据的日期数组，
-   * 车辆编码/车辆名称在查询时已知，需逐行重复展示。
-   */
-  const carColumns = [
-    { title: '车辆编码', dataIndex: 'mnCode', key: 'mnCode', width: 180 },
-    { title: '车辆名称', dataIndex: 'mnName', key: 'mnName', width: 220 },
-    { title: '数据日期', dataIndex: 'date', key: 'date', width: 180 },
-  ]
-
+  // ---------- 表格列（已抽到 ./columns） ----------
   const carName = cars.find(c => c.deviceId === carCode)?.shortName
     || cars.find(c => c.deviceId === carCode)?.deviceName
     || carDetail?.mnName
     || '-'
 
-  const carRows = (carDetail?.dataDates ?? []).map(d => ({
-    date: d,
-    mnCode: carDetail?.deviceId ?? carDetail?.mnCode ?? carCode ?? '-',
-    mnName: carName,
-  }))
+  const carRows = buildCarRows(carDetail, carCode, carName)
 
   return (
     <div className="alert-page-container">
