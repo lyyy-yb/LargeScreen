@@ -54,8 +54,10 @@ export async function createDeviceMapLayers(
   })
 
   // 无人机图标层（size 7 ≈ 14px 直径，与雷达 DOM 中心图标同大；不显示名称文字）
+  // zIndex 33：高于所有其他点位图层（排口 29 / 雷达告警 30 / 空气站 30 / 预警 31 / 预警计数 32），
+  // 避免机场图标被同类打点压盖。机场数量远少于站点，压盖影响可控。
   const iconLayer = new PointLayer({
-    zIndex: 22,
+    zIndex: 33,
     name: 'monitor-device-icon-layer',
     enablePropagation: false,
     pickingBuffer: 4,

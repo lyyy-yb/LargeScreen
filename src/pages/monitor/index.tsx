@@ -127,14 +127,14 @@ function normalizeStations(value: unknown, kind: 'drone' | 'radar'): MonitorStat
       lng: Number(firstText(
         item,
         kind === 'drone'
-          ? ['dockLng', 'lng', 'longitude']
+          ? ['longitude', 'dockLng', 'lng']
           : ['bsLng', 'bsiLng', 'lng', 'longitude'],
         'NaN',
       )),
       lat: Number(firstText(
         item,
         kind === 'drone'
-          ? ['dockLat', 'lat', 'latitude']
+          ? ['latitude', 'dockLat', 'lat']
           : ['bsiLat', 'lat', 'latitude'],
         'NaN',
       )),
@@ -313,8 +313,8 @@ export default function Monitor() {
   // 近一小时污染物值区间（stationAirRange）：全域统计，不随区域切换
   useAsyncEffect((cancelled) => {
     airDataStationAirRange()
-      .then(res => { if (!cancelled) setAirRanges(Array.isArray(res.data) ? res.data : []) })
-      .catch(() => { if (!cancelled) setAirRanges([]) })
+      .then(res => { if (!cancelled()) setAirRanges(Array.isArray(res.data) ? res.data : []) })
+      .catch(() => { if (!cancelled()) setAirRanges([]) })
   }, [])
 
   // 预警处置：dashboard 接口（统计 + 最新预警），5 分钟静默轮询
