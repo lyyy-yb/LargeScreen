@@ -66,15 +66,13 @@ export function useLayerVisibility(
     if (showDronePoints) d.show(); else d.hide()
   }, [deviceLayersRef, showDronePoints, ready])
 
-  // 雷达：扫描盘（DOM overlay，show/hide 为补丁实现）+ 雷达突发告警点（标准 ILayer）；
-  // 常规/突发点位名称层由缩放阈值 + 开关双条件控制
+  // 雷达扫描效果已下线（监控大屏地图不再渲染扫描盘/名称层，统一收敛到 radar 页）；
+  // 保留雷达突发告警点（标准 ILayer）的开关 + 名称层（缩放阈值 + 开关双条件控制）
   useEffect(() => {
-    const d = deviceLayersRef.current
     const r = radarAlarmLayersRef.current
-    if (showRadarPoints) { d?.radarLayer.show(); r?.layer.show() } else { d?.radarLayer.hide(); r?.layer.hide() }
-    d?.setNameVisible(showRadarPoints)
+    if (showRadarPoints) { r?.layer.show() } else { r?.layer.hide() }
     r?.setNameVisible(showRadarPoints)
-  }, [deviceLayersRef, radarAlarmLayersRef, showRadarPoints, ready])
+  }, [radarAlarmLayersRef, showRadarPoints, ready])
 
   // 企业排口打点：开关只更新基础显隐态，图标/文字的缩放门控仍然生效。
   useEffect(() => {

@@ -105,7 +105,7 @@ export default function StationStatusCard({
         ))}
       </div>
 
-      <div className={`mt-2 ${maxStations ? 'max-h-72px' : 'max-h-120px'} overflow-y-auto space-y-1 pr-1`}>
+      <div className={`mt-2 min-h-0 shrink overflow-y-auto space-y-1 pr-1 ${maxStations ? 'max-h-72px' : 'max-h-120px'}`}>
         {visibleStations.map(station => (
           <div
             key={station.id}
