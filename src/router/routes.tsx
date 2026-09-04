@@ -16,9 +16,8 @@ const Drone = lazy(() => import('@/pages/drone'))
 const DroneMediaPreview = lazy(() => import('@/pages/drone/MediaPreview'))
 const Patrol = lazy(() => import('@/pages/patrol'))
 const AlertPage = lazy(() => import('@/pages/alert'))
-// [隐藏] 年度管理：入口与 Tab 已注释下线，页面文件保留在 src/pages/report
-// 恢复方式：取消本行、routes 中 report 路由、tabRoutes 中 /report 三处注释
-// const Report = lazy(() => import('@/pages/report'))
+// 年度管理：仅 admin / 市级（city_admin / city_business）可见；区县、乡镇用户屏蔽
+const Report = lazy(() => import('@/pages/report'))
 const Pollution = lazy(() => import('@/pages/pollution'))
 const DataSource = lazy(() => import('@/pages/manage/dataSource'))
 const CleanRule = lazy(() => import('@/pages/manage/cleanRule'))
@@ -95,12 +94,16 @@ export const routes: RouteObject[] = [
         element: <LazyComponent><AlertPage /></LazyComponent>,
         handle: { title: '预警中心', tab: true } as RouteMeta,
       },
-      // [隐藏] 年度管理路由（恢复时取消注释，并同步恢复上方 Report 懒加载与 tabRoutes）
-      // {
-      //   path: 'report',
-      //   element: <LazyComponent><Report /></LazyComponent>,
-      //   handle: { title: '年度管理', tab: true } as RouteMeta,
-      // },
+      // 年度管理：仅 admin / city_admin / city_business 可见（区县/乡镇用户屏蔽）；AuthGuard 依据 roles 拦截
+      {
+        path: 'report',
+        element: <LazyComponent><Report /></LazyComponent>,
+        handle: {
+          title: '年度管理',
+          tab: true,
+          roles: ['admin', 'city_admin', 'city_business'],
+        } as RouteMeta,
+      },
       {
         path: 'pollution',
         element: <LazyComponent><Pollution /></LazyComponent>,
@@ -130,12 +133,19 @@ export const routes: RouteObject[] = [
 ]
 
 // Tab 配置
-export const tabRoutes = [
+export interface TabRouteMeta {
+  key: string
+  title: string
+  /** 角色白名单：仅列表内角色可见；缺省或空数组表示对所有角色可见 */
+  roles?: string[]
+}
+
+export const tabRoutes: TabRouteMeta[] = [
   { key: '/monitor', title: '监控大屏' },
   { key: '/radar', title: '光量子雷达' },
   { key: '/drone', title: '无人机机场' },
   { key: '/patrol', title: '走航巡查' },
   { key: '/alert', title: '预警中心' },
-  // [隐藏] 年度管理
-  // { key: '/report', title: '年度管理' },
+  // 年度管理：仅 admin / 市级可见（区县/乡镇用户屏蔽），AuthGuard 依据 roles 拦截
+  { key: '/report', title: '年度管理', roles: ['admin', 'city_admin', 'city_business'] },
 ]

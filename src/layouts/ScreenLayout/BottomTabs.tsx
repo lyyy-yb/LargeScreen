@@ -1,5 +1,5 @@
 import { useNavigate, useLocation } from 'react-router-dom'
-import { tabRoutes } from '@/router/routes'
+import { tabRoutes, type TabRouteMeta } from '@/router/routes'
 import { useAppStore } from '@/stores'
 import { getVisibleTabKeys } from '@/utils/region'
 
@@ -7,11 +7,16 @@ export default function BottomTabs() {
   const navigate = useNavigate()
   const location = useLocation()
   const regionContext = useAppStore(state => state.regionContext)
-  // 业务角色导航过滤：市/区县业务仅监控大屏/雷达/预警中心，乡镇业务无可见导航；null 不限制
+  // 业务角色导航过滤：市业务可见监控大屏/雷达/预警中心/年度管理，区县业务仅前三项，乡镇业务无可见导航；null 不限制
   const visibleTabKeys = getVisibleTabKeys(regionContext?.roleKey)
-  const visibleTabs = visibleTabKeys === null
-    ? tabRoutes
-    : tabRoutes.filter(item => visibleTabKeys.includes(item.key))
+  const roleKey = regionContext?.roleKey
+  const visibleTabs = tabRoutes.filter((item) => {
+    if (visibleTabKeys !== null && !visibleTabKeys.includes(item.key)) return false
+    if (item.roles && item.roles.length > 0) {
+      if (!roleKey || !item.roles.includes(roleKey)) return false
+    }
+    return true
+  }) as TabRouteMeta[]
   const scopeName =
     regionContext?.selection.townName
     || regionContext?.selection.countyName

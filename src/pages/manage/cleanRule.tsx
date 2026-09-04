@@ -1,8 +1,9 @@
 import { useCallback, useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Button, Table, Modal, Form, Input, Select, Switch, InputNumber, App } from 'antd'
-import { PlusOutlined, EditOutlined, EyeOutlined, DeleteOutlined, ArrowLeftOutlined } from '@ant-design/icons'
+import { PlusOutlined, ArrowLeftOutlined } from '@ant-design/icons'
 import { cleanRuleApi } from '@/servers/business'
+import { useDebounce } from '@/hooks/useDebounce'
 import type { CleanRuleDTO } from '@/types/business'
 
 const { Option } = Select
@@ -146,10 +147,12 @@ export default function CleanRule() {
     queueMicrotask(() => void loadList())
   }, [loadList])
 
-  const applySearch = (value?: string) => {
-    setAppliedName((value ?? searchName).trim())
+  // 搜索框 300ms 防抖（修改即触发，无需回车/查询按钮）
+  const debouncedCleanRuleSearch = useDebounce(searchName, 300)
+  useEffect(() => {
+    setAppliedName(debouncedCleanRuleSearch.trim())
     setPageNum(1)
-  }
+  }, [debouncedCleanRuleSearch])
   const [isModalVisible, setIsModalVisible] = useState(false)
   const [isDetailModalVisible, setIsDetailModalVisible] = useState(false)
   const [detailLoading, setDetailLoading] = useState(false)
@@ -275,11 +278,11 @@ export default function CleanRule() {
     { title: '优先级', dataIndex: 'priority', key: 'priority', width: 60, align: 'center' as const },
     { title: '状态', dataIndex: 'enabled', key: 'enabled', width: 70, render: (text: boolean, record: CleanRule) => (<Switch checked={text} onChange={() => toggleStatus(record.id, text)} checkedChildren="启用" unCheckedChildren="禁用" />) },
     {
-      title: '操作', key: 'actions', width: 160, align: 'center' as const, render: (_: unknown, record: CleanRule) => (
-        <div className="flex items-center gap-1 justify-center">
-          <Button type="link" size="small" icon={<EyeOutlined />} className="!text-[#03FBFD] !p-0 hover:!text-white" onClick={() => showDetailModal(record)}>详情</Button>
-          <Button type="link" size="small" icon={<EditOutlined />} className="!text-[#03FBFD] !p-0 hover:!text-white" onClick={() => showEditModal(record)}>编辑</Button>
-          <Button type="link" size="small" danger icon={<DeleteOutlined />} className="!p-0" onClick={() => handleDelete(record.id)}>删除</Button>
+      title: '操作', key: 'actions', width: 180, align: 'center' as const, render: (_: unknown, record: CleanRule) => (
+        <div className="flex items-center gap-1.5 justify-center whitespace-nowrap">
+          <button type="button" className="tech-action-btn btn-detail" onClick={() => showDetailModal(record)}>详情</button>
+          <button type="button" className="tech-action-btn btn-success" onClick={() => showEditModal(record)}>编辑</button>
+          <button type="button" className="tech-action-btn btn-danger" onClick={() => handleDelete(record.id)}>删除</button>
         </div>
       )
     },
@@ -289,14 +292,13 @@ export default function CleanRule() {
     <div className="alert-page-container">
       <div className="alert-header-bar">
         <div className="header-left">
-          <Button
-            type="text"
-            icon={<ArrowLeftOutlined />}
-            onClick={() => navigate('/monitor')}
-            className="!text-[#03FBFD] hover:!text-white !px-2 !h-28px"
-          >
-            返回监控大屏
-          </Button>
+          <div className="alert-nav-breadcrumb">
+            <span className="back-btn" onClick={() => navigate('/monitor')}>
+              <ArrowLeftOutlined /> 返回监控大屏
+            </span>
+            <span className="nav-divider">|</span>
+            <span className="nav-current-title">清洗规则管理</span>
+          </div>
         </div>
 
         <div className="header-right">
@@ -316,23 +318,13 @@ export default function CleanRule() {
         </div>
       </div>
 
-      <div className="flex items-center justify-center flex-shrink-0 mb-2">
-        <div className="alert-center-title" style={{ position: 'static', transform: 'none' }}>
-          <span className="title-diamond">◆</span>
-          <span>数据清洗规则管理</span>
-          <span className="title-diamond">◆</span>
-        </div>
-      </div>
-
       <div className="flex items-center gap-3 flex-shrink-0 mb-3">
-        <Input.Search
+        <Input
           placeholder="搜索规则名称"
           value={searchName}
           onChange={e => setSearchName(e.target.value)}
-          onSearch={applySearch}
-          onClear={() => applySearch('')}
           allowClear
-          className="max-w-220px model_from_input"
+          className="!w-220px model_from_input"
         />
         <Select
           className="w-160px model_from_sel" classNames={{ popup: { root: 'alert-rule-dropdown' } }}

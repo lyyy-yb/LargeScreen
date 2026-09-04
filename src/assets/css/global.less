@@ -589,17 +589,32 @@
   .ant-btn-primary {
     min-width: 110px;
     height: 38px;
-    background: #00F0FF !important;
-    border: none !important;
-    color: #002B49 !important;
-    font-weight: 700 !important;
+    background: linear-gradient(90deg, #1890ff 0%, #03fbfd 100%) !important;
+    border: 1px solid #03fbfd !important;
+    color: #ffffff !important;
+    font-weight: 600 !important;
     border-radius: 6px;
-    box-shadow: 0 0 12px rgba(0, 240, 255, 0.4) !important;
+    box-shadow: 0 0 10px rgba(3, 251, 253, 0.3) !important;
+    text-shadow: 0 0 4px rgba(0, 0, 0, 0.25);
 
     &:hover {
-      background: #40f4ff !important;
-      color: #001f35 !important;
-      box-shadow: 0 0 18px rgba(0, 240, 255, 0.6) !important;
+      background: linear-gradient(90deg, #40a9ff 0%, #40f4ff 100%) !important;
+      border-color: #40f4ff !important;
+      color: #ffffff !important;
+      box-shadow: 0 0 16px rgba(3, 251, 253, 0.55) !important;
+    }
+
+    &:active {
+      background: linear-gradient(90deg, #096dd9 0%, #08d8da 100%) !important;
+      box-shadow: 0 0 8px rgba(3, 251, 253, 0.4) !important;
+    }
+
+    &[disabled],
+    &.ant-btn-disabled {
+      background: linear-gradient(90deg, rgba(24, 144, 255, 0.4) 0%, rgba(3, 251, 253, 0.4) 100%) !important;
+      border-color: rgba(3, 251, 253, 0.4) !important;
+      color: rgba(255, 255, 255, 0.6) !important;
+      box-shadow: none !important;
     }
   }
 }

@@ -163,8 +163,11 @@ export default function Pollution() {
     { title: '经度', dataIndex: 'lng', width: 90 },
     { title: '纬度', dataIndex: 'lat', width: 90 },
     { title: '备注', dataIndex: 'beizhu', width: 100 },
-    { title: '操作', fixed: 'right' as const, width: 130, render: (_: unknown, r: PollutionItem) => (
-      <Space><Button size="small" onClick={() => handleEdit(r)}>编辑</Button><Button size="small" danger onClick={() => handleDelete(r)}>删除</Button></Space>
+    { title: '操作', width: 180, align: 'center' as const, render: (_: unknown, r: PollutionItem) => (
+      <div className="flex items-center gap-1.5 justify-center whitespace-nowrap">
+        <button type="button" className="tech-action-btn btn-detail" onClick={() => handleEdit(r)}>编辑</button>
+        <button type="button" className="tech-action-btn btn-danger" onClick={() => handleDelete(r)}>删除</button>
+      </div>
     ) },
   ]
 

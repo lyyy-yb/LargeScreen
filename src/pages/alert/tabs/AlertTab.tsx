@@ -1,15 +1,6 @@
-import { Button, Input, Select, Switch, Table, DatePicker } from 'antd'
+import { Input, Select, Switch, Table, DatePicker } from 'antd'
 import type { TableColumnsType } from 'antd'
 import type { Dayjs } from 'dayjs'
-import {
-  CheckCircleOutlined,
-  SendOutlined,
-  EyeOutlined,
-  DeleteOutlined,
-  RollbackOutlined,
-  SearchOutlined,
-  AlertFilled,
-} from '@ant-design/icons'
 import { disabledFutureDate } from '@/utils/helpers'
 import { DATA_TYPE_OPTIONS, ALERT_LEVEL_OPTIONS } from './shared/tabConstants'
 import type { AlertEvent } from '../modals/AlertDetailModal'
@@ -87,15 +78,23 @@ export default function AlertTab({
     {
       title: '预警级别',
       dataIndex: 'alertLevel',
-      width: 90,
+      width: 95,
       render: (t: string) => {
         const item = ALERT_LEVEL_OPTIONS.find((o) => o.value === t) || {
           label: '二级预警',
           color: '#FA8C16',
         }
+        const cls =
+          item.label.includes('一') || t === '1' || t === 'red'
+            ? 'level-1'
+            : item.label.includes('二') || t === '2' || t === 'orange'
+              ? 'level-2'
+              : item.label.includes('三') || t === '3' || t === 'yellow'
+                ? 'level-3'
+                : 'level-4'
         return (
-          <span className="flex items-center gap-1 font-semibold" style={{ color: item.color }}>
-            <AlertFilled style={{ color: item.color, fontSize: 13 }} />
+          <span className={`pill-badge ${cls}`}>
+            <span className="pill-dot" />
             {item.label}
           </span>
         )
@@ -106,91 +105,78 @@ export default function AlertTab({
     {
       title: '处置状态',
       dataIndex: 'status',
-      width: 80,
+      width: 85,
       render: (t: string) => {
-        const m: Record<string, { l: string; c: string }> = {
-          undispatched: { l: '待派发', c: 'gold' },
-          pending: { l: '待处置', c: 'orange' },
-          processing: { l: '处置中', c: 'blue' },
-          completed: { l: '已处置', c: 'green' },
-          closed: { l: '已关闭', c: 'default' },
-          cleared: { l: '已清除', c: 'default' },
+        const m: Record<string, { l: string; cls: string }> = {
+          undispatched: { l: '待派发', cls: 'status-pending' },
+          pending: { l: '待处置', cls: 'status-pending' },
+          processing: { l: '处置中', cls: 'status-processing' },
+          completed: { l: '已处置', cls: 'status-completed' },
+          closed: { l: '已关闭', cls: 'status-default' },
+          cleared: { l: '已清除', cls: 'status-default' },
         }
-        return <span style={{ color: m[t]?.c === 'default' ? 'rgba(255,255,255,0.45)' : undefined }}>{m[t]?.l}</span>
+        const item = m[t] || { l: t || '未知', cls: 'status-default' }
+        return <span className={`pill-badge ${item.cls}`}>{item.l}</span>
       },
     },
     { title: '预警时间', dataIndex: 'createdAt', width: 150 },
     {
       title: '操作',
-      width: isTown ? 70 : 160,
-      fixed: 'right' as const,
+      width: isTown ? 80 : 200,
+      align: 'center' as const,
       render: (_: unknown, r: AlertEvent) => (
-        <div className="flex items-center gap-1 whitespace-nowrap">
-          <Button
-            type="link"
-            size="small"
-            icon={<EyeOutlined />}
-            className="!text-[#03FBFD] hover:!text-white !p-0"
+        <div className="flex items-center gap-1.5 justify-center whitespace-nowrap">
+          <button
+            type="button"
+            className="tech-action-btn btn-detail"
             onClick={() => handlers.onOpenDetail(r)}
           >
             详情
-          </Button>
+          </button>
           {!isTown && r.status === 'undispatched' && (
             <>
-              <Button
-                type="link"
-                size="small"
-                icon={<SendOutlined />}
-                className="!text-[#1890FF] hover:!text-blue-300 !p-0"
+              <button
+                type="button"
+                className="tech-action-btn btn-dispatch"
                 onClick={() => handlers.onOpenDispatch(r)}
               >
                 派发
-              </Button>
-              <Button
-                type="link"
-                size="small"
-                danger
-                icon={<DeleteOutlined />}
-                className="!p-0"
+              </button>
+              <button
+                type="button"
+                className="tech-action-btn btn-danger"
                 onClick={() => handlers.onClear(r.id)}
               >
                 清除
-              </Button>
+              </button>
             </>
           )}
           {!isTown && r.status === 'completed' && (
             <>
-              <Button
-                type="link"
-                size="small"
-                icon={<CheckCircleOutlined />}
-                className="!text-[#52C41A] hover:!text-green-300 !p-0"
+              <button
+                type="button"
+                className="tech-action-btn btn-success"
                 onClick={() => handlers.onConfirm(r.id)}
               >
                 确认
-              </Button>
-              <Button
-                type="link"
-                size="small"
-                icon={<RollbackOutlined />}
-                className="!text-[#FA8C16] hover:!text-orange-300 !p-0"
+              </button>
+              <button
+                type="button"
+                className="tech-action-btn btn-dispatch"
                 onClick={() => handlers.onReturn(r.id)}
               >
                 退回
-              </Button>
+              </button>
             </>
           )}
           {!isTown && (r.status === 'closed' || r.status === 'completed' || r.status === 'cleared') && (
-            <Button
-              type="link"
-              size="small"
-              danger
-              icon={<DeleteOutlined />}
-              className="!p-0"
+            <button
+              type="button"
+              className="tech-action-btn btn-danger"
               onClick={() => handlers.onDelete(r.id)}
             >
               删除
-            </Button>
+            </button>
           )}
         </div>
       ),
@@ -199,25 +185,17 @@ export default function AlertTab({
 
   return (
     <>
-      {/* 筛选行 */}
-      <div className="flex items-center gap-3 flex-shrink-0 px-2 pt-2">
+      {/* 筛选行：搜索框 300ms 防抖（防抖由父组件 useDebounce 接管）；Select / RangePicker / Switch 即时触发 */}
+      <div className="flex items-center gap-3 flex-shrink-0 px-2 pt-2 pb-2">
         <Input
           className="model_from_input !w-200px"
           placeholder="搜索设备/数据源名称"
           value={searchDevice}
           onChange={(e) => setSearchDevice(e.target.value)}
-          onPressEnter={() => handlers.onApplySearch()}
           allowClear
-          onClear={() => handlers.onApplySearch('')}
-          suffix={
-            <SearchOutlined
-              className="text-[#03FBFD] cursor-pointer"
-              onClick={() => handlers.onApplySearch()}
-            />
-          }
         />
         <Select
-          className="!w-160px model_from_sel"
+          className="!w-150px model_from_sel"
           classNames={{ popup: { root: 'alert-rule-dropdown' } }}
           placeholder="筛选接入类型"
           value={filterDataType}
@@ -229,7 +207,7 @@ export default function AlertTab({
           allowClear
         />
         <Select
-          className="!w-150px model_from_sel"
+          className="!w-140px model_from_sel"
           classNames={{ popup: { root: 'alert-rule-dropdown' } }}
           placeholder="筛选预警级别"
           value={filterLevel}
@@ -241,7 +219,7 @@ export default function AlertTab({
           allowClear
         />
         <Select
-          className="!w-150px model_from_sel"
+          className="!w-140px model_from_sel"
           classNames={{ popup: { root: 'alert-rule-dropdown' } }}
           placeholder="筛选处置状态"
           value={filterStatus}
@@ -270,7 +248,7 @@ export default function AlertTab({
           />
         </div>
         <RangePicker
-          className="model_from_input !w-340px"
+          className="model_from_input !w-320px"
           classNames={{ popup: { root: 'alert-rule-dropdown' } }}
           showTime
           format="YYYY-MM-DD HH:mm:ss"
@@ -302,7 +280,6 @@ export default function AlertTab({
           },
         }}
         size="small"
-        scroll={{ x: 950 }}
       />
     </>
   )

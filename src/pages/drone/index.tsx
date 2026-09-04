@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { Button, Image, Input, Modal, Spin, message } from 'antd'
-import { ArrowLeftOutlined, RocketOutlined, VideoCameraOutlined, PictureOutlined, DashboardOutlined, SendOutlined, PlayCircleOutlined, CloseOutlined } from '@ant-design/icons'
-import dayjs from 'dayjs'
+import { Button, DatePicker, Image, Input, Modal, Popover, Spin, message } from 'antd'
+import { RocketOutlined, VideoCameraOutlined, PictureOutlined, DashboardOutlined, SendOutlined, PlayCircleOutlined, CloseOutlined, FilterOutlined } from '@ant-design/icons'
+import dayjs, { type Dayjs } from 'dayjs'
+import { disabledFutureDate } from '@/utils/helpers'
 import './index.less'
 import L7MapView from '@/components/L7MapView'
 import { dockList, listFlyJob, listFlyPlan, listFlyResult } from '@/servers/mapBox'
@@ -16,7 +16,6 @@ import type { TaskItem, PlanItem, FlyResultItem, SensorData } from './shared'
 import { isValidCoordinate, getRegionCamera, statusObj } from './shared'
 
 export default function Drone() {
-  const navigate = useNavigate()
   const [docks, setDocks] = useState<NormalizedDock[]>([])
   const [dockCode, setDockCode] = useState<string | null>(null)
   // sensorData 仅作为展示用读数，setter 未在写路径上触发（依赖后端 SSE 后续接入）
@@ -39,6 +38,13 @@ export default function Drone() {
   // 搜索关键字
   const [jobSearchText, setJobSearchText] = useState('')
   const [planSearchText, setPlanSearchText] = useState('')
+
+  // 飞行任务日期范围过滤（默认年初 → 今天，与原默认值一致）
+  const [jobDateRange, setJobDateRange] = useState<[Dayjs, Dayjs]>(() => [
+    dayjs().startOf('year'),
+    dayjs(),
+  ])
+  const [jobFilterOpen, setJobFilterOpen] = useState(false)
 
   // 地图中心控制（首次加载数据后飞到机场）
   const [mapCenter, setMapCenter] = useState<[number, number] | undefined>(undefined)
@@ -93,11 +99,15 @@ export default function Drone() {
     return () => { cancelled = true }
   }, [moveMapTo, querySelection])
 
-  // 选中机场变化 → 查询该机场飞行任务/待执飞计划
+  // 选中机场变化 / 日期范围变化 → 查询该机场飞行任务/待执飞计划
   useEffect(() => {
     if (!dockCode) return
     let cancelled = false
-    const param = { dockCode, startDate: dayjs().startOf('year').format('YYYY-MM-DD'), endDate: dayjs().format('YYYY-MM-DD') }
+    const param = {
+      dockCode,
+      startDate: jobDateRange[0].format('YYYY-MM-DD'),
+      endDate: jobDateRange[1].format('YYYY-MM-DD'),
+    }
 
     setJobsLoading(true)
     setPlansLoading(true)
@@ -116,7 +126,7 @@ export default function Drone() {
       .catch(() => { if (!cancelled) setPlans([]) })
       .finally(() => { if (!cancelled) setPlansLoading(false) })
     return () => { cancelled = true }
-  }, [dockCode])
+  }, [dockCode, jobDateRange])
 
   // 点击飞行任务 → 选中该任务，加载其 listFlyResult 图片/视频
   const selectJob = (jobID: string) => {
@@ -221,10 +231,6 @@ export default function Drone() {
   return (
     <div className="w-full h-full relative overflow-hidden" style={{ background: '#1a5ab0' }}>
       <L7MapView id="drone-map" center={mapCenter ?? regionCamera.center} zoom={mapZoom ?? regionCamera.zoom} minZoom={6} maxZoom={14} showTiles markers={markers} markerIconUrl="/marker/drone-on.png" onSceneLoaded={handleSceneLoaded} />
-      {/* 返回 */}
-      <div className="absolute top-15px left-20px z-50">
-        <Button type="text" icon={<ArrowLeftOutlined />} onClick={() => navigate('/monitor')} className="!text-[#03FBFD] !bg-[rgba(255,255,255,0.1)] hover:!bg-[rgba(255,255,255,0.2)] !rounded-2xl">返回监控大屏</Button>
-      </div>
       {/* 顶部选择器 */}
       <div className="absolute top-45px left-1/2 -translate-x-1/2 z-50 flex gap-2 bg-[rgba(0,56,129,0.8)] px-4 py-2 rounded-xl border border-[rgba(255,255,255,0.3)]">
         <RegionSelector />
@@ -400,14 +406,59 @@ export default function Drone() {
           <div className="bg-[rgba(0,56,129,0.85)] flex-1 rounded-20px px-3.5 py-2 flex flex-col overflow-hidden pointer-events-auto border border-[rgba(255,255,255,0.3)]">
             <div className="flex items-center justify-between py-1.5 shrink-0 gap-2">
               <span className="text-[#A0C7FF] text-16px font-bold shrink-0">飞行任务</span>
-              <Input
-                placeholder="搜索名称/ID"
-                allowClear
-                size="small"
-                value={jobSearchText}
-                onChange={e => setJobSearchText(e.target.value)}
-                className="drone-header-search"
-              />
+              <div className="flex items-center gap-1.5">
+                <Input
+                  placeholder="搜索名称/ID"
+                  allowClear
+                  size="small"
+                  value={jobSearchText}
+                  onChange={e => setJobSearchText(e.target.value)}
+                  className="drone-header-search"
+                />
+                <Popover
+                  trigger="click"
+                  open={jobFilterOpen}
+                  onOpenChange={setJobFilterOpen}
+                  placement="bottomRight"
+                  arrow={false}
+                  content={
+                    <div className="drone-date-filter">
+                      <div className="drone-date-filter__title">选择日期范围</div>
+                      <DatePicker.RangePicker
+                        value={jobDateRange}
+                        onChange={(values) => {
+                          if (values && values[0] && values[1]) {
+                            setJobDateRange([values[0], values[1]])
+                          }
+                        }}
+                        format="YYYY-MM-DD"
+                        allowClear={false}
+                        disabledDate={disabledFutureDate}
+                        size="small"
+                      />
+                      <div className="drone-date-filter__actions">
+                        <Button
+                          size="small"
+                          onClick={() => setJobDateRange([dayjs().startOf('year'), dayjs()])}
+                        >
+                          重置
+                        </Button>
+                        <Button size="small" type="primary" onClick={() => setJobFilterOpen(false)}>
+                          确定
+                        </Button>
+                      </div>
+                    </div>
+                  }
+                >
+                  <Button
+                    type="text"
+                    size="small"
+                    icon={<FilterOutlined />}
+                    className={`drone-filter-btn ${jobFilterOpen ? 'drone-filter-btn--active' : ''}`}
+                    title={`日期范围：${jobDateRange[0].format('YYYY-MM-DD')} ~ ${jobDateRange[1].format('YYYY-MM-DD')}`}
+                  />
+                </Popover>
+              </div>
             </div>
             <div className="flex-1 overflow-y-auto space-y-2 py-1">
               {!dockCode && <div className="text-[rgba(168,214,255,0.4)] text-11px py-2 text-center">请先在左侧选择无人机机场</div>}

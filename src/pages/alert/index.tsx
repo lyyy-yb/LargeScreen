@@ -1,12 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Button, Select, App } from 'antd'
+import { Select, App } from 'antd'
 import { ArrowLeftOutlined } from '@ant-design/icons'
 import RegionSelector from '@/components/RegionSelector'
 import './index.less'
 import { useAppStore, useAuthStore } from '@/stores'
 import { addOption, buildDeptRegionOptions, nameEquals } from '@/utils/deptRegion'
 import { getVisibleAlertTabs, type AlertTab } from '@/utils/region'
+import { useDebounce } from '@/hooks/useDebounce'
 import type { Dayjs } from 'dayjs'
 import { alertEventApi, disposalTaskApi } from '@/servers/business'
 import type { AlertEventDTO, DisposalTaskDTO } from '@/types/business'
@@ -21,6 +22,8 @@ import TrendsTab from './tabs/TrendsTab'
 import RuleTab from './tabs/RuleTab'
 import AlertTabView from './tabs/AlertTab'
 import TaskTab from './tabs/TaskTab'
+import AlertOverviewCards from './components/AlertOverviewCards'
+import type { AlertDashboardVO } from '@/types/business'
 import {
   DATA_TYPE_OPTIONS as dataTypeOptions,
   ALERT_LEVEL_OPTIONS as alertLevelOptions,
@@ -81,6 +84,7 @@ export default function AlertPage() {
   const [alerts, setAlerts] = useState<AlertEvent[]>([])
   const [tasks, setTasks] = useState<DisposalTask[]>([])
   const [loading, setLoading] = useState(false)
+  const [dashboard, setDashboard] = useState<AlertDashboardVO | null>(null)
   // 4 个 Modal 的状态合并：open + data 二元组（RuleModal 由 RuleTab 内部自管）
   const [alertDetail, setAlertDetail] = useState<{ open: boolean; alert: AlertEvent | null }>({ open: false, alert: null })
   const [dispatchModal, setDispatchModal] = useState<{ open: boolean; alert: AlertEvent | null }>({ open: false, alert: null })
@@ -241,6 +245,15 @@ export default function AlertPage() {
   // loadRules effect 已迁到 tabs/RuleTab.tsx
 
   useEffect(() => {
+    alertEventApi
+      .dashboard()
+      .then((res) => {
+        if (res?.data) setDashboard(res.data)
+      })
+      .catch(() => {})
+  }, [])
+
+  useEffect(() => {
     queueMicrotask(() => void loadAlerts())
   }, [loadAlerts])
 
@@ -255,6 +268,14 @@ export default function AlertPage() {
     void loadAlerts(true)
   }, 30_000, [activeTab, loadAlerts])
 
+  // 搜索框 300ms 防抖：连续输入停止 300ms 后才应用到查询，避免每次按键打接口
+  const debouncedAlertSearch = useDebounce(alertSearchDevice, 300)
+  useEffect(() => {
+    setAlertAppliedDevice(debouncedAlertSearch.trim())
+    setAlertsPage(1)
+  }, [debouncedAlertSearch])
+
+  // AlertTab 的 onPressEnter / onClear 仍保留立即查询入口（用户主动回车或清空不应等防抖）
   const applyAlertSearch = (value?: string) => {
     setAlertAppliedDevice((value ?? alertSearchDevice).trim())
     setAlertsPage(1)
@@ -442,29 +463,22 @@ export default function AlertPage() {
 
   return (
     <div className="alert-page-container">
-      {/* 返回行 - 紧凑上移 */}
+      {/* 顶部返回导航行 (借鉴图一图二: < 返回监控大屏 | 预警中心) */}
       <div className="alert-header-bar">
         <div className="header-left">
-          <Button
-            type="text"
-            icon={<ArrowLeftOutlined />}
-            onClick={() => navigate('/monitor')}
-            className="!text-[#03FBFD] hover:!text-white !px-2 !h-28px"
-          >
-            返回监控大屏
-          </Button>
+          <div className="alert-nav-breadcrumb">
+            <span className="back-btn" onClick={() => navigate('/monitor')}>
+              <ArrowLeftOutlined /> 返回监控大屏
+            </span>
+            <span className="nav-divider">|</span>
+            <span className="nav-current-title">预警中心</span>
+          </div>
           <RegionSelector />
         </div>
       </div>
 
-      {/* 标题 + Tabs + 按钮 同一行 */}
-      <div className="alert-title-tabs-row" style={{ position: 'relative' }}>
-        <div className="alert-center-title">
-          <span className="title-diamond">◆</span>
-          <span>预警中心</span>
-          <span className="title-diamond">◆</span>
-        </div>
-
+      {/* Tabs 切换行 */}
+      <div className="alert-title-tabs-row">
         <div className="tech-tabs-bar">
           {isTabVisible('rules') && (
             <div
@@ -499,9 +513,17 @@ export default function AlertPage() {
             </div>
           )}
         </div>
-
-        <div className="header-right-btn" />
       </div>
+
+      {/* 顶部 5 联排指标卡 (实时预警监控 & 处置任务管理 Tab 展示) */}
+      {(activeTab === 'alerts' || activeTab === 'tasks') && (
+        <AlertOverviewCards
+          mode={activeTab}
+          dashboard={dashboard}
+          totalAlerts={alertsTotal}
+          totalTasks={tasksTotal}
+        />
+      )}
 
       {/* 表格 / 内容区域 */}
       <div className="tech-table-wrapper">

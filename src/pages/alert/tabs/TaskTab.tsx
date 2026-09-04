@@ -1,14 +1,6 @@
-import { Button, Select, Table, Tag } from 'antd'
+import { Select, Table } from 'antd'
 import type { TableColumnsType } from 'antd'
-import {
-  EyeOutlined,
-  EditOutlined,
-  CheckCircleOutlined,
-  SendOutlined,
-  RollbackOutlined,
-  DeleteOutlined,
-} from '@ant-design/icons'
-import { DATA_TYPE_OPTIONS, TASK_TYPE_OPTIONS, TASK_STATUS_LABEL_MAP } from './shared/tabConstants'
+import { DATA_TYPE_OPTIONS, TASK_TYPE_OPTIONS } from './shared/tabConstants'
 import type { DisposalTask } from '../modals/TaskDetailModal'
 
 export interface TaskTabHandlers {
@@ -71,106 +63,114 @@ export default function TaskTab({
     {
       title: '状态',
       dataIndex: 'status',
-      width: 80,
+      width: 90,
       render: (t: string) => {
-        const m = TASK_STATUS_LABEL_MAP[t]
-        return <Tag color={m?.color ?? 'default'}>{m?.label ?? t}</Tag>
+        const m: Record<string, { l: string; cls: string }> = {
+          pending: { l: '待接收', cls: 'status-pending' },
+          processing: { l: '处置中', cls: 'status-processing' },
+          committed: { l: '已提交', cls: 'status-processing' },
+          completed: { l: '已完成', cls: 'status-completed' },
+          inspecting: { l: '现场核查中', cls: 'status-inspecting' },
+        }
+        const item = m[t] || { l: t || '未知', cls: 'status-default' }
+        return <span className={`pill-badge ${item.cls}`}>{item.l}</span>
       },
     },
-    { title: '处置人', dataIndex: 'assigneeName', width: 80, render: (t: string) => t || '未分配' },
-    { title: '要求时间', dataIndex: 'requireTime', width: 150 },
+    { title: '处置人', dataIndex: 'assigneeName', width: 90, render: (t: string) => t || '未分配' },
+    {
+      title: '要求时间',
+      dataIndex: 'requireTime',
+      width: 160,
+      render: (t: string, r: DisposalTask) => {
+        if (!t) return '-'
+        // 如果超期且未完成，突出警告提示（对标图二红字警告）
+        const isOverdue = r.status !== 'completed' && new Date(t).getTime() < Date.now()
+        if (isOverdue) {
+          return (
+            <span className="text-[#ff4d4f] flex items-center gap-1 font-mono text-12px">
+              <span className="font-bold">⚠</span>
+              {t}
+            </span>
+          )
+        }
+        return <span className="text-[#c2e5ff] font-mono text-12px">{t}</span>
+      },
+    },
     {
       title: '操作',
-      width: 210,
-      fixed: 'right' as const,
+      width: 220,
+      align: 'center' as const,
       render: (_: unknown, r: DisposalTask) => (
-        <div className="flex items-center gap-1 whitespace-nowrap">
-          <Button
-            type="link"
-            size="small"
-            icon={<EyeOutlined />}
-            className="!text-[#03FBFD] hover:!text-white !p-0"
+        <div className="flex items-center gap-1.5 justify-center whitespace-nowrap">
+          <button
+            type="button"
+            className="tech-action-btn btn-detail"
             onClick={() => handlers.onOpenDetail(r)}
           >
             详情
-          </Button>
+          </button>
           {!isTown && r.status === 'pending' && (
-            <Button
-              type="link"
-              size="small"
-              icon={<CheckCircleOutlined />}
-              className="!text-[#52C41A] hover:!text-green-300 !p-0"
+            <button
+              type="button"
+              className="tech-action-btn btn-receive"
               onClick={() => handlers.onUpdateStatus(r.id, 'processing')}
             >
               接收
-            </Button>
+            </button>
           )}
           {!isTown && r.status === 'processing' && (
             <>
-              <Button
-                type="link"
-                size="small"
-                icon={<EditOutlined />}
-                className="!text-[#1890FF] hover:!text-blue-300 !p-0"
+              <button
+                type="button"
+                className="tech-action-btn btn-detail"
                 onClick={() => handlers.onOpenCommit(r)}
               >
                 处置
-              </Button>
-              <Button
-                type="link"
-                size="small"
-                icon={<SendOutlined />}
-                className="!text-[#FA8C16] hover:!text-orange-300 !p-0"
+              </button>
+              <button
+                type="button"
+                className="tech-action-btn btn-dispatch"
                 onClick={() => handlers.onDispatchToTown(r)}
               >
                 下派
-              </Button>
+              </button>
             </>
           )}
           {!isTown && r.status === 'committed' && (
             <>
-              <Button
-                type="link"
-                size="small"
-                icon={<CheckCircleOutlined />}
-                className="!text-[#52C41A] hover:!text-green-300 !p-0"
+              <button
+                type="button"
+                className="tech-action-btn btn-success"
                 onClick={() => handlers.onConfirm(r.alertId)}
               >
                 确认
-              </Button>
-              <Button
-                type="link"
-                size="small"
-                icon={<RollbackOutlined />}
-                className="!text-[#FA8C16] hover:!text-orange-300 !p-0"
+              </button>
+              <button
+                type="button"
+                className="tech-action-btn btn-dispatch"
                 onClick={() => handlers.onReturn(r.alertId)}
               >
                 退回
-              </Button>
+              </button>
             </>
           )}
           {(r.status === 'committed' || r.status === 'completed') && r.disposalContent && (
-            <Button
-              type="link"
-              size="small"
-              icon={<EyeOutlined />}
-              className="!text-[#03FBFD] hover:!text-white !p-0"
+            <button
+              type="button"
+              className="tech-action-btn btn-detail"
               onClick={() => handlers.onOpenDisposalView(r)}
             >
               查看
-            </Button>
+            </button>
           )}
           {!isTown && r.status === 'completed' && (
-            <Button
-              type="link"
-              size="small"
-              danger
-              icon={<DeleteOutlined />}
-              className="!p-0"
+            <button
+              type="button"
+              className="tech-action-btn btn-danger"
               onClick={() => handlers.onDelete(r.id)}
             >
               删除
-            </Button>
+            </button>
           )}
         </div>
       ),
@@ -180,7 +180,7 @@ export default function TaskTab({
   return (
     <>
       {/* 筛选行 */}
-      <div className="flex items-center gap-3 flex-shrink-0 px-2 pt-2">
+      <div className="flex items-center gap-3 flex-shrink-0 px-2 pt-2 pb-2">
         <Select
           className="!w-160px model_from_sel"
           classNames={{ popup: { root: 'alert-rule-dropdown' } }}
@@ -241,7 +241,6 @@ export default function TaskTab({
           },
         }}
         size="small"
-        scroll={{ x: 900 }}
       />
     </>
   )

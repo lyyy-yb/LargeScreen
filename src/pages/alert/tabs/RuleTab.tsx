@@ -3,17 +3,12 @@ import { Button, Input, Select, Switch, Table, App } from 'antd'
 import type { TableColumnsType } from 'antd'
 import {
   PlusOutlined,
-  EditOutlined,
-  EyeOutlined,
-  CopyOutlined,
-  DeleteOutlined,
   DownloadOutlined,
   ImportOutlined,
   ExportOutlined,
-  SearchOutlined,
-  AlertFilled,
 } from '@ant-design/icons'
 import dayjs from 'dayjs'
+import { useDebounce } from '@/hooks/useDebounce'
 import { warningRuleApi } from '@/servers/business'
 import type { WarningRuleExportQuery } from '@/types/business'
 import RuleModal, {
@@ -125,10 +120,12 @@ export default function RuleTab({
     queueMicrotask(() => void loadRules())
   }, [loadRules])
 
-  const applyRuleSearch = (value?: string) => {
-    setRuleAppliedName((value ?? ruleSearchName).trim())
+  // 搜索框 300ms 防抖（修改即触发，无需回车/查询按钮）
+  const debouncedRuleSearch = useDebounce(ruleSearchName, 300)
+  useEffect(() => {
+    setRuleAppliedName(debouncedRuleSearch.trim())
     setRulesPage(1)
-  }
+  }, [debouncedRuleSearch])
 
   const handleDeleteRule = (id: string) => {
     modal.confirm({
@@ -248,15 +245,23 @@ export default function RuleTab({
     {
       title: '预警级别',
       dataIndex: 'alertLevel',
-      width: 90,
+      width: 95,
       render: (t: string) => {
         const item = ALERT_LEVEL_OPTIONS.find((o) => o.value === t) || {
           label: '二级预警',
           color: '#FA8C16',
         }
+        const cls =
+          item.label.includes('一') || t === '1' || t === 'red'
+            ? 'level-1'
+            : item.label.includes('二') || t === '2' || t === 'orange'
+              ? 'level-2'
+              : item.label.includes('三') || t === '3' || t === 'yellow'
+                ? 'level-3'
+                : 'level-4'
         return (
-          <span className="flex items-center gap-1 font-semibold" style={{ color: item.color }}>
-            <AlertFilled style={{ color: item.color, fontSize: 13 }} />
+          <span className={`pill-badge ${cls}`}>
+            <span className="pill-dot" />
             {item.label}
           </span>
         )
@@ -304,49 +309,40 @@ export default function RuleTab({
     },
     {
       title: '操作',
-      width: isTown ? 70 : 140,
-      fixed: 'right' as const,
+      width: isTown ? 80 : 180,
+      align: 'center' as const,
       render: (_: unknown, r: AlertRule) =>
         isTown ? (
-          <Button
-            type="link"
-            size="small"
-            icon={<EyeOutlined />}
+          <button
+            type="button"
+            className="tech-action-btn btn-detail"
             onClick={() => openRuleModal('edit', r)}
-            className="!text-[#03FBFD] hover:!text-white !p-0"
           >
             查看
-          </Button>
+          </button>
         ) : (
-          <div className="flex items-center gap-1 whitespace-nowrap">
-            <Button
-              type="link"
-              size="small"
-              icon={<EditOutlined />}
+          <div className="flex items-center gap-1.5 justify-center whitespace-nowrap">
+            <button
+              type="button"
+              className="tech-action-btn btn-detail"
               onClick={() => openRuleModal('edit', r)}
-              className="!text-[#03FBFD] hover:!text-white !p-0"
             >
               编辑
-            </Button>
-            <Button
-              type="link"
-              size="small"
-              icon={<CopyOutlined />}
+            </button>
+            <button
+              type="button"
+              className="tech-action-btn btn-success"
               onClick={() => openRuleModal('copy', r)}
-              className="!text-[#52C41A] hover:!text-green-300 !p-0"
             >
               复制
-            </Button>
-            <Button
-              type="link"
-              size="small"
-              danger
-              icon={<DeleteOutlined />}
+            </button>
+            <button
+              type="button"
+              className="tech-action-btn btn-danger"
               onClick={() => handleDeleteRule(r.id)}
-              className="!p-0"
             >
               删除
-            </Button>
+            </button>
           </div>
         ),
     },
@@ -355,21 +351,13 @@ export default function RuleTab({
   return (
     <>
       {/* 工具栏 + 筛选同一行：搜索/筛选左，按钮组右 */}
-      <div className="flex items-center gap-3 flex-shrink-0 px-2 pt-2">
+      <div className="flex items-center gap-3 flex-shrink-0 px-2 pt-2 pb-3">
         <Input
           className="model_from_input !w-200px"
           placeholder="搜索规则名称"
           value={ruleSearchName}
           onChange={(e) => setRuleSearchName(e.target.value)}
-          onPressEnter={() => applyRuleSearch()}
           allowClear
-          onClear={() => applyRuleSearch('')}
-          suffix={
-            <SearchOutlined
-              className="text-[#03FBFD] cursor-pointer"
-              onClick={() => applyRuleSearch()}
-            />
-          }
         />
         <Select
           className="!w-160px model_from_sel"
@@ -452,12 +440,6 @@ export default function RuleTab({
               onClick={() => {
                 if (!canEditRule) return
                 openRuleModal('add')
-              }}
-              style={{
-                background: 'linear-gradient(90deg, #1890ff 0%, #03fbfd 100%)',
-                borderColor: '#03fbfd',
-                fontWeight: 600,
-                boxShadow: '0 0 10px rgba(3, 251, 253, 0.3)',
               }}
             >
               新增预警规则

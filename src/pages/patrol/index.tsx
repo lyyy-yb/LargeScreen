@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { Button, Select, Tag, Spin, message } from 'antd'
-import { ArrowLeftOutlined, CarOutlined } from '@ant-design/icons'
+import { CarOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
 import { Scene, HeatmapLayer, Source } from '@antv/l7'
 import type { ILayer } from '@antv/l7'
@@ -31,7 +30,6 @@ const colorLegend = [
 ]
 
 export default function Patrol() {
-  const navigate = useNavigate()
   const regionContext = useAppStore(state => state.regionContext)
   const mapSelection = regionContext?.mapSelection
   const [cars, setCars] = useState<CarItem[]>([])
@@ -172,10 +170,6 @@ export default function Patrol() {
   return (
     <div className="w-full h-full relative overflow-hidden" style={{ background: '#1a5ab0' }}>
       <L7MapView id="patrol-map" center={mapCenter} zoom={mapCounty ? 11 : mapCity ? 9 : 7.5} minZoom={6} maxZoom={14} showTiles onSceneLoaded={handleSceneLoaded} />
-      {/* 返回 */}
-      <div className="absolute top-15px left-20px z-50">
-        <Button type="text" icon={<ArrowLeftOutlined />} onClick={() => navigate('/monitor')} className="!text-[#03FBFD] !bg-[rgba(255,255,255,0.1)] hover:!bg-[rgba(255,255,255,0.2)] !rounded-2xl">返回监控大屏</Button>
-      </div>
       {/* 顶部因子选择 */}
       <div className="absolute top-45px left-1/2 -translate-x-1/2 z-50 flex gap-2 bg-[rgba(0,56,129,0.8)] px-4 py-2 rounded-xl border border-[rgba(255,255,255,0.3)] items-center">
         <RegionSelector />

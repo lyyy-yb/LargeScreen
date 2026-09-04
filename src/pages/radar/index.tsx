@@ -1,7 +1,9 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Button, Modal, QRCode, Select, Spin, message } from 'antd'
-import { ArrowLeftOutlined, EnvironmentOutlined, ExclamationCircleOutlined, InboxOutlined, SendOutlined } from '@ant-design/icons'
+import { Button, DatePicker, Modal, QRCode, Select, Spin, message } from 'antd'
+import './index.less'
+import { EnvironmentOutlined, ExclamationCircleOutlined, InboxOutlined, SendOutlined } from '@ant-design/icons'
+import { type Dayjs } from 'dayjs'
 import L7MapView from '@/components/L7MapView'
 import FlyListModel from '@/components/MapBox/FlyListModel'
 import { leidaList, alarmPointAll, dockList, options4leixing, wuranListByLngLat } from '@/servers/mapBox'
@@ -38,7 +40,10 @@ export default function Radar() {
   const [radarList, setRadarList] = useState<RadarStation[]>([])
   const [radarLoading, setRadarLoading] = useState(false)
   const [selectedBsiId, setSelectedBsiId] = useState('')
-  const [hourRange, setHourRange] = useState<1 | 3 | 24>(24)
+  // 三个快捷时间（近 1/3/24 小时）；custom 表示用日期范围（互斥）
+  const [hourRange, setHourRange] = useState<1 | 3 | 24 | 'custom'>(24)
+  // 自定义日期范围（包含时间，yyyy-MM-dd HH:mm:ss）
+  const [customRange, setCustomRange] = useState<[Dayjs, Dayjs] | null>(null)
   const [sceneReady, setSceneReady] = useState(false)
   const sceneRef = useRef<Scene | null>(null)
   const radarLayersRef = useRef<{ scan: RadarScanOverlay | null; icon: ILayer | null }>({ scan: null, icon: null })
@@ -147,6 +152,16 @@ export default function Radar() {
   // 按选中雷达查询突发/常规告警点位（hour 随底部时间范围切换，默认 24；结果为空/失败时清空列表，不使用 mock 数据）
   useEffect(() => {
     let cancelled = false
+    const buildAlarmParams = () => {
+      if (hourRange === 'custom' && customRange) {
+        return {
+          BsiId: selectedBsiId,
+          startTime: customRange[0].format('YYYY-MM-DD HH:mm:ss'),
+          endTime: customRange[1].format('YYYY-MM-DD HH:mm:ss'),
+        }
+      }
+      return { BsiId: selectedBsiId, hour: hourRange }
+    }
     const loadAlarm = async () => {
       if (!selectedBsiId) {
         setCgList([])
@@ -155,7 +170,7 @@ export default function Radar() {
       }
       try {
         setAlarmLoading(true)
-        const res = await alarmPointAll({ BsiId: selectedBsiId, hour: hourRange })
+        const res = await alarmPointAll(buildAlarmParams())
         if (cancelled) return
         const data: AlarmItem[] = res?.resultCode === 0 && Array.isArray(res.data) ? res.data : []
         const cg: AlarmItem[] = []
@@ -178,7 +193,7 @@ export default function Radar() {
     // 切换雷达后清除旧的定位高亮
     highlightLayerRef.current?.setData({ type: 'FeatureCollection', features: [] })
     return () => { cancelled = true }
-  }, [selectedBsiId, hourRange])
+  }, [selectedBsiId, hourRange, customRange])
 
   // 绘制雷达扫描动画 + 图标层（与原项目 showRadar 一致）
   const renderRadarLayers = useCallback(async (scene: Scene, list: RadarStation[]) => {
@@ -446,10 +461,6 @@ export default function Radar() {
   return (
     <div className="w-full h-full relative overflow-hidden" style={{ background: '#1a5ab0' }}>
       <L7MapView id="radar-map" center={mapCenter} zoom={mapZoom} minZoom={6} maxZoom={14} showTiles markers={markers} onSceneLoaded={handleSceneLoaded} onMarkerClick={handleMarkerClick} />
-      {/* 返回按钮 */}
-      <div className="absolute top-15px left-20px z-50">
-        <Button type="text" icon={<ArrowLeftOutlined />} onClick={() => navigate('/monitor')} className="!text-[#03FBFD] !bg-[rgba(255,255,255,0.1)] hover:!bg-[rgba(255,255,255,0.2)] !rounded-2xl">返回监控大屏</Button>
-      </div>
       {/* 顶部选择器 */}
       <div className="absolute top-45px left-1/2 -translate-x-1/2 z-50 flex gap-2 bg-[rgba(0,56,129,0.8)] px-4 py-2 rounded-xl border border-[rgba(255,255,255,0.3)]">
         <RegionSelector />
@@ -473,7 +484,7 @@ export default function Radar() {
           items={tfList}
           urgent
           loading={alarmLoading}
-          hourRange={hourRange}
+          hourRange={typeof hourRange === 'number' ? hourRange : undefined}
           onLocate={flyTo}
           onShare={showWX}
           dispatchContent={showContent}
@@ -484,7 +495,7 @@ export default function Radar() {
           subtitle="持续关注的例行监测点位"
           items={cgList}
           loading={alarmLoading}
-          hourRange={hourRange}
+          hourRange={typeof hourRange === 'number' ? hourRange : undefined}
           onLocate={flyTo}
           onShare={showWX}
           dispatchContent={showContent}
@@ -541,14 +552,17 @@ export default function Radar() {
           )}
         </div>
       </div>
-      {/* 底部时间选择 */}
+      {/* 底部时间选择：3 个快捷按钮 + 1 个日期范围（互斥）。选了快捷按钮则清空日期范围；选了日期范围则不传 hour。 */}
       <div className="absolute bottom-58px left-1/2 -translate-x-1/2 z-50 bg-[rgba(0,56,129,0.8)] px-4 py-2 rounded-xl border border-[rgba(255,255,255,0.3)] flex items-center gap-3">
-        <span className="text-[#A0C7FF] text-12px">时间范围</span>
+        <span className="text-[#A0C7FF] text-12px whitespace-nowrap">时间范围</span>
         {([1, 3, 24] as const).map(h => (
           <Button
             key={h}
             size="small"
-            onClick={() => setHourRange(h)}
+            onClick={() => {
+              setHourRange(h)
+              setCustomRange(null)
+            }}
             className={hourRange === h
               ? '!text-[#D5F9F9] !border-[#01C2FF] !bg-[#01C2FF] font-600'
               : '!text-[#D5F9F9] !border-[#6788AF]'}
@@ -556,6 +570,25 @@ export default function Radar() {
             近{h}小时
           </Button>
         ))}
+        <DatePicker.RangePicker
+          size="small"
+          showTime={{ format: 'HH:mm:ss' }}
+          format="YYYY-MM-DD HH:mm:ss"
+          value={customRange}
+          onChange={(values) => {
+            if (values && values[0] && values[1]) {
+              setCustomRange([values[0], values[1]])
+              setHourRange('custom')
+            } else {
+              setCustomRange(null)
+              // 清空日期范围时回退到默认 24 小时
+              setHourRange(24)
+            }
+          }}
+          placeholder={['开始时间', '结束时间']}
+          className="!w-380px radar-time-range-picker"
+          allowClear
+        />
       </div>
       {/* 二维码弹窗 */}
       <Modal open={wxVisible} onCancel={() => setWxVisible(false)} footer={null} title={null} width={380}>

@@ -39,3 +39,74 @@
     }
   }
 }
+
+/* 飞行任务日期过滤图标按钮（与搜索框高度对齐） */
+.drone-filter-btn {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 28px !important;
+  height: 28px !important;
+  min-width: 28px !important;
+  padding: 0 !important;
+  border: 1px solid rgba(255, 255, 255, 0.2) !important;
+  border-radius: 6px !important;
+  background: rgba(0, 0, 0, 0.25) !important;
+  color: rgba(168, 214, 255, 0.85) !important;
+  transition: all 0.2s ease-in-out !important;
+
+  &:hover,
+  &:focus {
+    border-color: #01C2FF !important;
+    background: rgba(0, 0, 0, 0.45) !important;
+    color: #01C2FF !important;
+  }
+
+  &.drone-filter-btn--active {
+    border-color: #01C2FF !important;
+    background: rgba(1, 194, 255, 0.18) !important;
+    color: #01C2FF !important;
+  }
+}
+
+/* 日期范围选择 Popover 弹层 */
+.drone-date-filter {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 4px;
+  min-width: 260px;
+
+  &__title {
+    color: #A8D6FF;
+    font-size: 12px;
+    line-height: 1.4;
+  }
+
+  /* RangePicker 适配暗色弹层 */
+  .ant-picker {
+    background: rgba(0, 0, 0, 0.35) !important;
+    border-color: rgba(255, 255, 255, 0.2) !important;
+    width: 100%;
+  }
+
+  .ant-picker-input > input {
+    color: #A8D6FF !important;
+    font-size: 12px;
+
+    &::placeholder {
+      color: rgba(168, 214, 255, 0.4) !important;
+    }
+  }
+
+  .ant-picker-suffix,
+  .ant-picker-separator {
+    color: rgba(168, 214, 255, 0.55) !important;
+  }
+
+  &__actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+}

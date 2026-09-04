@@ -26,16 +26,14 @@ export default function Header() {
   const user = useAuthStore(state => state.user)
   const resetRegionContext = useAppStore(state => state.resetRegionContext)
   const regionContext = useAppStore(state => state.regionContext)
-  const [currentTime, setCurrentTime] = useState(() => dayjs().format('YYYY / MM / DD HH:mm'))
+  const [currentTime, setCurrentTime] = useState(() => dayjs().format('YYYY / MM / DD  HH:mm:ss'))
 
   const avatarUrl = resolveAvatarUrl(user?.avatar)
   const displayName = user?.nickName || username || '用户'
 
   useEffect(() => {
-    const timer = window.setInterval(
-      () => setCurrentTime(dayjs().format('YYYY / MM / DD HH:mm')),
-      60_000,
-    )
+    const updateTime = () => setCurrentTime(dayjs().format('YYYY / MM / DD  HH:mm:ss'))
+    const timer = window.setInterval(updateTime, 1000)
     return () => window.clearInterval(timer)
   }, [])
 
@@ -94,11 +92,17 @@ export default function Header() {
 
   return (
     <header className="screen-header h-52px shrink-0 relative flex justify-center bg-gradient-to-r from-[#3d8ad4] via-[#1a5ab0] to-[#3d8ad4]">
-      <time className="absolute left-18px top-10px z-100 text-[#2af3ff] text-13px font-mono tracking-wide">
-        {currentTime}
-      </time>
+      {/* 左侧时间：秒级实时更新，垂直居中对齐，科技冰蓝字体 */}
+      <div className="absolute left-20px top-0 bottom-0 z-100 flex items-center">
+        <time
+          className="text-[#d8f0ff] text-13px font-mono font-medium tracking-wide flex items-center leading-none select-none"
+          style={{ textShadow: '0 0 8px rgba(180, 230, 255, 0.45)' }}
+        >
+          {currentTime}
+        </time>
+      </div>
 
-      {/* 标题图片 - 与demo一致的装饰性标题 */}
+      {/* 标题图片 - 装饰性标题 */}
       <img
         src={hBg}
         className="z-99 pointer-events-none object-contain h-86px"
@@ -106,18 +110,22 @@ export default function Header() {
         alt="颗粒物量子溯源管控平台"
       />
 
-      {/* 右侧操作区 */}
-      <div className="absolute right-0 pr-16px top-10px pointer-events-auto z-1000 flex gap-16px">
+      {/* 右侧操作区：垂直居中微调 */}
+      <div className="absolute right-0 pr-20px top-0 bottom-0 pointer-events-auto z-1000 flex items-center gap-14px">
         <Dropdown menu={{ items: manageItems, onClick: onManageClick }}>
-          <Space className="cursor-pointer">
-            <SettingOutlined className="text-#FFFFFF text-lg" />
-            <span className="c-#FFFFFF">管理</span>
+          <Space className="cursor-pointer px-2.5 py-1 rounded-4px bg-[rgba(255,255,255,0.08)] hover:bg-[rgba(255,255,255,0.18)] transition-colors border border-[rgba(255,255,255,0.2)]">
+            <SettingOutlined className="text-[#d8f0ff] text-base" />
+            <span className="text-[#d8f0ff] text-13px">管理</span>
           </Space>
         </Dropdown>
         <Dropdown menu={{ items: userItems, onClick: onUserClick }}>
-          <Space onClick={e => e.preventDefault()} className="cursor-pointer">
-            <span className="c-#FFFFFF">{displayName}</span>
+          <Space
+            onClick={e => e.preventDefault()}
+            className="cursor-pointer px-2.5 py-1 rounded-4px bg-[rgba(255,255,255,0.08)] hover:bg-[rgba(255,255,255,0.18)] transition-colors border border-[rgba(255,255,255,0.2)]"
+          >
+            <span className="text-[#d8f0ff] text-13px">{displayName}</span>
             <Avatar
+              size={24}
               src={avatarUrl}
               style={{ backgroundColor: '#0efbfd', color: '#004385' }}
               icon={!avatarUrl ? <UserOutlined /> : undefined}

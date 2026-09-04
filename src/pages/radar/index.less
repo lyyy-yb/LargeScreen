@@ -1,0 +1,31 @@
+// 雷达页底部日期范围选择器：暗色科技风适配
+.radar-time-range-picker {
+  background: rgba(0, 0, 0, 0.35) !important;
+  border-color: rgba(255, 255, 255, 0.2) !important;
+  color: #A8D6FF !important;
+
+  .ant-picker-input > input {
+    color: #A8D6FF !important;
+    font-size: 12px;
+
+    &::placeholder {
+      color: rgba(168, 214, 255, 0.4) !important;
+    }
+  }
+
+  .ant-picker-suffix,
+  .ant-picker-separator,
+  .ant-picker-clear {
+    color: rgba(168, 214, 255, 0.55) !important;
+
+    &:hover {
+      color: #03FBFD !important;
+    }
+  }
+
+  &:hover,
+  &.ant-picker-focused {
+    border-color: #03FBFD !important;
+    box-shadow: 0 0 6px rgba(3, 251, 253, 0.3) !important;
+  }
+}

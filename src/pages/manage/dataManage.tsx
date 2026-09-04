@@ -10,6 +10,7 @@ import { useAppStore } from '@/stores'
 import { normalizeDock, type NormalizedDock } from '@/utils/dock'
 import { disabledFutureDate } from '@/utils/helpers'
 import { toRegionQuery } from '@/utils/region'
+import { useDebounce } from '@/hooks/useDebounce'
 import type {
   AirDataDetailVO,
   AirDataLevel,
@@ -70,6 +71,8 @@ export default function DataManage() {
   const [docksLoading, setDocksLoading] = useState(false)
   const [droneDockCode, setDroneDockCode] = useState('')
   const [droneTaskName, setDroneTaskName] = useState('')
+  // 任务名称搜索 300ms 防抖：避免连续输入每次按键都触发无人机任务列表查询
+  const debouncedDroneTaskName = useDebounce(droneTaskName, 300)
   const [droneStatus, setDroneStatus] = useState<DroneTaskStatus>()
   const [includeThirdParty, setIncludeThirdParty] = useState(true)
   const [droneRange, setDroneRange] = useState<[Dayjs, Dayjs] | null>(defaultDayRange)
@@ -143,13 +146,13 @@ export default function DataManage() {
   const droneQuery = useMemo(
     () => ({
       dockCode: droneDockCode || undefined,
-      taskName: droneTaskName || undefined,
+      taskName: debouncedDroneTaskName || undefined,
       taskStatus: droneStatus,
       includeThirdParty,
       startTime: droneRange?.[0]?.format(DATE_TIME_FMT),
       endTime: droneRange?.[1]?.format(DATE_TIME_FMT),
     }),
-    [droneDockCode, droneTaskName, droneStatus, includeThirdParty, droneRange],
+    [droneDockCode, debouncedDroneTaskName, droneStatus, includeThirdParty, droneRange],
   )
 
   const fetchDrone = useCallback(
@@ -305,25 +308,19 @@ export default function DataManage() {
       <div className="alert-header-bar">
         <div className="header-left">
           {showBackToMonitor && (
-            <Button
-              type="text"
-              icon={<ArrowLeftOutlined />}
-              onClick={() => navigate('/monitor')}
-              className="!text-[#03FBFD] hover:!text-white !px-2 !h-28px"
-            >
-              返回监控大屏
-            </Button>
+            <div className="alert-nav-breadcrumb">
+              <span className="back-btn" onClick={() => navigate('/monitor')}>
+                <ArrowLeftOutlined /> 返回监控大屏
+              </span>
+              <span className="nav-divider">|</span>
+              <span className="nav-current-title">数据管理</span>
+            </div>
           )}
         </div>
       </div>
 
-      {/* 标题 + Tabs 同一行，与 alert 页布局一致 */}
+      {/* 标题 + Tabs 同一行，与预警中心保持一致风格 */}
       <div className="alert-title-tabs-row">
-        <div className="alert-center-title">
-          <span className="title-diamond">◆</span>
-          <span>数据管理</span>
-          <span className="title-diamond">◆</span>
-        </div>
         <div className="tech-tabs-bar">
           <div
             className={`tech-tab-item ${activeTab === 'station' ? 'active' : ''}`}

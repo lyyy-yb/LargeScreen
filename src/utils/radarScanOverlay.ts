@@ -2,7 +2,6 @@ import Marker from '@antv/l7-component/es/marker'
 import { PointLayer, type Scene } from '@antv/l7'
 import { anchorType } from '@antv/l7-utils'
 
-/** 扫描半径（真实米制）：6000m */
 export const RADAR_SCAN_RADIUS_M = 6000
 
 export interface RadarScanPoint {
@@ -35,7 +34,8 @@ interface MarkerEntry {
 }
 
 /**
- * 使用 L7 原生 shape('radar') + .style({ speed: 1, unit: 'meter' }) 实现 6000 米贴地雷达旋转扫描图层。
+ * 6000 米贴地雷达扫描盘：L7 原生 shape('radar') 旋转圈 + DOM 中心图标。
+ * 名称沿用 RadarScanOverlay 以保持与原调用方（监控大屏三层地图、雷达页）接口兼容。
  */
 export function createRadarScanOverlay(
   scene: Scene,

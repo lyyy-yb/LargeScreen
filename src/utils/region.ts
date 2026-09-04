@@ -25,7 +25,9 @@ const BUSINESS_ROLE_KEYS = new Set(['city_business', 'district_business', 'town_
 export type AlertTab = 'rules' | 'alerts' | 'tasks' | 'trends'
 
 // 市/区县业务人员可见的底部导航：监控大屏、光量子雷达、预警中心
-const CITY_COUNTY_BUSINESS_TAB_KEYS = ['/monitor', '/radar', '/alert']
+// 市级（city_business）单独列出，可看年度管理；区县业务（district_business）只可见上述三项
+const CITY_BUSINESS_TAB_KEYS = ['/monitor', '/radar', '/alert', '/report']
+const DISTRICT_BUSINESS_TAB_KEYS = ['/monitor', '/radar', '/alert']
 
 // 市/区县业务人员禁止访问的页面（矩阵未授予的功能）
 const CITY_COUNTY_BUSINESS_BLOCKED_PATHS = ['/drone', '/patrol', '/report', '/pollution', '/manage/data-source', '/manage/clean-rule']
@@ -39,7 +41,8 @@ export function isBusinessRole(context?: { roleKey?: string } | null) {
 
 // 底部导航可见页：返回 null 表示不限制；空数组表示无可见导航（乡镇业务人员）
 export function getVisibleTabKeys(roleKey?: string): string[] | null {
-  if (roleKey === 'city_business' || roleKey === 'district_business') return CITY_COUNTY_BUSINESS_TAB_KEYS
+  if (roleKey === 'city_business') return CITY_BUSINESS_TAB_KEYS
+  if (roleKey === 'district_business') return DISTRICT_BUSINESS_TAB_KEYS
   if (roleKey === 'town_business') return []
   return null
 }
