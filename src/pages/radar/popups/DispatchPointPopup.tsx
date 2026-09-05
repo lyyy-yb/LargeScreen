@@ -15,7 +15,7 @@ export default function DispatchPointPopup({ popup, onDispatch }: DispatchPointP
   }
   return (
     <div
-      className="absolute z-[9998] rounded-8px shadow-xl overflow-hidden"
+      className="map-point-popup absolute rounded-8px shadow-xl overflow-hidden"
       style={{ ...style, background: 'rgba(4,22,52,0.95)', border: '1px solid rgba(0,180,255,0.35)' }}
       onClick={e => e.stopPropagation()}
     >

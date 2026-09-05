@@ -6,6 +6,7 @@ import { Scene, HeatmapLayer, Source } from '@antv/l7'
 import type { ILayer } from '@antv/l7'
 import L7MapView from '@/components/L7MapView'
 import RegionSelector from '@/components/RegionSelector'
+import MapPanelHeader from '@/components/MapPanelHeader'
 import { useAppStore } from '@/stores'
 import { cities, districts } from '@/utils/city'
 import { zouhangList, taskList as zouhangTaskList, taskDetail } from '@/servers/mapBox'
@@ -168,10 +169,10 @@ export default function Patrol() {
       : [120.582886, 29.991549]
 
   return (
-    <div className="w-full h-full relative overflow-hidden" style={{ background: '#1a5ab0' }}>
+    <div className="map-screen w-full h-full relative overflow-hidden" style={{ background: '#1a5ab0' }}>
       <L7MapView id="patrol-map" center={mapCenter} zoom={mapCounty ? 11 : mapCity ? 9 : 7.5} minZoom={6} maxZoom={14} showTiles onSceneLoaded={handleSceneLoaded} />
       {/* 顶部因子选择 */}
-      <div className="absolute top-45px left-1/2 -translate-x-1/2 z-50 flex gap-2 bg-[rgba(0,56,129,0.8)] px-4 py-2 rounded-xl border border-[rgba(255,255,255,0.3)] items-center">
+      <div className="map-overlay-toolbar map-top-controls">
         <RegionSelector />
         <span className="text-[#A0C7FF] text-12px">监测因子</span>
         <Select value={wageVal} onChange={(v) => setWageVal(v)} className="w-110px screen-select" classNames={{ popup: { root: 'screen-select-popup' } }} size="small">
@@ -179,15 +180,17 @@ export default function Patrol() {
         </Select>
       </div>
       {/* 左侧 - 车辆列表（卡片式，与 drone 页无人机机场列表一致） */}
-      <div className="absolute left-20px top-70px bottom-20px z-50 w-320px pointer-events-none">
-        <div className="bg-[rgba(0,56,129,0.85)] h-full rounded-20px border border-[rgba(255,255,255,0.3)] px-4 py-3 overflow-y-auto pointer-events-auto">
-          <div className="text-[#A0C7FF] text-16px font-bold mb-3">走航车辆</div>
+      <div className="absolute left-16px top-10px bottom-10px z-50 w-330px pointer-events-none">
+        <div className="screen-glass-panel h-full flex flex-col pointer-events-auto">
+          <MapPanelHeader title="走航车辆" extra={<span>{cars.length} 辆</span>} />
+          <div className="map-panel-scroll">
           {carsLoading && (
             <div className="flex flex-col items-center justify-center gap-2 py-6 text-[#A8D6FF] text-12px">
               <Spin size="small" />
               <span>车辆列表加载中…</span>
             </div>
           )}
+          {!carsLoading && cars.length === 0 && <div className="text-[rgba(168,214,255,0.5)] text-12px py-6 text-center">当前区域暂无走航车辆</div>}
           {cars.map(item => (
             <div key={item.id ?? item.mnCode} className={`relative mb-3 rounded-xl border p-3 cursor-pointer transition-all ${curCarCode === item.mnCode ? 'border-[#01C2FF] bg-[rgba(1,194,255,0.15)]' : 'border-[rgba(255,255,255,0.2)] bg-[rgba(0,0,0,0.2)] hover:bg-[rgba(255,255,255,0.05)]'}`} onClick={() => handleSelectCar(item.mnCode)}>
               <div className="flex items-center justify-between mb-1">
@@ -202,12 +205,13 @@ export default function Patrol() {
               )}
             </div>
           ))}
+          </div>
         </div>
       </div>
       {/* 右侧 - 历史任务（卡片式，与 drone 页飞行任务列表一致） */}
-      <div className="absolute right-20px top-70px bottom-20px z-50 w-320px pointer-events-none">
-        <div className="bg-[rgba(0,56,129,0.85)] h-full rounded-20px border border-[rgba(255,255,255,0.3)] px-3 py-2 flex flex-col pointer-events-auto">
-          <div className="text-[#A0C7FF] text-16px font-bold py-2">历史任务</div>
+      <div className="absolute right-16px top-10px bottom-10px z-50 w-330px pointer-events-none">
+        <div className="screen-glass-panel h-full px-3 py-2 flex flex-col pointer-events-auto">
+          <MapPanelHeader title="历史任务" subtitle={curCarCode ? `当前车辆：${curCarCode}` : '请先选择走航车辆'} extra={<span>{taskDates.length} 项</span>} />
           <div className="flex-1 overflow-y-auto space-y-2 py-1">
             {tasksLoading && <div className="flex items-center justify-center gap-2 py-2 text-[#A8D6FF] text-11px"><Spin size="small" />加载中…</div>}
             {!tasksLoading && taskDates.length === 0 && <div className="text-[rgba(168,214,255,0.4)] text-11px py-2 text-center">暂无历史任务</div>}
@@ -222,13 +226,14 @@ export default function Patrol() {
       </div>
       {/* 热力图图例 */}
       {showHeatmap && (
-        <div className="absolute right-2px bottom-2px z-50 bg-[rgba(0,56,129,0.9)] rounded-lg px-3 py-2 text-[#A0C7FF] text-12px pointer-events-auto">
-          <div className="flex flex-col gap-1 w-120px">
+        <div className="screen-glass-panel map-patrol-legend text-[#A0C7FF] text-12px pointer-events-auto">
+          <MapPanelHeader title="热力图例" />
+          <div className="flex flex-col gap-1 w-full">
             {colorLegend.map((item, i) => (
               <div key={i} className="flex items-center gap-2"><div className="w-14px h-14px rounded-sm" style={{ background: item.color }} /><span>{item.range}</span></div>
             ))}
           </div>
-          <span className="text-10px">(\u03bcg/m\u00b3)</span>
+          <span className="text-10px">(μg/m³)</span>
           <div className="flex gap-2 mt-1">
             <Button type="text" size="small" className="!text-[#A0C7FF] !text-11px" onClick={() => setShowHeatmap(false)}>关闭</Button>
           </div>

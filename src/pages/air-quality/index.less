@@ -1,0 +1,471 @@
+// 空气质量大屏页面专用样式（仿 monitor 布局：地图铺满，aside 浮在上面）
+.air-quality-screen {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  color: #e7f7ff;
+  padding: 0 !important;
+}
+
+.air-quality-side {
+  position: absolute !important;
+  top: 10px;
+  bottom: 10px;
+  z-index: 30;
+  box-sizing: border-box;
+  width: 330px !important;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  overflow: hidden;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  backdrop-filter: none;
+}
+
+.air-quality-side-left {
+  left: 16px;
+}
+
+.air-quality-side-right {
+  right: 16px;
+}
+
+.air-quality-map-stage {
+  position: absolute !important;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+
+  &::after {
+    position: absolute;
+    inset: 0;
+    z-index: 12;
+    pointer-events: none;
+    content: "";
+    box-shadow:
+      inset 54px 0 62px -52px rgba(0, 8, 31, 0.78),
+      inset -54px 0 62px -52px rgba(0, 8, 31, 0.78),
+      inset 0 -42px 58px -40px rgba(0, 6, 24, 0.82);
+  }
+
+  .l7-map,
+  .l7-scene,
+  canvas {
+    background: transparent !important;
+  }
+}
+
+.air-quality-topbar {
+  position: absolute;
+  top: 20px;
+  left: calc(50% + 18px);
+  transform: translateX(-50%);
+  z-index: 25;
+  padding: 6px 10px;
+  background: rgba(4, 22, 52, 0.78);
+  border: 1px solid rgba(0, 212, 255, 0.3);
+  border-radius: 8px;
+  backdrop-filter: blur(8px);
+}
+
+// 为两侧 330px 面板及边距留出空间。
+.air-quality-bottombar,
+.air-quality-compare {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 24;
+  width: calc(100% - 716px);
+  max-width: 1100px;
+  min-width: 0;
+}
+
+.air-quality-bottombar {
+  bottom: 60px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
+.air-quality-compare {
+  bottom: 60px;
+  height: 260px;
+  background: rgba(4, 22, 52, 0.85);
+  border: 1px solid rgba(0, 212, 255, 0.3);
+  border-radius: 10px;
+  backdrop-filter: blur(8px);
+  padding: 10px 12px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.air-quality-section-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #7bd7ff;
+  font-size: 13px;
+  font-weight: 700;
+  min-height: 30px;
+  margin-bottom: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px dashed rgba(82, 166, 225, 0.4);
+
+  &::before {
+    content: '';
+    display: inline-block;
+    width: 3px;
+    height: 14px;
+    background: linear-gradient(180deg, #00f0ff, #5c8dff);
+    border-radius: 1px;
+  }
+}
+
+// 左侧预警栏
+.air-quality-alert-levels {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.air-quality-alert-level-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 10px 4px;
+  border-radius: 6px;
+  border: 1px solid;
+  color: #fff;
+  font-weight: 700;
+}
+
+.air-quality-alert-level-card-value {
+  font-size: 22px;
+  line-height: 1;
+  font-family: 'Cascadia Code', 'Consolas', monospace;
+  margin: 4px 0 2px;
+}
+
+.air-quality-alert-level-card-label {
+  font-size: 10px;
+  opacity: 0.9;
+}
+
+.air-quality-alert-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding-right: 2px;
+}
+
+.air-quality-alert-item {
+  display: block;
+  width: 100%;
+  flex-shrink: 0;
+  text-align: left;
+  color: #d5ebff;
+  cursor: pointer;
+  padding: 6px 8px;
+  border-radius: 5px;
+  border-left: 3px solid;
+  background: rgba(8, 40, 84, 0.4);
+  font-size: 11px;
+  line-height: 1.4;
+  &:hover:not(:disabled), &:focus-visible { background: rgba(30, 93, 153, 0.65); outline: 1px solid #37dfff; outline-offset: -1px; }
+  &:disabled { cursor: default; }
+}
+
+.air-quality-alert-item-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 4px;
+}
+
+.air-quality-alert-item-station {
+  color: #cce9ff;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  margin-bottom: 5px;
+}
+
+.air-quality-alert-item-time {
+  color: #5ca2d9;
+  font-size: 10px;
+  flex-shrink: 0;
+}
+
+.air-quality-alert-item-rule {
+  color: #b9ddf5;
+  font-size: 11px;
+  margin-bottom: 2px;
+}
+
+.air-quality-alert-item-location {
+  color: #7eb5de;
+  font-size: 10px;
+}
+
+.air-quality-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 80px;
+  color: #5ca2d9;
+  font-size: 12px;
+  opacity: 0.7;
+}
+
+// 右侧范围栏
+.air-quality-range-panel {
+  flex: 0 0 auto;
+  height: auto;
+}
+
+.air-quality-range-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  grid-auto-rows: 80px;
+  gap: 6px;
+  padding: 4px 2px;
+}
+
+.air-quality-range-card {
+  height: 80px;
+  padding: 0 0 4px;
+  background: rgba(8, 40, 84, 0.55);
+  border: 1px solid rgba(0, 212, 255, 0.18);
+  border-radius: 5px;
+  text-align: center;
+}
+
+.air-quality-range-card-label {
+  color: #ddecff;
+  background: rgba(80, 148, 216, 0.23);
+  line-height: 19px;
+  font-size: 11px;
+  margin-bottom: 3px;
+}
+
+.air-quality-range-card-value {
+  font-family: 'Cascadia Code', 'Consolas', monospace;
+  font-size: 21px;
+  font-weight: 700;
+  line-height: 1.2;
+}
+
+.air-quality-range-card-unit {
+  color: #92afca;
+  font-size: 9px;
+  margin-top: 2px;
+}
+
+// 播放器
+.air-quality-time-player {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: auto;
+  max-width: 100%;
+  pointer-events: none;
+
+  &.has-playback {
+    width: 100%;
+  }
+}
+
+.air-quality-time-strip,
+.air-quality-playback-strip {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  min-height: 50px;
+  padding: 8px 12px;
+  border: 1px solid rgba(0, 212, 255, 0.3);
+  border-radius: 10px;
+  background: rgba(4, 22, 52, 0.82);
+  backdrop-filter: blur(8px);
+  box-shadow: 0 8px 22px rgba(0, 8, 30, 0.3);
+}
+
+.air-quality-time-strip {
+  flex: 0 0 auto;
+  max-width: 100%;
+}
+
+.air-quality-playback-strip {
+  flex: 1 1 auto;
+  min-width: 0;
+  gap: 10px;
+}
+
+.air-quality-play-btn.ant-btn {
+  flex: 0 0 32px;
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  padding: 0;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.air-quality-player-step {
+  flex-shrink: 0;
+  white-space: nowrap;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  background: rgba(8, 40, 84, 0.55);
+  border: 1px solid rgba(0, 212, 255, 0.18);
+  border-radius: 4px;
+  color: #cce9ff;
+  font-size: 11px;
+}
+
+.air-quality-player-frame-info {
+  color: #7eb5de;
+  font-size: 11px;
+  font-family: 'Cascadia Code', 'Consolas', monospace;
+  white-space: nowrap;
+}
+
+.air-quality-player-slider {
+  flex: 1;
+  min-width: 0;
+}
+
+.air-quality-mock-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 6px;
+  background: rgba(255, 200, 60, 0.18);
+  border: 1px solid rgba(255, 200, 60, 0.45);
+  border-radius: 3px;
+  color: #fad93e;
+  font-size: 10px;
+  font-weight: 600;
+}
+
+// 对比区
+.air-quality-compare-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.air-quality-compare-station-chips {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: nowrap;
+  flex-shrink: 0;
+  overflow-x: auto;
+  padding-bottom: 5px;
+  margin-bottom: 4px;
+}
+
+.air-quality-compare-station-chip {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 6px;
+  background: rgba(8, 40, 84, 0.6);
+  border: 1px solid rgba(0, 212, 255, 0.3);
+  border-radius: 3px;
+  font-size: 10px;
+  color: #cce9ff;
+}
+
+// 热力图（空白矢量区域底图 + L7 连续热力层）
+.air-quality-heatmap-panel {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.air-heatmap-viewport {
+  flex: 1;
+  min-height: 0;
+  container-type: size;
+  display: grid;
+  place-items: center;
+}
+.air-quality-heatmap-stage {
+  width: min(100cqw, 100cqh);
+  height: min(100cqw, 100cqh);
+  border-radius: 50%;
+  overflow: hidden;
+  background: rgba(2, 16, 36, 0.7);
+  position: relative;
+  border: 1px solid rgba(158, 182, 255, .55);
+  box-shadow: 0 0 20px rgba(102, 100, 214, .2);
+}
+
+.air-quality-heatmap-map {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: rgba(5, 36, 68, 0.48);
+}
+
+.air-quality-heatmap-legend {
+  display: flex;
+  align-items: center;
+  gap: 5px 10px;
+  margin-top: 6px;
+  font-size: 10px;
+  color: #7eb5de;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.air-heatmap-tint { position: absolute; inset: 0; background: rgba(149, 113, 217, .13); pointer-events: none; }
+.air-heatmap-legend-title { margin-top: 8px; color: #9cb7d8; font-size: 10px; text-align: center; }
+.air-average-caption { color: #9dbbd7; font-size: 11px; margin: -3px 0 5px; }
+.air-average-level { display: inline-block; font-size: 9px; line-height: 14px; padding: 0 5px; border-radius: 3px; }
+.air-alert-level { display: inline-block; color: #fff; padding: 2px 6px; border-radius: 3px; font-size: 11px; }
+.air-alert-trigger { color: #ffca57; margin: 4px 0 6px; overflow-wrap: anywhere; }
+.air-aggregation-select { width: 76px; flex-shrink: 0; }
+.air-quality-time-strip .air-quality-range-picker { min-width: 0; width: 330px; }
+.air-compare-heading { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.air-mode-tag { font-size: 10px; font-weight: 400; line-height: 20px; padding: 0 7px; border: 1px solid #32628b; border-radius: 4px; color: #8daecb; background: #103552; }
+.air-mode-tag.is-active { border-color: #28dafa; background: #216790; color: #edfcff; box-shadow: inset 0 0 8px #2bc9e333; }
+.air-compare-step, .air-compare-factor { font-size: 11px; color: #96c8e9; font-weight: 400; }
+
+.air-quality-heatmap-legend-swatch {
+  display: inline-block;
+  width: 12px;
+  height: 10px;
+  border-radius: 2px;
+}
+
+@media (max-width: 1700px) {
+  .air-quality-time-player.has-playback { flex-wrap: wrap; }
+  .air-quality-playback-strip { flex-basis: 100%; }
+}
+
+.air-quality-screen.has-comparison .air-quality-bottombar { bottom: 332px; }

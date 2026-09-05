@@ -28,7 +28,7 @@ export default function MapPointDisplayBar({
   const btnActive = 'border-[#00f0ff] text-white bg-[#1890ff]/35 shadow-[0_0_8px_rgba(0,240,255,0.35)]'
   const btnIdle = 'border-[#2f9bff]/60 text-[#7bd7ff] hover:text-white hover:border-[#00f0ff]'
   return (
-    <div className="point-display-bar absolute bottom-52px left-1/2 -translate-x-1/2 z-20 flex items-center gap-2 rounded-8px bg-[rgba(4,22,52,0.85)] px-2 py-1.5 border border-[#00d4ff]/30 shadow-[0_4px_12px_rgba(0,0,0,0.3)]">
+    <div className="point-display-bar map-overlay-toolbar absolute bottom-60px left-1/2 -translate-x-1/2 z-20">
       <button
         type="button"
         onClick={() => onPointModeChange('alert')}

@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import { Button, Popover, Spin } from 'antd'
-import { EnvironmentOutlined, SendOutlined, WarningFilled } from '@ant-design/icons'
+import { EnvironmentOutlined, SendOutlined } from '@ant-design/icons'
+import MapPanelHeader from '@/components/MapPanelHeader'
 import type { AlarmItem } from '../shared'
 
 export interface AlarmPointPanelProps {
@@ -33,23 +34,11 @@ export default function AlarmPointPanel({
   const accent = urgent ? '#ff7272' : '#ffd45c'
   return (
     <section
-      className="flex-1 min-h-0 rounded-16px border px-3 py-2.5 overflow-hidden flex flex-col"
-      style={{
-        background: 'linear-gradient(145deg, rgba(6,64,137,0.94), rgba(4,48,111,0.9))',
-        borderColor: 'rgba(112,211,255,0.35)',
-        boxShadow: 'inset 0 0 22px rgba(69,184,255,0.08)',
-      }}
+      className="screen-glass-panel flex-1 min-h-0 px-3 py-2.5 overflow-hidden flex flex-col"
     >
-      <header className="flex items-center justify-between pb-2 mb-1 border-b border-[rgba(137,219,255,0.2)]">
-        <div>
-          <div className="flex items-center gap-2 text-[#edfaff] text-15px font-700">
-            <WarningFilled style={{ color: accent }} />
-            <span>{title}</span>
-          </div>
-          <div className="mt-0.5 pl-22px text-9px text-[#c5e5ff]/52">{subtitle}</div>
-        </div>
-        <span className="min-w-26px h-22px px-2 rounded-full flex items-center justify-center text-11px font-mono font-700" style={{ color: accent, background: `${accent}1f`, border: `1px solid ${accent}55` }}>{items.length}</span>
-      </header>
+      <MapPanelHeader title={title} subtitle={subtitle} accent={accent} extra={
+        <span className="min-w-26px h-22px px-2 rounded-full flex items-center justify-center font-mono" style={{ color: accent, background: `${accent}1f`, border: `1px solid ${accent}55` }}>{items.length}</span>
+      } />
       <div className="flex-1 min-h-0 overflow-y-auto pointer-events-auto space-y-1.5 pt-1 pr-0.5">
         {loading && (
           <div className="flex flex-col items-center justify-center gap-1.5 py-6 text-[#c5e5ff]/60 text-11px">

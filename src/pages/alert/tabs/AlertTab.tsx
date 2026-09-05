@@ -1,6 +1,7 @@
 import { Input, Select, Switch, Table, DatePicker } from 'antd'
 import type { TableColumnsType } from 'antd'
 import type { Dayjs } from 'dayjs'
+import AlertLevelBadge from '@/components/AlertLevelBadge'
 import { disabledFutureDate } from '@/utils/helpers'
 import { DATA_TYPE_OPTIONS, ALERT_LEVEL_OPTIONS } from './shared/tabConstants'
 import type { AlertEvent } from '../modals/AlertDetailModal'
@@ -79,26 +80,7 @@ export default function AlertTab({
       title: '预警级别',
       dataIndex: 'alertLevel',
       width: 95,
-      render: (t: string) => {
-        const item = ALERT_LEVEL_OPTIONS.find((o) => o.value === t) || {
-          label: '二级预警',
-          color: '#FA8C16',
-        }
-        const cls =
-          item.label.includes('一') || t === '1' || t === 'red'
-            ? 'level-1'
-            : item.label.includes('二') || t === '2' || t === 'orange'
-              ? 'level-2'
-              : item.label.includes('三') || t === '3' || t === 'yellow'
-                ? 'level-3'
-                : 'level-4'
-        return (
-          <span className={`pill-badge ${cls}`}>
-            <span className="pill-dot" />
-            {item.label}
-          </span>
-        )
-      },
+      render: (level: string) => <AlertLevelBadge level={level} />,
     },
     { title: '设备名称', dataIndex: 'deviceName', width: 120 },
     { title: '监测位置', dataIndex: 'location', width: 110 },

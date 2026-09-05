@@ -1,12 +1,14 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { Button, DatePicker, Image, Input, Modal, Popover, Spin, message } from 'antd'
-import { RocketOutlined, VideoCameraOutlined, PictureOutlined, DashboardOutlined, SendOutlined, PlayCircleOutlined, CloseOutlined, FilterOutlined } from '@ant-design/icons'
+import { RocketOutlined, VideoCameraOutlined, PictureOutlined, SendOutlined, PlayCircleOutlined, CloseOutlined, FilterOutlined } from '@ant-design/icons'
 import dayjs, { type Dayjs } from 'dayjs'
 import { disabledFutureDate } from '@/utils/helpers'
 import './index.less'
 import L7MapView from '@/components/L7MapView'
 import { dockList, listFlyJob, listFlyPlan, listFlyResult } from '@/servers/mapBox'
 import RegionSelector from '@/components/RegionSelector'
+import MapPanelHeader from '@/components/MapPanelHeader'
+import MapPopupPortal from '@/components/MapPopupPortal'
 import { useAppStore } from '@/stores'
 import { toRegionQuery } from '@/utils/region'
 import FlyListModel from '@/components/MapBox/FlyListModel'
@@ -229,16 +231,17 @@ export default function Drone() {
   }, [])
 
   return (
-    <div className="w-full h-full relative overflow-hidden" style={{ background: '#1a5ab0' }}>
+    <div className="map-screen w-full h-full relative overflow-hidden" style={{ background: '#1a5ab0' }}>
       <L7MapView id="drone-map" center={mapCenter ?? regionCamera.center} zoom={mapZoom ?? regionCamera.zoom} minZoom={6} maxZoom={14} showTiles markers={markers} markerIconUrl="/marker/drone-on.png" onSceneLoaded={handleSceneLoaded} />
       {/* 顶部选择器 */}
-      <div className="absolute top-45px left-1/2 -translate-x-1/2 z-50 flex gap-2 bg-[rgba(0,56,129,0.8)] px-4 py-2 rounded-xl border border-[rgba(255,255,255,0.3)]">
+      <div className="map-overlay-toolbar map-top-controls">
         <RegionSelector />
       </div>
       {/* 左侧 - 机场列表 */}
-      <div className="absolute left-20px top-70px bottom-20px z-50 w-340px pointer-events-none">
-        <div className="bg-[rgba(0,56,129,0.85)] h-full rounded-20px border border-[rgba(255,255,255,0.3)] px-4 py-3 overflow-y-auto pointer-events-auto">
-          <div className="text-[#A0C7FF] text-16px font-bold mb-3">无人机机场</div>
+      <div className="absolute left-16px top-10px bottom-10px z-50 w-330px pointer-events-none">
+        <div className="screen-glass-panel h-full flex flex-col pointer-events-auto">
+          <MapPanelHeader title="无人机机场" extra={<span>{docks.length} 座</span>} />
+          <div className="map-panel-scroll">
           {docksLoading && (
             <div className="flex flex-col items-center justify-center gap-2 py-8 text-[#A8D6FF] text-12px">
               <Spin size="small" />
@@ -306,17 +309,15 @@ export default function Drone() {
               </div>
             </div>
           ))}
+          </div>
         </div>
       </div>
 
       {/* 底部中间 - 传感器数据面板 */}
       {dockCode && (
-        <div className="absolute bottom-20px left-1/2 -translate-x-1/2 z-50 w-680px">
-          <div className="bg-[rgba(0,56,129,0.9)] rounded-20px border border-[rgba(255,255,255,0.3)] px-5 py-3">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-[#A0C7FF] text-14px font-bold flex items-center gap-1"><DashboardOutlined className="text-[#01C2FF]" />无人机传感器数据</span>
-              <span className="text-[rgba(168,214,255,0.5)] text-11px">{sensorData ? '实时更新中' : '暂无数据'}</span>
-            </div>
+        <div className="map-sensor-panel absolute bottom-60px left-1/2 -translate-x-1/2 z-40">
+          <div className="screen-glass-panel">
+            <MapPanelHeader title="无人机传感器数据" extra={<span>{sensorData ? '实时更新中' : '暂无数据'}</span>} />
             {sensorData ? (
               <div className="grid grid-cols-6 gap-3">
                 {[
@@ -342,14 +343,11 @@ export default function Drone() {
       )}
 
       {/* 右侧容器 - [视频采集(选中飞行任务后在此左侧显示)] + [飞行任务 + 待执飞任务] */}
-      <div className="absolute right-20px top-70px bottom-20px z-50 flex gap-3 pointer-events-none">
+      <div className="absolute right-16px top-10px bottom-10px z-50 flex gap-3 pointer-events-none">
         {/* 视频采集面板：仅在选中飞行任务 curJobID 有值时显示在飞行任务左侧 */}
         {curJobID && (
-          <div className="w-360px mt-45px mb-115px bg-[rgba(0,56,129,0.85)] rounded-20px border border-[rgba(255,255,255,0.3)] px-3.5 py-3 flex flex-col pointer-events-auto overflow-hidden">
-            <div className="flex items-center justify-between pb-2 mb-2 border-b border-[rgba(255,255,255,0.15)] shrink-0">
-              <span className="text-[#A0C7FF] text-15px font-bold flex items-center gap-1.5">
-                <VideoCameraOutlined className="text-[#01C2FF]" />视频采集
-              </span>
+          <div className="screen-glass-panel w-330px mt-45px mb-115px flex flex-col pointer-events-auto overflow-hidden">
+            <MapPanelHeader title="视频采集" extra={
               <div className="flex items-center gap-2">
                 <span className="text-[#01C2FF] text-11px px-2 py-0.5 rounded-full bg-[rgba(1,194,255,0.12)] border border-[rgba(1,194,255,0.25)]">
                   {jobResults.length} 个结果
@@ -362,7 +360,7 @@ export default function Drone() {
                   title="关闭视频采集面板"
                 />
               </div>
-            </div>
+            } />
             <div className="flex-1 overflow-y-auto space-y-2.5 py-1 pr-1">
               {resultsLoading && (
                 <div className="flex flex-col items-center justify-center gap-2 py-8 text-[#A8D6FF] text-11px">
@@ -402,11 +400,10 @@ export default function Drone() {
         )}
 
         {/* 飞行任务 + 待执飞任务 */}
-        <div className="w-380px flex flex-col gap-3 pointer-events-none">
-          <div className="bg-[rgba(0,56,129,0.85)] flex-1 rounded-20px px-3.5 py-2 flex flex-col overflow-hidden pointer-events-auto border border-[rgba(255,255,255,0.3)]">
-            <div className="flex items-center justify-between py-1.5 shrink-0 gap-2">
-              <span className="text-[#A0C7FF] text-16px font-bold shrink-0">飞行任务</span>
-              <div className="flex items-center gap-1.5">
+        <div className="w-330px flex flex-col gap-3 pointer-events-none">
+          <div className="screen-glass-panel flex-1 px-3.5 py-2 flex flex-col overflow-hidden pointer-events-auto">
+            <MapPanelHeader title="飞行任务" extra={<span>{filteredJobs.length} 项</span>} tools={
+              <div className="drone-task-search-row">
                 <Input
                   placeholder="搜索名称/ID"
                   allowClear
@@ -459,7 +456,7 @@ export default function Drone() {
                   />
                 </Popover>
               </div>
-            </div>
+            } />
             <div className="flex-1 overflow-y-auto space-y-2 py-1">
               {!dockCode && <div className="text-[rgba(168,214,255,0.4)] text-11px py-2 text-center">请先在左侧选择无人机机场</div>}
               {dockCode && jobsLoading && <div className="flex items-center justify-center gap-2 py-2 text-[#A8D6FF] text-11px"><Spin size="small" />加载中…</div>}
@@ -500,9 +497,8 @@ export default function Drone() {
             </div>
           </div>
 
-          <div className="bg-[rgba(0,56,129,0.85)] flex-1 rounded-20px px-3.5 py-2 flex flex-col overflow-hidden pointer-events-auto border border-[rgba(255,255,255,0.3)]">
-            <div className="flex items-center justify-between py-1.5 shrink-0 gap-2">
-              <span className="text-[#A0C7FF] text-16px font-bold shrink-0">待执飞任务</span>
+          <div className="screen-glass-panel flex-1 px-3.5 py-2 flex flex-col overflow-hidden pointer-events-auto">
+            <MapPanelHeader title="待执飞任务" extra={<span>{filteredPlans.length} 项</span>} tools={
               <Input
                 placeholder="搜索名称/ID"
                 allowClear
@@ -511,7 +507,7 @@ export default function Drone() {
                 onChange={e => setPlanSearchText(e.target.value)}
                 className="drone-header-search"
               />
-            </div>
+            } />
             <div className="flex-1 overflow-y-auto space-y-2 py-1">
               {!dockCode && <div className="text-[rgba(168,214,255,0.4)] text-11px py-2 text-center">请先在左侧选择无人机机场</div>}
               {dockCode && plansLoading && <div className="flex items-center justify-center gap-2 py-2 text-[#A8D6FF] text-11px"><Spin size="small" />加载中…</div>}
@@ -543,8 +539,9 @@ export default function Drone() {
 
       {/* 右键上下文菜单 - 无人机派遣 */}
       {contextMenu && (
+        <MapPopupPortal>
         <div
-          className="absolute z-[9999] min-w-150px rounded-lg shadow-xl overflow-hidden"
+          className="map-point-popup absolute min-w-150px rounded-lg shadow-xl overflow-hidden"
           style={{ left: contextMenu.x, top: contextMenu.y, background: 'rgba(4,22,52,0.95)', border: '1px solid rgba(0,180,255,0.35)', backdropFilter: 'blur(8px)' }}
           onClick={(e) => e.stopPropagation()}
         >
@@ -560,6 +557,7 @@ export default function Drone() {
             <span>无人机派遣</span>
           </div>
         </div>
+        </MapPopupPortal>
       )}
 
       {/* 派遣无人机巡逻弹窗（右键菜单触发） */}

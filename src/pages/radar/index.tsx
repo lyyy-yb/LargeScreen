@@ -20,6 +20,8 @@ import AlarmPointPopup from './popups/AlarmPointPopup'
 import DispatchPointPopup from './popups/DispatchPointPopup'
 import CreatePollutionModal from './modals/CreatePollutionModal'
 import AlarmPointPanel from './panels/AlarmPointPanel'
+import MapPanelHeader from '@/components/MapPanelHeader'
+import MapPopupPortal from '@/components/MapPopupPortal'
 
 export default function Radar() {
   const navigate = useNavigate()
@@ -459,10 +461,10 @@ export default function Radar() {
   const mapZoom = mapCounty ? 11 : mapCity ? 9 : 7.5
 
   return (
-    <div className="w-full h-full relative overflow-hidden" style={{ background: '#1a5ab0' }}>
+    <div className="map-screen w-full h-full relative overflow-hidden" style={{ background: '#1a5ab0' }}>
       <L7MapView id="radar-map" center={mapCenter} zoom={mapZoom} minZoom={6} maxZoom={14} showTiles markers={markers} onSceneLoaded={handleSceneLoaded} onMarkerClick={handleMarkerClick} />
       {/* 顶部选择器 */}
-      <div className="absolute top-45px left-1/2 -translate-x-1/2 z-50 flex gap-2 bg-[rgba(0,56,129,0.8)] px-4 py-2 rounded-xl border border-[rgba(255,255,255,0.3)]">
+      <div className="map-overlay-toolbar map-top-controls">
         <RegionSelector />
         <Select
           value={selectedBsiId || undefined}
@@ -477,7 +479,7 @@ export default function Radar() {
         />
       </div>
       {/* 左侧 - 突发/常规点位 */}
-      <div className="absolute left-20px top-70px bottom-58px z-50 w-360px flex flex-col gap-3 pointer-events-none">
+      <div className="absolute left-16px top-10px bottom-10px z-50 w-330px flex flex-col gap-3 pointer-events-none">
         <AlarmPointPanel
           title="突发点位"
           subtitle="高频异常点位，建议优先处置"
@@ -503,15 +505,11 @@ export default function Radar() {
         />
       </div>
       {/* 右侧 - 污染源管理 */}
-      <div className="absolute right-20px top-70px bottom-58px z-50 w-360px pointer-events-none">
-        <div className="h-full rounded-16px border border-[rgba(112,211,255,0.35)] px-3 py-2.5 flex flex-col bg-[linear-gradient(145deg,rgba(6,64,137,0.94),rgba(4,48,111,0.9))] shadow-[inset_0_0_22px_rgba(69,184,255,0.08)]">
-          <div className="flex items-center justify-between pb-2 mb-1 border-b border-[rgba(137,219,255,0.2)]">
-            <div>
-              <div className="text-[#edfaff] text-15px font-700">污染源管理</div>
-              <div className="text-9px text-[#c5e5ff]/52 mt-0.5">当前雷达附近共 {pollutionList.length} 个污染源</div>
-            </div>
+      <div className="absolute right-16px top-10px bottom-10px z-50 w-330px pointer-events-none">
+        <div className="screen-glass-panel h-full px-3 py-2.5 flex flex-col">
+          <MapPanelHeader title="污染源管理" subtitle={`当前雷达附近共 ${pollutionList.length} 个污染源`} extra={
             <Select value={filterLeixing} onChange={setFilterLeixing} className="w-100px pointer-events-auto screen-select" classNames={{ popup: { root: 'screen-select-popup' } }} size="small" options={leixingFilters} />
-          </div>
+          } />
           <div className="flex-1 min-h-0 overflow-y-auto pointer-events-auto py-1 space-y-2 pr-0.5">
             {pollutionLoading && (
               <div className="h-full flex flex-col items-center justify-center gap-2 text-[#c5e5ff]/50">
@@ -553,7 +551,7 @@ export default function Radar() {
         </div>
       </div>
       {/* 底部时间选择：3 个快捷按钮 + 1 个日期范围（互斥）。选了快捷按钮则清空日期范围；选了日期范围则不传 hour。 */}
-      <div className="absolute bottom-58px left-1/2 -translate-x-1/2 z-50 bg-[rgba(0,56,129,0.8)] px-4 py-2 rounded-xl border border-[rgba(255,255,255,0.3)] flex items-center gap-3">
+      <div className="map-overlay-toolbar map-bottom-controls radar-time-controls">
         <span className="text-[#A0C7FF] text-12px whitespace-nowrap">时间范围</span>
         {([1, 3, 24] as const).map(h => (
           <Button
@@ -586,7 +584,7 @@ export default function Radar() {
             }
           }}
           placeholder={['开始时间', '结束时间']}
-          className="!w-380px radar-time-range-picker"
+          className="!w-380px radar-time-range-picker screen-range-picker"
           allowClear
         />
       </div>
@@ -601,8 +599,9 @@ export default function Radar() {
       </Modal>
       {/* 右键上下文菜单 - 无人机派遣 */}
       {contextMenu && (
+        <MapPopupPortal>
         <div
-          className="absolute z-[9999] min-w-150px rounded-lg shadow-xl overflow-hidden"
+          className="map-point-popup absolute min-w-150px rounded-lg shadow-xl overflow-hidden"
           style={{ left: contextMenu.x, top: contextMenu.y, background: 'rgba(4,22,52,0.95)', border: '1px solid rgba(0,180,255,0.35)', backdropFilter: 'blur(8px)' }}
           onClick={(e) => e.stopPropagation()}
         >
@@ -618,13 +617,17 @@ export default function Radar() {
             <span>无人机派遣</span>
           </div>
         </div>
+        </MapPopupPortal>
       )}
       {/* 告警点位点击弹窗：是否确认为污染源（对齐 antd-demo LayerPopup） */}
       {alarmPopup && (
+        <MapPopupPortal>
         <AlarmPointPopup popup={alarmPopup} onCancel={() => setAlarmPopup(null)} onConfirm={confirmAsPollution} />
+        </MapPopupPortal>
       )}
       {/* 地图空白处点击弹窗：派遣无人机（对齐 antd-demo showFlyPopup） */}
       {dispatchPopup && (
+        <MapPopupPortal>
         <DispatchPointPopup
           popup={dispatchPopup}
           onDispatch={lngLat => {
@@ -633,6 +636,7 @@ export default function Radar() {
             setFlyVisible(true)
           }}
         />
+        </MapPopupPortal>
       )}
       {/* 新建污染源弹窗（告警点确认后预填坐标打开） */}
       <CreatePollutionModal

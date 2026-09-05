@@ -1,5 +1,6 @@
 @import url("./reset.less");
 @import url("./variables.less");
+@import './map-surfaces.less';
 
 .ant-app {
   width: 100%;
@@ -151,11 +152,155 @@
   }
 }
 
-// L7 Popup 样式
-.l7-popup {
-  z-index: 99999 !important;
+/* 地图侧栏统一采用 monitor 的半透明毛玻璃面板。 */
+.screen-glass-panel {
+  .map-panel-surface();
+  position: relative;
+  padding: 14px 18px 13px !important;
+  overflow: hidden;
+
+  &::after {
+    position: absolute;
+    top: 0;
+    right: 0;
+    z-index: 0;
+    width: 72px;
+    height: 72px;
+    pointer-events: none;
+    content: "";
+    background: radial-gradient(circle at 100% 0, rgba(22, 186, 247, 0.15), transparent 68%);
+  }
+
 }
 
+.map-panel-header {
+  flex: 0 0 auto;
+  margin-bottom: 10px;
+  padding-bottom: 9px;
+  border-bottom: 1px dashed rgba(82, 166, 225, 0.4);
+
+  &__row { display: flex; align-items: flex-start; gap: 10px; }
+  &__heading { flex: 1; min-width: 0; }
+  &__title {
+    display: flex; align-items: center; gap: 8px;
+    color: #eef9ff; font-size: 14px; font-weight: 700; line-height: 22px;
+    &::before {
+      content: ''; flex: 0 0 3px; height: 14px; border-radius: 2px;
+      background: var(--panel-accent); box-shadow: 0 0 8px var(--panel-accent);
+    }
+  }
+  &__subtitle { margin: 3px 0 0 11px; color: #84acd0; font-size: 11px; line-height: 17px; font-weight: 400; }
+  &__extra { display: flex; flex: 0 0 auto; align-items: center; gap: 6px; min-height: 22px; color: #7bd7ff; font-size: 11px; }
+  &__tools { display: flex; align-items: center; gap: 8px; margin-top: 8px; min-width: 0; }
+}
+
+.map-overlay-toolbar {
+  .map-control-surface();
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 12px; color: #cce6f9; font-size: 12px;
+}
+
+.map-top-controls {
+  position: absolute; top: 20px; left: 50%; transform: translateX(-50%);
+  z-index: 40; max-width: calc(100% - 716px); flex-wrap: wrap; justify-content: center;
+}
+
+.map-bottom-controls {
+  position: absolute; bottom: 60px; left: 50%; transform: translateX(-50%);
+  z-index: 40; max-width: calc(100% - 716px); flex-wrap: wrap; justify-content: center;
+}
+
+.map-panel-scroll { flex: 1; min-height: 0; overflow-y: auto; padding-right: 2px; }
+.map-sensor-panel { width: min(680px, calc(100% - 716px)); }
+.map-sensor-panel .map-panel-header { margin-bottom: 8px; }
+.map-patrol-legend { position: absolute; right: 358px; bottom: 60px; z-index: 40; width: 154px; }
+.map-popup-portal { position: fixed; z-index: 100000; pointer-events: none; transform-origin: top left; }
+.map-popup-portal > * { pointer-events: auto; }
+.air-map-label {
+  display: flex; align-items: center; gap: 5px; padding: 3px 5px;
+  border: 1px solid rgba(84, 193, 237, .75); border-radius: 5px;
+  background: rgba(3, 24, 54, .94); color: #edf9ff; cursor: pointer;
+  font: 12px/18px 'Microsoft YaHei', sans-serif; white-space: nowrap;
+  box-shadow: 0 2px 7px #00172c99;
+  &:hover, &:focus-visible { outline: 1px solid #37e4ff; }
+  &__name { max-width: 150px; overflow: hidden; text-overflow: ellipsis; }
+  &__value { padding: 0 5px; border-radius: 3px; color: #ffe798; background: #725014; font-weight: 700; }
+}
+.air-station-badge {
+  display: inline-flex; justify-content: center; align-items: center;
+  min-width: 22px; height: 22px; flex-shrink: 0; border-radius: 4px;
+  color: #002936; background: #39dcfa; border: 1px solid #a6f5ff; font-size: 13px; font-weight: 800;
+  &[data-station-type='mobile'], [data-station-type='mobile'] > & { color: #382200; background: #ffc452; border-color: #ffe39e; }
+}
+.map-overlay-close {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px; padding: 0; border-radius: 4px;
+  color: #94c8ec; cursor: pointer;
+  &:hover { color: #fff; background: rgba(55, 155, 224, 0.25); }
+  &:focus-visible { outline: 1px solid #20e8ff; outline-offset: 2px; }
+}
+
+/* 地图侧栏标题与内容之间的统一虚线分隔。 */
+.screen-panel-title {
+  display: flex;
+  min-height: 30px;
+  align-items: center;
+  padding-bottom: 8px;
+  border-bottom: 1px dashed rgba(82, 166, 225, 0.4) !important;
+  color: #eef9ff !important;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.3px;
+
+  &::before {
+    width: 3px;
+    height: 14px;
+    flex: 0 0 3px;
+    margin-right: 7px;
+    border-radius: 2px;
+    background: #20e8ff;
+    box-shadow: 0 0 8px rgba(32, 232, 255, 0.72);
+    content: "";
+  }
+}
+
+/* radar 与 air-quality 共用的时间范围选择器外观。 */
+.screen-range-picker.ant-picker {
+  min-height: 30px;
+  border-color: rgba(86, 166, 225, 0.62) !important;
+  border-radius: 5px !important;
+  background: rgba(28, 100, 190, 0.64) !important;
+  box-shadow: inset 0 0 12px rgba(0, 22, 66, 0.22) !important;
+
+  .ant-picker-input > input {
+    color: #e7f7ff !important;
+    font-size: 12px;
+
+    &::placeholder {
+      color: rgba(207, 234, 255, 0.62) !important;
+    }
+  }
+
+  .ant-picker-suffix,
+  .ant-picker-separator,
+  .ant-picker-clear {
+    color: rgba(196, 229, 255, 0.75) !important;
+  }
+
+  &:hover,
+  &.ant-picker-focused {
+    border-color: #20e8ff !important;
+    box-shadow: 0 0 8px rgba(32, 232, 255, 0.28) !important;
+  }
+}
+
+/* 所有地图打点详情浮层必须盖过侧栏、控制条、网络提示和普通弹窗。 */
+.map-point-popup,
+.l7-popup {
+  z-index: 100000 !important;
+}
+
+// L7 Popup 样式
 .l7-popup-tip {
   opacity: 0.85;
   border-top-color: rgba(10, 60, 130, 0.9) !important;

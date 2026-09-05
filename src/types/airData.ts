@@ -49,6 +49,8 @@ export interface AirQualityPoint {
   /** 站点类型：fixed-固定站 mobile-移动站 */
   stationType?: string
   name: string
+  /** 空气质量专题页的分段站名；不影响 monitor 文字层。 */
+  richLabel?: { prefix: string; value: string }
   lng: number
   lat: number
   /** AQI 数值（图标上方显示） */
@@ -60,6 +62,8 @@ export interface AirQualityPoint {
   deptId?: number
   /** 空气质量等级文本（优/良/轻度污染/…，决定六级图标） */
   aqiLevel?: string
+  /** 页面明确允许打开详情；空气质量页即使缺少 AQI 仍可查看浓度，monitor 不传时保持原行为。 */
+  detailEnabled?: boolean
   /** 各污染物分指数 IAQI（点击详情展示） */
   pm25Iaqi?: number | null
   pm10Iaqi?: number | null

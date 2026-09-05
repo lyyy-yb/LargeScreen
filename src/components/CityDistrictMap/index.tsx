@@ -42,6 +42,10 @@ interface CityDistrictMapProps {
   showRadarPoints?: boolean
   /** 显示企业排口打点（图标 + 两行文字），默认 true */
   showEmissionOutletPoints?: boolean
+  /** 是否显示市级外的省外挖洞蒙层；默认 true（monitor 行为不变），空气质量页传 false */
+  showRegionMask?: boolean
+  /** 是否显示边界线 + 城市块 + 区县标签；默认 true（monitor 行为不变），空气质量页传 false */
+  showBoundary?: boolean
   /** 全局搜索选中后的定位目标 */
   focusTarget?: MapFocusTarget | null
 }
@@ -65,6 +69,8 @@ export default function CityDistrictMap({
   showDronePoints = true,
   showRadarPoints = true,
   showEmissionOutletPoints = true,
+  showRegionMask = true,
+  showBoundary = true,
   focusTarget,
 }: CityDistrictMapProps) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -210,17 +216,18 @@ export default function CityDistrictMap({
         districtFeaturesRef.current = districtsRes.features
 
         // 市外蒙层 + 限制拖拽范围（与省级同方案）：市界外雾化，市域不能拖出可视范围
-        addRegionMask(scene, cityBoundRes)
+        addRegionMask(scene, cityBoundRes, 1, 0.55, { enabled: showRegionMask })
         setRegionBounds(scene, cityBoundRes)
 
         // 1. 市界轮廓（平面边界：天蓝实线，不再使用有高度的边墙）
-        const cityBoundLine = new LineLayer({ zIndex: 6, enablePicking: false })
-          .source(cityBoundRes)
-          .shape('line')
-          .color('#3fc6ff')
-          .size(2.2)
-          .style({ opacity: 1 })
-        scene.addLayer(cityBoundLine)
+        if (showBoundary) {
+          const cityBoundLine = new LineLayer({ zIndex: 6, enablePicking: false })
+            .source(cityBoundRes)
+            .shape('line')
+            .color('#3fc6ff')
+            .size(2.2)
+            .style({ opacity: 1 })
+          scene.addLayer(cityBoundLine)
 
         // 2. 平面区域地块 —— 近全透明填充直接显示卫星底图，仅承担点选交互与淡色区域衬托
         const polygonLayer = new PolygonLayer({ zIndex: 2, autoFit: false })
@@ -271,8 +278,7 @@ export default function CityDistrictMap({
             .style({ opacity: 1 })
           scene.addLayer(districtLine)
         })
-
-
+        }
 
         // 5. 悬浮描边：亮白加粗，与常态天蓝边形成对比（同省级方案）
         const hoverOutline = new LineLayer({ zIndex: 8, enablePicking: false })
@@ -351,7 +357,7 @@ export default function CityDistrictMap({
             textAllowOverlap: true,
             heightFixed: true,
           })
-        scene.addLayer(textLayer)
+        if (showBoundary) scene.addLayer(textLayer)
 
         // 11. 雷达扫描与无人机场图标
         deviceLayersRef.current = await createDeviceMapLayers(scene, devicePointsRef.current, 0)

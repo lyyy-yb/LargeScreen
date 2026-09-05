@@ -1,4 +1,7 @@
 import { PointLayer, type ILayer, type Scene } from '@antv/l7'
+// 绕过 l7-component 的 UMD browser 入口，避免开发构建丢失 Marker 命名导出。
+import Marker from '@antv/l7-component/es/marker'
+import { anchorType } from '@antv/l7-utils'
 import type { AirQualityPoint } from '@/types/airData'
 import { AQI_LEVEL_ICON, resolveAqiLevelKey } from './airQuality'
 import { AIR_NAME_MIN_ZOOM, bindZoomNameLayer } from './mapZoomName'
@@ -15,6 +18,12 @@ export interface AirPointClickPos {
   x: number
   y: number
 }
+
+/** 可选：自定义名称装饰函数。返回字符串会作为地图文字层显示（替代默认 name） */
+export type AirPointNameDecorator = (point: AirQualityPoint) => string | undefined
+
+/** 可选：控制点位是否可点击（空气质量页允许所有有数据点；monitor 行为不变） */
+export type AirPointClickable = (point: AirQualityPoint) => boolean
 
 /** 无空气质量数据的微站图标名与图片 */
 const AQ_NONE_ICON_NAME = 'aq-none'
@@ -51,6 +60,15 @@ function decorate(points: AirQualityPoint[]) {
   }))
 }
 
+/** 名称装饰：默认沿用 point.name；调用方传入 nameDecorator 时使用其返回值。 */
+function applyDisplayName(points: AirQualityPoint[], decorator?: AirPointNameDecorator): AirQualityPoint[] {
+  if (!decorator) return points
+  return points.map(point => {
+    const text = decorator(point)
+    return text ? { ...point, name: text } : point
+  })
+}
+
 /**
  * 创建空气质量打点图层：按 IAQI 六级显示对应图标（aq-good ~ aq-severe）。
  * 点击图标通过 onPointClick 回调通知页面（含点击像素坐标），详情弹窗由页面侧统一渲染，
@@ -62,6 +80,7 @@ export async function createAirQualityLayers(
   points: AirQualityPoint[],
   raisingHeight = 0,
   onPointClick?: (point: AirQualityPoint, pos?: AirPointClickPos) => void,
+  options?: { nameDecorator?: AirPointNameDecorator; clickable?: AirPointClickable },
 ): Promise<AirMapLayers> {
   // 注册六级 AQI 图标与无数据占位图标：直接使用设计原始切图，不做透视/光晕等立体加工
   const iconEntries: [string, string][] = [
@@ -75,7 +94,54 @@ export async function createAirQualityLayers(
     scene.addImage(name, url)
   })
 
-  const data = decorate(points)
+  const data = decorate(applyDisplayName(points, options?.nameDecorator))
+  const richMarkers = new Map<string, { marker: Marker; element: HTMLButtonElement; point: AirQualityPoint }>()
+  let namesVisible = true
+  const refreshRichVisibility = () => {
+    richMarkers.forEach(({ marker }) => {
+      if (namesVisible && scene.getZoom() >= AIR_NAME_MIN_ZOOM) marker.show()
+      else marker.hide()
+    })
+  }
+  const rawMap = (scene as unknown as { mapService: { map: { on: (event: string, fn: () => void) => void; off: (event: string, fn: () => void) => void } } }).mapService.map
+  rawMap.on('zoom', refreshRichVisibility)
+  scene.on('destroy', () => { rawMap.off('zoom', refreshRichVisibility); richMarkers.clear() })
+  const syncRichLabels = (next: AirQualityPoint[]) => {
+    const keys = new Set<string>()
+    next.filter(point => point.richLabel).forEach(point => {
+      const key = String(point.id ?? `${point.lng},${point.lat},${point.name}`)
+      keys.add(key)
+      let entry = richMarkers.get(key)
+      if (!entry) {
+        const element = document.createElement('button')
+        element.type = 'button'
+        element.className = 'air-map-label'
+        ;['air-station-badge', 'air-map-label__name', 'air-map-label__value'].forEach(className => {
+          const span = document.createElement('span'); span.className = className; element.appendChild(span)
+        })
+        // L7 的 y offset 正数向上；TOP 锚点配负值把标签放在图标下方，留 8px 空隙。
+        const marker = new Marker({ element, anchor: anchorType.TOP, offsets: [0, -18] }).setLnglat({ lng: point.lng, lat: point.lat })
+        entry = { marker, element, point }
+        richMarkers.set(key, entry)
+        element.addEventListener('click', event => {
+          event.stopPropagation()
+          const current = richMarkers.get(key)?.point
+          if (current) onPointClick?.(current, scene.lngLatToContainer([current.lng, current.lat]))
+        })
+        scene.addMarker(marker)
+      }
+      entry.point = point
+      entry.marker.setLnglat({ lng: point.lng, lat: point.lat })
+      entry.element.dataset.stationType = point.stationType ?? 'unknown'
+      entry.element.setAttribute('aria-label', `${point.richLabel!.prefix} ${point.name} ${point.richLabel!.value}`)
+      entry.element.children[0].textContent = point.richLabel!.prefix
+      entry.element.children[1].textContent = point.name
+      entry.element.children[2].textContent = point.richLabel!.value
+    })
+    richMarkers.forEach((entry, key) => { if (!keys.has(key)) { entry.marker.remove(); richMarkers.delete(key) } })
+    refreshRichVisibility()
+  }
+  syncRichLabels(data)
 
   // 六级图标层（开启拾取，点击由页面侧弹出唯一详情弹窗）
   const iconLayer = new PointLayer({
@@ -93,10 +159,12 @@ export async function createAirQualityLayers(
   iconLayer.on('click', (e: any) => {
     const props = e?.feature
     if (!props?.name) return
-    // 无空气质量数据的微站仅占位展示，不弹详情弹窗
-    if (!hasAirQualityData(props as AirQualityPoint)) return
+    // monitor 的无 AQI 点继续不可点；空气质量页可通过 detailEnabled 明确开启浓度详情。
+    const point = props as AirQualityPoint
+    const clickable = options?.clickable?.(point) ?? (point.detailEnabled === true || hasAirQualityData(point))
+    if (!clickable) return
     const pos = typeof e?.x === 'number' && typeof e?.y === 'number' ? { x: e.x, y: e.y } : undefined
-    onPointClick?.(props as AirQualityPoint, pos)
+    onPointClick?.(point, pos)
   })
 
   // 站名文字层：地图放大到 AIR_NAME_MIN_ZOOM 后自动显示，禁拾取避免盖住图标点击
@@ -105,7 +173,7 @@ export async function createAirQualityLayers(
     name: 'air-quality-name-layer',
     enablePicking: false,
   })
-    .source(data, { parser: { type: 'json', x: 'lng', y: 'lat' } })
+    .source(data.filter(point => !point.richLabel), { parser: { type: 'json', x: 'lng', y: 'lat' } })
     .shape('name', 'text')
     .size(9)
     .color('#eafcff')
@@ -127,12 +195,15 @@ export async function createAirQualityLayers(
   return {
     iconLayer,
     setData(nextPoints) {
-      const nextData = decorate(nextPoints)
+      const nextData = decorate(applyDisplayName(nextPoints, options?.nameDecorator))
       iconLayer.setData(nextData, { parser: { type: 'json', x: 'lng', y: 'lat' } })
-      nameLayer.setData(nextData, { parser: { type: 'json', x: 'lng', y: 'lat' } })
+      nameLayer.setData(nextData.filter(point => !point.richLabel), { parser: { type: 'json', x: 'lng', y: 'lat' } })
+      syncRichLabels(nextData)
     },
     setNameVisible(visible) {
       nameControl.setBaseVisible(visible)
+      namesVisible = visible
+      refreshRichVisibility()
     },
   }
 }

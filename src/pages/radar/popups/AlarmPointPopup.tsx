@@ -24,7 +24,7 @@ export default function AlarmPointPopup({ popup, onCancel, onConfirm }: AlarmPoi
   }
   return (
     <div
-      className="absolute z-[9998] rounded-10px p-3 text-[#A8D6FF] shadow-xl"
+      className="map-point-popup absolute rounded-10px p-3 text-[#A8D6FF] shadow-xl"
       style={{ ...style, background: 'rgba(4,22,52,0.95)', border: '1px solid rgba(0,180,255,0.35)', backdropFilter: 'blur(8px)' }}
       onClick={e => e.stopPropagation()}
     >

@@ -24,16 +24,16 @@ const BUSINESS_ROLE_KEYS = new Set(['city_business', 'district_business', 'town_
 
 export type AlertTab = 'rules' | 'alerts' | 'tasks' | 'trends'
 
-// 市/区县业务人员可见的底部导航：监控大屏、光量子雷达、预警中心
-// 市级（city_business）单独列出，可看年度管理；区县业务（district_business）只可见上述三项
-const CITY_BUSINESS_TAB_KEYS = ['/monitor', '/radar', '/alert', '/report']
-const DISTRICT_BUSINESS_TAB_KEYS = ['/monitor', '/radar', '/alert']
+// 市/区县业务人员可见的底部导航：监控大屏、空气质量、光量子雷达、预警中心
+// 市级（city_business）单独列出，可看年度管理；区县业务（district_business）只可见上述四项
+const CITY_BUSINESS_TAB_KEYS = ['/monitor', '/air-quality', '/radar', '/alert', '/report']
+const DISTRICT_BUSINESS_TAB_KEYS = ['/monitor', '/air-quality', '/radar', '/alert']
 
 // 市/区县业务人员禁止访问的页面（矩阵未授予的功能）
 const CITY_COUNTY_BUSINESS_BLOCKED_PATHS = ['/drone', '/patrol', '/report', '/pollution', '/manage/data-source', '/manage/clean-rule']
 
 // 乡镇业务人员仅有小程序与数据管理权限，大屏页面全部不可访问
-const TOWN_BUSINESS_BLOCKED_PATHS = ['/monitor', '/radar', '/drone', '/patrol', '/alert', '/report', '/pollution']
+const TOWN_BUSINESS_BLOCKED_PATHS = ['/monitor', '/air-quality', '/radar', '/drone', '/patrol', '/alert', '/report', '/pollution']
 
 export function isBusinessRole(context?: { roleKey?: string } | null) {
   return !!context?.roleKey && BUSINESS_ROLE_KEYS.has(context.roleKey)

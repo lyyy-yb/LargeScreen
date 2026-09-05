@@ -1,3 +1,5 @@
+@import '../../assets/css/map-surfaces.less';
+
 .monitor-screen {
   position: relative;
   padding: 0 !important;
@@ -114,15 +116,9 @@
 }
 
 .map-legend-card {
+  .map-control-surface();
   min-height: 0;
   padding: 10px 12px !important;
-  border: 1px solid rgba(103, 171, 226, 0.52) !important;
-  border-radius: 9px;
-  background: linear-gradient(145deg, rgba(13, 73, 147, 0.62), rgba(4, 29, 72, 0.68));
-  box-shadow:
-    inset 0 0 18px rgba(35, 148, 224, 0.08),
-    0 10px 24px rgba(0, 11, 34, 0.28);
-  backdrop-filter: blur(8px) saturate(1.1);
 
   &--air {
     width: 150px;
@@ -160,12 +156,11 @@
 }
 
 .region-controls {
+  .map-control-surface();
   top: 14px !important;
   right: 358px !important;
-  padding: 0 !important;
-  border: 0 !important;
-  background: transparent !important;
-  box-shadow: none !important;
+  top: 10px !important;
+  padding: 6px 8px !important;
 }
 
 .global-map-search {
@@ -225,6 +220,7 @@
   }
 
   &__input-wrap {
+    .map-control-surface();
     display: flex;
     height: 36px;
     align-items: center;
@@ -280,11 +276,10 @@
 }
 
 .source-summary {
-  bottom: 56px !important;
+  .map-control-surface();
+  bottom: 60px !important;
   left: 358px !important;
   padding: 8px 16px !important;
-  border-radius: 10px !important;
-  background: rgba(0, 0, 0, 0.2) !important;
   color: #b8dcf8 !important;
   font-size: 11.5px !important;
   line-height: 1.35;
@@ -296,15 +291,16 @@
 }
 
 .distribution-summary {
+  .map-control-surface();
   right: 358px !important;
-  bottom: 56px !important;
+  bottom: 60px !important;
   min-width: 230px;
   padding: 11px 13px !important;
-  border-color: rgba(86, 166, 225, 0.62) !important;
-  background: rgba(5, 43, 94, 0.64) !important;
-  backdrop-filter: blur(8px) saturate(1.08);
 
   > div:first-child {
+    padding-bottom: 6px;
+    margin-bottom: 6px;
+    border-bottom: 1px dashed rgba(82, 166, 225, 0.4);
     color: #1eeeff !important;
     font-size: 14px !important;
     font-weight: 700;
@@ -314,6 +310,10 @@
     color: #bcdcf7 !important;
     font-size: 12px !important;
   }
+}
+
+@media (max-width: 1740px) {
+  .distribution-summary { bottom: 164px !important; }
 }
 
 .status-panel {
@@ -326,17 +326,9 @@
 }
 
 .status-card {
+  .map-panel-surface();
   position: relative;
   padding: 14px 18px 13px !important;
-  border-color: rgba(62, 162, 231, 0.62) !important;
-  border-radius: 13px !important;
-  background:
-    linear-gradient(90deg, rgba(34, 155, 230, 0.16), transparent 18%) top left / 55% 1px no-repeat,
-    linear-gradient(150deg, rgba(8, 59, 127, 0.66), rgba(3, 27, 70, 0.72)) !important;
-  box-shadow:
-    inset 0 0 26px rgba(22, 128, 216, 0.11),
-    0 9px 25px rgba(0, 8, 27, 0.34) !important;
-  backdrop-filter: blur(9px) saturate(1.12);
 
   &::after {
     position: absolute;

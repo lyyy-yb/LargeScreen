@@ -53,7 +53,7 @@ export default function OutletDetailPopup({ detail, onClose }: OutletDetailPopup
   return (
     <div
       ref={popupRef}
-      className="absolute z-[99999] p-3 rounded-8px border border-[#9aa7b4]/45 bg-[rgba(10,18,32,0.94)] shadow-[0_8px_28px_rgba(0,10,35,0.55)] box-border"
+      className="map-point-popup absolute p-3 rounded-8px border border-[#9aa7b4]/45 bg-[rgba(10,18,32,0.94)] shadow-[0_8px_28px_rgba(0,10,35,0.55)] box-border"
       style={{ ...anchorStyle, width: OUTLET_POPUP_WIDTH }}
     >
       <div className="flex items-center justify-between mb-2 pb-2 border-b border-[#9aa7b4]/25">

@@ -141,7 +141,7 @@ export default function AirStationDetailPopup({ detail, onClose }: AirStationDet
   return (
     <div
       ref={popupRef}
-      className="absolute z-[99999] p-3 rounded-8px border border-[#00d4ff]/45 bg-[rgba(4,22,52,0.94)] shadow-[0_8px_28px_rgba(0,10,35,0.55)] flex flex-col box-border"
+      className="map-point-popup absolute p-3 rounded-8px border border-[#00d4ff]/45 bg-[rgba(4,22,52,0.94)] shadow-[0_8px_28px_rgba(0,10,35,0.55)] flex flex-col box-border"
       style={{ ...anchorStyle, width: AIR_POPUP_WIDTH, height: AIR_POPUP_HEIGHT }}
     >
       <div className="flex items-center justify-between mb-2 shrink-0">

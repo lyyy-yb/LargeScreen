@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Scene, PolygonLayer, LineLayer, PointLayer } from '@antv/l7'
+import { Scene, PolygonLayer, LineLayer, PointLayer, type ILayer } from '@antv/l7'
 import { Mapbox } from '@antv/l7-maps'
 import type { MapDevicePoint } from '@/types/mapDevice'
 import type { AirQualityPoint } from '@/types/airData'
@@ -14,10 +14,15 @@ import { useMapFocus } from '@/hooks/useMapFocus'
 import type { MapFocusTarget } from '@/types/mapFocus'
 
 interface ZJ3DMapProps {
+  maxZoom?: number
   id?: string
   selectedCity?: string
   onCityClick?: (cityName: string, adcode: number) => void
   onCityHover?: (cityName: string | null) => void
+  /** 是否显示省外挖洞蒙层；默认 true（monitor 行为不变），空气质量页传 false */
+  showRegionMask?: boolean
+  /** 是否显示省/市边界线 + 城市块填充；默认 true（monitor 行为不变），空气质量页传 false */
+  showBoundary?: boolean
   devicePoints?: MapDevicePoint[]
   airPoints?: AirQualityPoint[]
   /** 预警点位（alertEvent/list 经纬度），与 airPoints 由页面按钮组切换显示 */
@@ -46,6 +51,7 @@ interface ZJ3DMapProps {
 // 平面地图风格：区域不抬高、无拉伸/边墙，仅平面边界线勾勒轮廓，卫星底图直接透出
 
 export default function ZJ3DMap({
+  maxZoom = 15,
   id = 'zj3dmap',
   selectedCity,
   onCityClick,
@@ -62,6 +68,8 @@ export default function ZJ3DMap({
   showDronePoints = true,
   showRadarPoints = true,
   showEmissionOutletPoints = true,
+  showRegionMask = true,
+  showBoundary = true,
   focusTarget,
 }: ZJ3DMapProps) {
   const sceneRef = useRef<Scene | null>(null)
@@ -85,7 +93,7 @@ export default function ZJ3DMap({
   const emissionOutletLayersRef = useRef<EmissionOutletLayers | null>(null)
 
   // 高亮图层引用（L7 链式构建返回 ILayer，统一用 any 持有）
-  const selectedOutlineRef = useRef<any>(null)
+  const selectedOutlineRef = useRef<ILayer | null>(null)
   const selectedFillRef = useRef<any>(null)
   const selectedGlowRef = useRef<any>(null)
   const selectedDashRef = useRef<any>(null)
@@ -181,7 +189,7 @@ export default function ZJ3DMap({
         pitch: 45,
         rotation: -5,
         minZoom: 6.2,
-        maxZoom: 15,
+        maxZoom,
       }),
     })
     scene.setBgColor('rgba(9, 54, 114, 0.5)')
@@ -209,82 +217,90 @@ export default function ZJ3DMap({
         cityFeaturesRef.current = citiesRes.features
 
         // 0. 省外蒙层：大范围矩形挖掉浙江省轮廓，深色半透明雾化省外区域突出主体
-        const outerRing = [[108, 18], [132, 18], [132, 40], [108, 40], [108, 18]]
-        const zjRings = wallRes.features.flatMap((f: any) =>
-          f.geometry?.type === 'Polygon'
-            ? f.geometry.coordinates
-            : (f.geometry?.coordinates ?? []).flat(),
-        )
-        const maskLayer = new PolygonLayer({ zIndex: 1, enablePicking: false, autoFit: false })
-          .source({
-            type: 'FeatureCollection',
-            features: [{ type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [outerRing, ...zjRings] } }],
-          })
-          .shape('fill')
-          .color('#04162e')
-          .style({ opacity: 0.55 })
-        scene.addLayer(maskLayer)
+        // 空气质量页传 showRegionMask=false 跳过该蒙层（卫星底图铺满浙江省外）
+        if (showRegionMask) {
+          const outerRing = [[108, 18], [132, 18], [132, 40], [108, 40], [108, 18]]
+          const zjRings = wallRes.features.flatMap((f: any) =>
+            f.geometry?.type === 'Polygon'
+              ? f.geometry.coordinates
+              : (f.geometry?.coordinates ?? []).flat(),
+          )
+          const maskLayer = new PolygonLayer({ zIndex: 1, enablePicking: false, autoFit: false })
+            .source({
+              type: 'FeatureCollection',
+              features: [{ type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [outerRing, ...zjRings] } }],
+            })
+            .shape('fill')
+            .color('#04162e')
+            .style({ opacity: 0.55 })
+          scene.addLayer(maskLayer)
+        }
 
         // 1. 省界轮廓（平面边界：天蓝色实线，不再使用有高度的边墙）
-        const provinceLine = new LineLayer({ zIndex: 6, enablePicking: false })
-          .source(wallRes)
-          .shape('line')
-          .color('#3fc6ff')
-          .size(2.2)
-          .style({ opacity: 1 })
-        scene.addLayer(provinceLine)
-
-        // 2. 平面区域地块 —— 近全透明填充直接显示卫星底图，仅承担点选交互与淡色区域衬托
-        const polygonLayer = new PolygonLayer({ zIndex: 2, autoFit: false })
-          .source(citiesRes)
-          .shape('fill')
-          .color('name', [
-            '#2b86d8', '#2f8cdd', '#318fe0', '#2c88da',
-            '#3492e2', '#2d89db', '#3695e5', '#2e8bdc',
-            '#338fe1', '#3090df', '#369aea',
-          ])
-          .style({ opacity: 0.06 })
-        scene.addLayer(polygonLayer)
-
-        // 交互事件立即绑定：不依赖后续任何异步图层加载，保证点选/悬浮始终可用。
-        // 注意：所有装饰层必须 enablePicking: false，否则会盖住本地块层截获鼠标事件。
-        polygonLayer.on('mousemove', (e: any) => {
-          const name = e.feature?.properties?.name
-          if (!name) return
-          onCityHoverRef.current?.(name)
-          hoverNameRef.current = name
-          if (name !== selectedCityRef.current) {
-            setHighlight(hoverOutlineRef.current, name)
-          } else {
-            setHighlight(hoverOutlineRef.current, null)
-          }
-        })
-
-        polygonLayer.on('unmousemove', () => {
-          onCityHoverRef.current?.(null)
-          hoverNameRef.current = null
-          setHighlight(hoverOutlineRef.current, null)
-        })
-
-        polygonLayer.on('click', (e: any) => {
-          const name = e.feature?.properties?.name
-          const adcode = e.feature?.properties?.adcode
-          if (name) onCityClickRef.current?.(name, adcode)
-        })
-
-        // 3. 市界描边（内侧市界：天蓝色）。
-        // 关键实测结论：本机真实浏览器中，「11 个市要素喂给单个 LineLayer」不渲染，
-        // 而「单市要素 setData 的 LineLayer」（选中/悬浮描边）稳定渲染。
-        // 因此常态市界 = 每市一个线图层，完全复用已验证可用的单要素图层模式。
-        citiesRes.features.forEach((feature: any) => {
-          const cityLine = new LineLayer({ zIndex: 5, enablePicking: false })
-            .source({ type: 'FeatureCollection', features: [feature] })
+        if (showBoundary) {
+          const provinceLine = new LineLayer({ zIndex: 6, enablePicking: false })
+            .source(wallRes)
             .shape('line')
             .color('#3fc6ff')
-            .size(2)
+            .size(2.2)
             .style({ opacity: 1 })
-          scene.addLayer(cityLine)
-        })
+          scene.addLayer(provinceLine)
+        }
+
+        // 2. 平面区域地块 —— 近全透明填充直接显示卫星底图，仅承担点选交互与淡色区域衬托
+        let polygonLayer: ILayer | null = null
+        if (showBoundary) {
+          polygonLayer = new PolygonLayer({ zIndex: 2, autoFit: false })
+            .source(citiesRes)
+            .shape('fill')
+            .color('name', [
+              '#2b86d8', '#2f8cdd', '#318fe0', '#2c88da',
+              '#3492e2', '#2d89db', '#3695e5', '#2e8bdc',
+              '#338fe1', '#3090df', '#369aea',
+            ])
+            .style({ opacity: 0.06 })
+          scene.addLayer(polygonLayer)
+
+          // 交互事件立即绑定：不依赖后续任何异步图层加载，保证点选/悬浮始终可用。
+          // 注意：所有装饰层必须 enablePicking: false，否则会盖住本地块层截获鼠标事件。
+          polygonLayer.on('mousemove', (e: any) => {
+            const name = e.feature?.properties?.name
+            if (!name) return
+            onCityHoverRef.current?.(name)
+            hoverNameRef.current = name
+            if (name !== selectedCityRef.current) {
+              setHighlight(hoverOutlineRef.current, name)
+            } else {
+              setHighlight(hoverOutlineRef.current, null)
+            }
+          })
+
+          polygonLayer.on('unmousemove', () => {
+            onCityHoverRef.current?.(null)
+            hoverNameRef.current = null
+            setHighlight(hoverOutlineRef.current, null)
+          })
+
+          polygonLayer.on('click', (e: any) => {
+            const name = e.feature?.properties?.name
+            const adcode = e.feature?.properties?.adcode
+            if (name) onCityClickRef.current?.(name, adcode)
+          })
+
+          // 3. 市界描边（内侧市界：天蓝色）。
+          // 关键实测结论：本机真实浏览器中，「11 个市要素喂给单个 LineLayer」不渲染，
+          // 而「单市要素 setData 的 LineLayer」（选中/悬浮描边）稳定渲染。
+          // 因此常态市界 = 每市一个线图层，完全复用已验证可用的单要素图层模式。
+          citiesRes.features.forEach((feature: any) => {
+            const cityLine = new LineLayer({ zIndex: 5, enablePicking: false })
+              .source({ type: 'FeatureCollection', features: [feature] })
+              .shape('line')
+              .color('#3fc6ff')
+              .size(2)
+              .style({ opacity: 1 })
+            scene.addLayer(cityLine)
+          })
+        }
 
         // 5. 悬浮描边：亮白加粗，与常态天蓝边形成对比
         const hoverOutline = new LineLayer({ zIndex: 8, enablePicking: false })
@@ -367,7 +383,7 @@ export default function ZJ3DMap({
             textAllowOverlap: true,
             heightFixed: true,
           })
-        scene.addLayer(textLayer)
+        if (showBoundary) scene.addLayer(textLayer)
 
         // 11-12. 使用接口经纬度打印雷达扫描与无人机场图标（与老项目字段一致）
         deviceLayersRef.current = await createDeviceMapLayers(scene, devicePointsRef.current, 0)
@@ -420,7 +436,7 @@ export default function ZJ3DMap({
       emissionOutletLayersRef.current = null
       cityFeaturesRef.current = []
     }
-  }, [])
+  }, [showBoundary, showRegionMask, maxZoom])
 
   return <div ref={containerRef} id={id} className="w-full h-full" />
 }

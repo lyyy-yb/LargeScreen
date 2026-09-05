@@ -38,6 +38,10 @@ interface CountyBoundaryMapProps {
   showRadarPoints?: boolean
   /** 显示企业排口打点（图标 + 两行文字），默认 true */
   showEmissionOutletPoints?: boolean
+  /** 是否显示区县外的省外挖洞蒙层；默认 true（monitor 行为不变），空气质量页传 false */
+  showRegionMask?: boolean
+  /** 是否显示区县边界线 + 区域填充 + 标签；默认 true（monitor 行为不变），空气质量页传 false */
+  showBoundary?: boolean
   /** 全局搜索选中后的定位目标 */
   focusTarget?: MapFocusTarget | null
 }
@@ -73,6 +77,8 @@ export default function CountyBoundaryMap({
   showDronePoints = true,
   showRadarPoints = true,
   showEmissionOutletPoints = true,
+  showRegionMask = true,
+  showBoundary = true,
   focusTarget,
 }: CountyBoundaryMapProps) {
   const containerRef = useRef<HTMLDivElement>(null)
@@ -189,49 +195,51 @@ export default function CountyBoundaryMap({
 
         // 区县级：仅显示区县边界
         // 区县外蒙层 + 限制拖拽范围（与省级同方案）
-        addRegionMask(scene, countyData)
+        addRegionMask(scene, countyData, 1, 0.55, { enabled: showRegionMask })
         setRegionBounds(scene, countyData)
 
         // 平面区域底：近全透明填充直接透出卫星底图（仅承担区域衬托，不再拉伸抬高）
-        const countyBase = new PolygonLayer({ zIndex: 1, autoFit: true })
-          .source(countyData)
-          .shape('fill')
-          .color('#2f8cdd')
-          .style({ opacity: 0.06 })
-        scene.addLayer(countyBase)
+        if (showBoundary) {
+          const countyBase = new PolygonLayer({ zIndex: 1, autoFit: true })
+            .source(countyData)
+            .shape('fill')
+            .color('#2f8cdd')
+            .style({ opacity: 0.06 })
+          scene.addLayer(countyBase)
 
-        // 区县界亮轮廓（平面边界：天蓝实线，不再使用有高度的边墙）
-        const countyBoundLine = new LineLayer({ zIndex: 7, enablePicking: false })
-          .source(countyData)
-          .shape('line')
-          .color('#3fc6ff')
-          .size(2.2)
-          .style({ opacity: 1 })
-        scene.addLayer(countyBoundLine)
+          // 区县界亮轮廓（平面边界：天蓝实线，不再使用有高度的边墙）
+          const countyBoundLine = new LineLayer({ zIndex: 7, enablePicking: false })
+            .source(countyData)
+            .shape('line')
+            .color('#3fc6ff')
+            .size(2.2)
+            .style({ opacity: 1 })
+          scene.addLayer(countyBoundLine)
 
-        // 区域名称文本标签
-        const featureProps = countyData.features[0]?.properties
-        const labelCenter: [number, number] =
-          (Array.isArray(featureProps?.center) && featureProps.center.length === 2 && (featureProps.center as [number, number])) ||
-          (Array.isArray(featureProps?.centroid) && featureProps.centroid.length === 2 && (featureProps.centroid as [number, number])) ||
-          [county.lng, county.lat]
+          // 区域名称文本标签
+          const featureProps = countyData.features[0]?.properties
+          const labelCenter: [number, number] =
+            (Array.isArray(featureProps?.center) && featureProps.center.length === 2 && (featureProps.center as [number, number])) ||
+            (Array.isArray(featureProps?.centroid) && featureProps.centroid.length === 2 && (featureProps.centroid as [number, number])) ||
+            [county.lng, county.lat]
 
-        const textLayer = new PointLayer({ zIndex: 12, enablePicking: false })
-          .source([{ name: county.name, lng: labelCenter[0], lat: labelCenter[1] }], {
-            parser: { type: 'json', x: 'lng', y: 'lat' },
-          })
-          .shape('name', 'text')
-          .size(15)
-          .color('#dffbff')
-          .style({
-            textAnchor: 'center',
-            stroke: '#082548',
-            strokeWidth: 3.5,
-            raisingHeight: 0,
-            textAllowOverlap: true,
-            heightFixed: true,
-          })
-        scene.addLayer(textLayer)
+          const textLayer = new PointLayer({ zIndex: 12, enablePicking: false })
+            .source([{ name: county.name, lng: labelCenter[0], lat: labelCenter[1] }], {
+              parser: { type: 'json', x: 'lng', y: 'lat' },
+            })
+            .shape('name', 'text')
+            .size(15)
+            .color('#dffbff')
+            .style({
+              textAnchor: 'center',
+              stroke: '#082548',
+              strokeWidth: 3.5,
+              raisingHeight: 0,
+              textAllowOverlap: true,
+              heightFixed: true,
+            })
+          scene.addLayer(textLayer)
+        }
 
         deviceLayersRef.current = await createDeviceMapLayers(scene, devicePointsRef.current, 0)
         airLayersRef.current = await createAirQualityLayers(
@@ -272,7 +280,7 @@ export default function CountyBoundaryMap({
       scene.destroy()
       sceneRef.current = null
     }
-  }, [county])
+  }, [county, showBoundary, showRegionMask])
 
   return (
     <div className="relative w-full h-full">

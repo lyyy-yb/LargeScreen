@@ -38,7 +38,10 @@ export function useMapFocus(
     const scene = sceneRef.current
     if (!ready || !focusTarget || !scene) return
 
-    scene.setZoomAndCenter(focusTarget.zoom, [focusTarget.lng, focusTarget.lat])
+    const rawMap = (scene as unknown as { mapService?: { map?: { flyTo?: (options: object) => void } } }).mapService?.map
+    if (focusTarget.animate && rawMap?.flyTo) {
+      rawMap.flyTo({ center: [focusTarget.lng, focusTarget.lat], zoom: focusTarget.zoom, duration: 1200 })
+    } else scene.setZoomAndCenter(focusTarget.zoom, [focusTarget.lng, focusTarget.lat])
     const data = [{ lng: focusTarget.lng, lat: focusTarget.lat }]
 
     let haloLayer: ILayer | null = null

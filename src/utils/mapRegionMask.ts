@@ -22,7 +22,14 @@ function extractRings(geojson: any): number[][][] {
  * 区域外蒙层：大矩形挖掉区域轮廓，区域外用深色半透明雾化，突出主体区域。
  * 与省级地图（ZJ3DMap）方案一致，市/区县/乡镇级复用。
  */
-export function addRegionMask(scene: Scene, geojson: any, zIndex = 1, opacity = 0.55): ILayer {
+export function addRegionMask(
+  scene: Scene,
+  geojson: any,
+  zIndex: number = 1,
+  opacity: number = 0.55,
+  options: { enabled?: boolean } = { enabled: true },
+): ILayer | null {
+  if (options.enabled === false) return null
   const rings = extractRings(geojson)
   const maskLayer = new PolygonLayer({ zIndex, enablePicking: false, autoFit: false })
     .source({

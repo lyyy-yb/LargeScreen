@@ -11,6 +11,7 @@ import { getLandingPath } from '@/utils/region'
 // 懒加载页面
 const Login = lazy(() => import('@/pages/login'))
 const Monitor = lazy(() => import('@/pages/monitor'))
+const AirQuality = lazy(() => import('@/pages/air-quality'))
 const Radar = lazy(() => import('@/pages/radar'))
 const Drone = lazy(() => import('@/pages/drone'))
 const DroneMediaPreview = lazy(() => import('@/pages/drone/MediaPreview'))
@@ -68,6 +69,11 @@ export const routes: RouteObject[] = [
         path: 'monitor',
         element: <LazyComponent><Monitor /></LazyComponent>,
         handle: { title: '监控大屏', tab: true } as RouteMeta,
+      },
+      {
+        path: 'air-quality',
+        element: <LazyComponent><AirQuality /></LazyComponent>,
+        handle: { title: '空气质量', tab: true } as RouteMeta,
       },
       {
         path: 'radar',
@@ -142,6 +148,7 @@ export interface TabRouteMeta {
 
 export const tabRoutes: TabRouteMeta[] = [
   { key: '/monitor', title: '监控大屏' },
+  { key: '/air-quality', title: '空气质量' },
   { key: '/radar', title: '光量子雷达' },
   { key: '/drone', title: '无人机机场' },
   { key: '/patrol', title: '走航巡查' },

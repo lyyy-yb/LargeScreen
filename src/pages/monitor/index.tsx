@@ -31,6 +31,7 @@ import droneSpinGif from '@/assets/images/drone-spin.gif'
 import radarSpinGif from '@/assets/images/radar-spin.gif'
 import AirStationDetailPopup from './popups/AirStationDetailPopup'
 import OutletDetailPopup from './popups/OutletDetailPopup'
+import MapPopupPortal from '@/components/MapPopupPortal'
 import type { AirPointDetail, OutletPointDetail } from './popups/shared'
 import AirStationRangeCard from './cards/AirStationRangeCard'
 import AlertHandlingPanel from './cards/AlertHandlingPanel'
@@ -802,20 +803,24 @@ export default function Monitor() {
 
       {/* 空气质量打点详情弹窗（全局最高 z-index 浮层，锚定在图标点击位置） */}
       {airDetail && (
+        <MapPopupPortal>
         <AirStationDetailPopup
           key={airDetail.id ?? airDetail.name}
           detail={airDetail}
           onClose={() => setAirDetail(null)}
         />
+        </MapPopupPortal>
       )}
 
       {/* 企业排口详情弹窗（全局最高 z-index 浮层，锚定在圆点点击位置） */}
       {outletDetail && (
+        <MapPopupPortal>
         <OutletDetailPopup
           key={outletDetail.id ?? outletDetail.outletName}
           detail={outletDetail}
           onClose={() => setOutletDetail(null)}
         />
+        </MapPopupPortal>
       )}
     </div>
   )

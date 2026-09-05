@@ -58,6 +58,12 @@ export interface AlertEventDTO {
   stationType?: string
   deptId?: number
   triggerReason: string
+  /** 规则累计触发次数（预警列表接口返回） */
+  triggerCount?: number
+  /** 最近一次触发时间 */
+  lastTriggerTime?: string
+  /** 最近一次触发值；部分数据源可能返回字符串 */
+  lastTriggerValue?: number | string
   status: 'undispatched' | 'pending' | 'processing' | 'completed' | 'closed' | 'cleared'
   assignedCity?: string
   /** 预警点位经度（list 接口返回，用于大屏地图打点） */

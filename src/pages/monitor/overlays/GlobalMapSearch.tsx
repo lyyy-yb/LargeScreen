@@ -29,7 +29,7 @@ export default function GlobalMapSearch({
   onClose,
 }: GlobalMapSearchProps) {
   return (
-    <div className="global-map-search absolute bottom-94px left-1/2 -translate-x-1/2 z-30 w-460px">
+    <div className="global-map-search absolute bottom-112px left-1/2 -translate-x-1/2 z-30 w-460px">
       {open && (
         <div className="global-map-search__results">
           {results.length ? (

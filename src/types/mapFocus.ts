@@ -3,6 +3,7 @@ export interface MapFocusTarget {
   lng: number
   lat: number
   zoom: number
+  animate?: boolean
   /** 保证连续点击同一结果时仍会重新定位 */
   requestId: number
 }
