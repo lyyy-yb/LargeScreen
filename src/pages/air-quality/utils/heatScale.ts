@@ -10,7 +10,8 @@ export interface HeatPoint {
 
 export interface HeatScale {
   max: number
-  stops: Array<{ ratio: number; value: number; color: string }>
+  /** 6 段色阶；每段是一组 [下限, 上限] 区间（单位同污染物原始浓度） */
+  bands: Array<{ lower: number; upper: number; color: string }>
 }
 
 export const HEATMAP_RAMP_COLORS = ['#164e86', '#00a8a8', '#53d769', '#ffe45c', '#ff8a3d', '#e53935']
@@ -29,17 +30,14 @@ export function normalizeHeatWeights(values: Array<number | null | undefined>): 
     if (max <= 0 || value == null) return 0.1
     return Math.min(1, Math.max(0.1, value / max))
   })
-  const legendRatios = [0.2, 0.4, 0.6, 0.8, 1]
-  const legendColors = HEATMAP_RAMP_COLORS.slice(1)
+  // 6 段色阶均分 max；L7 ramp 同步用 6 段 positions（0, 0.2, ..., 1）。
+  const bands = HEATMAP_RAMP_COLORS.map((color, index) => {
+    const lower = (max * index) / HEATMAP_RAMP_COLORS.length
+    const upper = (max * (index + 1)) / HEATMAP_RAMP_COLORS.length
+    return { lower, upper, color }
+  })
   return {
     weights,
-    scale: {
-      max,
-      stops: legendRatios.map((ratio, index) => ({
-        ratio,
-        value: max * ratio,
-        color: legendColors[index],
-      })),
-    },
+    scale: { max, bands },
   }
 }

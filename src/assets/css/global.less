@@ -217,12 +217,16 @@
 .map-popup-portal { position: fixed; z-index: 100000; pointer-events: none; transform-origin: top left; }
 .map-popup-portal > * { pointer-events: auto; }
 .air-map-label {
-  display: flex; align-items: center; gap: 5px; padding: 3px 5px;
+  display: flex; align-items: center; gap: 0; padding: 3px 6px;
   border: 1px solid rgba(84, 193, 237, .75); border-radius: 5px;
   background: rgba(3, 24, 54, .94); color: #edf9ff; cursor: pointer;
   font: 12px/18px 'Microsoft YaHei', sans-serif; white-space: nowrap;
   box-shadow: 0 2px 7px #00172c99;
   &:hover, &:focus-visible { outline: 1px solid #37e4ff; }
+  // 前缀(固/移) 和名称之间 6px 间距
+  .air-station-badge + .air-map-label__name { margin-left: 6px; }
+  // 名称和数值之间 8px 间距
+  .air-map-label__name + .air-map-label__value { margin-left: 8px; }
   &__name { max-width: 150px; overflow: hidden; text-overflow: ellipsis; }
   &__value { padding: 0 5px; border-radius: 3px; color: #ffe798; background: #725014; font-weight: 700; }
 }

@@ -205,10 +205,12 @@ export default function AirHeatmapPanel({
       </div></div>
       <div className="air-heatmap-legend-title">参考浓度区间（{POLLUTANT_BY_KEY[activePollutant].unit}）</div>
       <div className="air-quality-heatmap-legend" title="按最大浓度归一化的参考区间；地图热力为周边点位平滑叠加，非逐像素实测浓度。缺测权重按 0.1 保底。">
-        {scale.max > 0 ? scale.stops.map((stop, index) => (
-          <span key={stop.ratio} className="flex items-center gap-0.5">
-            <span className="air-quality-heatmap-legend-swatch" style={{ background: stop.color }} />
-            <span>{index === 0 ? '0' : `>${scale.stops[index - 1].value.toFixed(1)}`}–{stop.value.toFixed(1)}</span>
+        {scale.max > 0 ? scale.bands.map((band, index) => (
+          <span key={band.color} className="air-quality-heatmap-legend-item">
+            <span className="air-quality-heatmap-legend-swatch" style={{ background: band.color }} />
+            <span>
+              {index === 0 ? '0' : band.lower.toFixed(1)}–{band.upper.toFixed(1)}
+            </span>
           </span>
         )) : <span>暂无正值数据 · 仅展示保底热力</span>}
       </div>

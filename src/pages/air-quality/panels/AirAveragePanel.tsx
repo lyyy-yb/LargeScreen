@@ -8,7 +8,7 @@ export default function AirAveragePanel({ records, loading, error }: { records: 
   const means = useMemo(() => concentrationMeans(records), [records])
   return <section className="screen-glass-panel air-quality-range-panel flex flex-col">
     <MapPanelHeader title="污染物浓度" extra={<span className="air-quality-mock-badge">模拟评级</span>} />
-    <div className="air-average-caption">上一完整小时 · 区域站点均值{error ? ' · 更新失败' : ''}</div>
+    {error && <div className="air-average-caption">更新失败</div>}
     <div className="air-quality-range-grid">
       {means.map(({ key, count, value }) => {
         const pollutant = POLLUTANT_BY_KEY[key]

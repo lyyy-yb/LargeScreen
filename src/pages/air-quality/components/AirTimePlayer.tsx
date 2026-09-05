@@ -10,7 +10,6 @@ interface AirTimePlayerProps {
   frameCount: number
   currentFrameTime?: string
   loading?: boolean
-  isMock?: boolean
   timeRange: AirTimeRange | null
   aggregation: AirAggregation
   onAggregationChange: (type: AirAggregation) => void
@@ -18,7 +17,7 @@ interface AirTimePlayerProps {
   onFrameChange: (index: number) => void
 }
 
-export default function AirTimePlayer({ currentFrameIdx, frameCount, currentFrameTime, loading, isMock, timeRange, aggregation, onAggregationChange, onTimeRangeChange, onFrameChange }: AirTimePlayerProps) {
+export default function AirTimePlayer({ currentFrameIdx, frameCount, currentFrameTime, loading, timeRange, aggregation, onAggregationChange, onTimeRangeChange, onFrameChange }: AirTimePlayerProps) {
   const [isPlaying, setIsPlaying] = useState(false)
   const config = AGGREGATIONS[aggregation]
   const playing = isPlaying && !loading && frameCount > 1 && currentFrameIdx < frameCount - 1
@@ -79,14 +78,15 @@ export default function AirTimePlayer({ currentFrameIdx, frameCount, currentFram
       </div>
       {timeRange && (
         <div className="air-quality-playback-strip map-overlay-toolbar">
-          {isMock && <span className="air-quality-mock-badge">模拟回放</span>}
           <Button type="primary" size="small" className="air-quality-play-btn" aria-label={playing ? '暂停播放' : '开始播放'}
             icon={playing ? <PauseOutlined /> : <CaretRightOutlined />} disabled={frameCount <= 1 || loading}
             onClick={() => { if (playing) setIsPlaying(false); else { if (currentFrameIdx >= frameCount - 1) onFrameChange(0); setIsPlaying(true) } }} />
-          <div className="air-quality-player-step">步长 {config.stepLabel}</div>
-          <div className="air-quality-player-slider"><Slider min={0} max={Math.max(1, frameCount - 1)} value={currentFrameIdx}
-            onChange={index => { setIsPlaying(false); onFrameChange(index) }} disabled={frameCount <= 1 || loading}
-            tooltip={{ formatter: () => currentFrameTime ? dayjs(currentFrameTime).format(config.format) : '--' }} /></div>
+          <div className="air-quality-player-slider">
+            <Slider min={0} max={Math.max(1, frameCount - 1)} value={currentFrameIdx}
+              onChange={index => { setIsPlaying(false); onFrameChange(index) }} disabled={frameCount <= 1 || loading}
+              marks={frameCount > 1 ? Object.fromEntries(Array.from({ length: frameCount }, (_, i) => [i, ''])) : undefined}
+              tooltip={{ formatter: () => currentFrameTime ? dayjs(currentFrameTime).format(config.format) : '--' }} />
+          </div>
           <div className="air-quality-player-frame-info">{frameCount ? currentFrameIdx + 1 : 0} / {frameCount}
             {currentFrameTime && <span className="ml-2">{dayjs(currentFrameTime).format(config.format)}</span>}</div>
         </div>

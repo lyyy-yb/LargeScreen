@@ -353,7 +353,6 @@ export default function AirQuality() {
           frameCount={frames.length}
           currentFrameTime={currentFrameTime}
           loading={playbackLoading}
-          isMock={isMockPlayback}
           onFrameChange={setCurrentFrameIdx}
         />
       </div>
