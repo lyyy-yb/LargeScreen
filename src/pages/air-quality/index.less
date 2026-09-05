@@ -469,15 +469,21 @@
 .air-average-level { display: inline-block; font-size: 9px; line-height: 14px; padding: 0 6px; border-radius: 3px; }
 .air-alert-level { display: inline-block; color: #fff; padding: 2px 6px; border-radius: 3px; font-size: 11px; }
 .air-alert-trigger { color: #ffca57; margin: 4px 0 6px; overflow-wrap: anywhere; }
-// 拉齐统计类型下拉与时间范围选择器的高度（共用 30px）
-.air-aggregation-select.ant-select-single {
+// 拉齐统计类型下拉与时间范围选择器的高度（共用 30px，覆盖 size=small 24px）
+.air-aggregation-select.ant-select-single.ant-select-sm {
   width: 76px;
   flex-shrink: 0;
+  height: 30px;
 
   .ant-select-selector {
-    min-height: 30px;
+    height: 30px !important;
+    min-height: 30px !important;
     padding: 0 22px 0 8px !important;
     border-radius: 5px !important;
+  }
+
+  .ant-select-selection-search {
+    height: 30px;
   }
 
   .ant-select-selection-item,
