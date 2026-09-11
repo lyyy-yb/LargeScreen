@@ -1,0 +1,37 @@
+.radar-view-container { position: relative; width: 100%; height: 100%; }
+.radar-view-toggle { position: absolute; z-index: 65; top: 10px; left: 50%; transform: translateX(-50%); display: flex; gap: 5px; padding: 5px 8px !important;
+  button { padding: 4px 14px; border: 1px solid transparent; border-radius: 5px; color:#a2cbea; background: transparent; cursor:pointer; font-size:12px; }
+  button[aria-pressed=true] { color:#e1fcff; border-color:#31dbed77; background:#159eae55; }
+}
+.radar-view-container .map-top-controls { top:56px; }
+.radar-heat-mode-card { cursor:pointer; color:#a9d9f0; font-size:12px; transition:border-color .2s; &:hover{border-color:#5beaff !important} }
+.radar-heat-mode-icon { display:block; font-size:44px; color:#62deef; margin:22px 0 16px; }
+.radar-heat-mode-card:focus-visible { outline:2px solid #5beaff; outline-offset:3px; }
+.radar-heat-view { width:100%; height:100%; position:relative; overflow:hidden; background:#0b2746; }
+.radar-data-tag { font-size:11px; color:#ffd565; background:#8d681d33; border:1px solid #e7ae4266; border-radius:4px; padding:2px 6px; white-space:nowrap; }
+.radar-heat-information { position:absolute; top:144px; left:20px; z-index:50; display:flex; align-items:flex-start; flex-direction:column; gap:7px; padding:12px 16px !important; color:#daf6ff;
+  time { font-variant-numeric:tabular-nums; font-size:18px; } small { color:#99bdd6; } }
+.radar-heat-error { color:#ff9b72; max-width:290px; }
+.radar-heat-scale { position:absolute; z-index:50; top:320px; left:20px; display:flex; flex-direction:column; gap:7px; padding:12px !important; font-size:12px;
+  small{color:#a8cce4} }
+.radar-heat-scale-body { height:230px; display:flex; gap:8px; }
+.radar-heat-gradient { width:12px; border-radius:6px; background:linear-gradient(to top,#008511,#6fb900,#f3ed00,#ff9000,#ff2800,#f242c4,#663591); }
+.radar-heat-ticks { position:relative; width:35px; color:#e0f5ff; span{position:absolute;left:0;transform:translateY(50%)} }
+.radar-heat-previous { position:absolute; right:20px; top:144px; z-index:50; width:188px; padding:12px !important; text-align:center;
+  canvas{display:block;width:160px;height:160px;background:#061e3a66;border-radius:50%;margin:10px auto} time{color:#a2c8e1;font-size:11px} }
+.radar-heat-mini-title { display:flex; justify-content:space-between; border-bottom:1px dashed #6dcced55; padding-bottom:8px; color:#dffbff; span{font-size:11px;color:#ffd565} }
+.radar-mode-preview { position:relative; margin:12px 0; border-radius:8px; overflow:hidden; border:1px solid #75d4eb55;
+  img { display:block; width:100%; height:auto; }
+}
+.radar-preview-name-blur { position:absolute; left:30%; top:50%; width:45%; height:6%; backdrop-filter:blur(4px); background:#28596b33; }
+.radar-preview-player { position:absolute; bottom:6%; left:7%; right:7%; height:20px; display:flex; align-items:center; gap:7px; padding:0 7px; background:#0b3659dd; border:1px solid #68c8e988; border-radius:4px; color:#22e5fb;
+  >span:nth-child(2) { flex:1; height:3px; background:linear-gradient(to right,#00d7ec 40%,#75a4c766 40%); }
+  i { width:4px; height:4px; border-radius:50%; background:#b5def5; }
+}
+.radar-heat-no-previous { padding:30px 0; color:#8fb5d1; font-size:12px; }
+.radar-heat-controls { position:absolute; z-index:50; bottom:60px; left:50%; transform:translateX(-50%); width:min(850px,calc(100% - 80px)); padding:12px 16px !important; display:flex; flex-direction:column; gap:10px;
+  small{color:#92b3ca;font-size:10px;} }
+.radar-heat-date-row { display:flex; width:100%; align-items:center; gap:10px; color:#b6e9ff; font-size:12px; .screen-range-picker{flex:1;min-width:250px;} }
+.radar-heat-player { display:flex; width:100%; align-items:center; gap:10px; color:#b4e9ff;font-size:12px; .ant-slider{flex:1;min-width:90px} }
+.monitor-radar-heat-control { position:absolute; top:10px; left:50%; transform:translateX(-50%); z-index:45; display:flex; align-items:center; gap:8px; padding:6px 10px !important; }
+@media(max-height:750px){ .radar-heat-scale-body{height:120px}.radar-heat-scale{top:295px} }
