@@ -1,16 +1,18 @@
-import { Input, Select, Switch, Table, DatePicker } from 'antd'
+import { Button, Input, Select, Switch, Table, DatePicker } from 'antd'
 import type { TableColumnsType } from 'antd'
 import type { Dayjs } from 'dayjs'
 import AlertLevelBadge from '@/components/AlertLevelBadge'
 import { disabledFutureDate } from '@/utils/helpers'
 import { DATA_TYPE_OPTIONS, ALERT_LEVEL_OPTIONS } from './shared/tabConstants'
 import type { AlertEvent } from '../modals/AlertDetailModal'
+import { canCollectEvidence } from '../data/evidenceWorkflow'
 
 const { RangePicker } = DatePicker
 
 export interface AlertTabHandlers {
   onOpenDetail: (r: AlertEvent) => void
   onOpenDispatch: (r: AlertEvent) => void
+  onOpenEvidence: (r: AlertEvent) => void
   onConfirm: (id: string) => void
   onReturn: (id: string) => void
   onClear: (id: string) => void
@@ -22,6 +24,8 @@ export interface AlertTabProps {
   // 数据
   alerts: AlertEvent[]
   loading: boolean
+  refreshing: boolean
+  onRefresh: () => void
   // 分页
   page: number
   size: number
@@ -53,6 +57,8 @@ export interface AlertTabProps {
 export default function AlertTab({
   alerts,
   loading,
+  refreshing,
+  onRefresh,
   page,
   size,
   total,
@@ -104,7 +110,7 @@ export default function AlertTab({
     { title: '预警时间', dataIndex: 'createdAt', width: 150 },
     {
       title: '操作',
-      width: isTown ? 80 : 200,
+      width: isTown ? 140 : 250,
       align: 'center' as const,
       render: (_: unknown, r: AlertEvent) => (
         <div className="flex items-center gap-1.5 justify-center whitespace-nowrap">
@@ -115,6 +121,9 @@ export default function AlertTab({
           >
             详情
           </button>
+          {canCollectEvidence(r.status) && (
+            <button type="button" className="tech-action-btn btn-receive" onClick={() => handlers.onOpenEvidence(r)}>取证</button>
+          )}
           {!isTown && r.status === 'undispatched' && (
             <>
               <button
@@ -243,6 +252,7 @@ export default function AlertTab({
           allowClear
           disabledDate={disabledFutureDate}
         />
+        <Button type="primary" className="alert-refresh-button !ml-auto flex-shrink-0" disabled={refreshing} onClick={onRefresh}>{refreshing ? '刷新中…' : '刷新'}</Button>
       </div>
 
       {/* 表格 */}

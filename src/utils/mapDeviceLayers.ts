@@ -1,9 +1,11 @@
 import { PointLayer, type ILayer, type Scene } from '@antv/l7'
 import type { MapDevicePoint } from '@/types/mapDevice'
+import { createMonitorRadarHeat } from '@/features/radar-heat/monitorOverlay'
 
 export interface DeviceMapLayers {
-  /** monitor 端只保留无人机图标层；雷达扫描效果已下线（统一收敛到 radar 页） */
+  /** 无人机图标层；雷达真实扫描由内部 heat 管理器独立维护。 */
   iconLayer: ILayer
+  setRadarVisible: (visible: boolean) => void
   setData: (points: MapDevicePoint[]) => void
   destroy: () => void
 }
@@ -42,16 +44,21 @@ export async function createDeviceMapLayers(
     .size(7)
     .style({ raisingHeight, heightfixed: true })
   scene.addLayer(iconLayer)
+  const heat = createMonitorRadarHeat(scene)
+  heat.setData(points)
 
   return {
     iconLayer,
+    setRadarVisible: heat.setVisible,
     setData(nextPoints) {
+      heat.setData(nextPoints)
       const nextDronePoints = nextPoints
         .filter(point => point.type === 'drone')
         .map(point => ({ ...point, iconName: point.online ? 'monitor-drone-on' : 'monitor-drone-off' }))
       iconLayer.setData(nextDronePoints, { parser: { type: 'json', x: 'lng', y: 'lat' } })
     },
     destroy() {
+      heat.destroy()
       scene.removeLayer(iconLayer)
     },
   }

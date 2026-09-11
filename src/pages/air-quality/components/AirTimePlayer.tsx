@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Button, DatePicker, Select, Slider, message } from 'antd'
+import { Button, DatePicker, Select, Slider, Tooltip, message } from 'antd'
 import { CaretRightOutlined, PauseOutlined } from '@ant-design/icons'
 import dayjs, { type Dayjs } from 'dayjs'
 import { disabledFutureDate } from '@/utils/helpers'
@@ -8,8 +8,9 @@ import { AGGREGATIONS, latestBucket, normalizeRange, rangeError, recentRange, ty
 interface AirTimePlayerProps {
   currentFrameIdx: number
   frameCount: number
-  currentFrameTime?: string
+  frameTimes: string[]
   loading?: boolean
+  error?: string | null
   timeRange: AirTimeRange | null
   aggregation: AirAggregation
   onAggregationChange: (type: AirAggregation) => void
@@ -17,9 +18,11 @@ interface AirTimePlayerProps {
   onFrameChange: (index: number) => void
 }
 
-export default function AirTimePlayer({ currentFrameIdx, frameCount, currentFrameTime, loading, timeRange, aggregation, onAggregationChange, onTimeRangeChange, onFrameChange }: AirTimePlayerProps) {
+export default function AirTimePlayer({ currentFrameIdx, frameCount, frameTimes, loading, error, timeRange, aggregation, onAggregationChange, onTimeRangeChange, onFrameChange }: AirTimePlayerProps) {
   const [isPlaying, setIsPlaying] = useState(false)
   const config = AGGREGATIONS[aggregation]
+  const formatFrameTime = (index?: number) => index != null && frameTimes[index]
+    ? dayjs(frameTimes[index]).format(config.format) : '--'
   const playing = isPlaying && !loading && frameCount > 1 && currentFrameIdx < frameCount - 1
   useEffect(() => {
     if (!playing) return
@@ -78,17 +81,21 @@ export default function AirTimePlayer({ currentFrameIdx, frameCount, currentFram
       </div>
       {timeRange && (
         <div className="air-quality-playback-strip map-overlay-toolbar">
+          <span className="text-11px text-[#a7d9ed]">{loading ? '查询中…' : error || (frameCount ? '历史数据' : '该范围暂无数据')}</span>
           <Button type="primary" size="small" className="air-quality-play-btn" aria-label={playing ? '暂停播放' : '开始播放'}
             icon={playing ? <PauseOutlined /> : <CaretRightOutlined />} disabled={frameCount <= 1 || loading}
             onClick={() => { if (playing) setIsPlaying(false); else { if (currentFrameIdx >= frameCount - 1) onFrameChange(0); setIsPlaying(true) } }} />
           <div className="air-quality-player-slider">
             <Slider min={0} max={Math.max(1, frameCount - 1)} value={currentFrameIdx}
               onChange={index => { setIsPlaying(false); onFrameChange(index) }} disabled={frameCount <= 1 || loading}
-              marks={frameCount > 1 ? Object.fromEntries(Array.from({ length: frameCount }, (_, i) => [i, ''])) : undefined}
-              tooltip={{ formatter: () => currentFrameTime ? dayjs(currentFrameTime).format(config.format) : '--' }} />
+              marks={Object.fromEntries(frameTimes.map((_, index) => [index,
+                <Tooltip key={index} title={formatFrameTime(index)} trigger={['hover', 'focus']}>
+                  <span className="air-playback-mark" tabIndex={0} aria-label={formatFrameTime(index)} />
+                </Tooltip>,
+              ]))}
+              tooltip={{ formatter: formatFrameTime }} />
           </div>
-          <div className="air-quality-player-frame-info">{frameCount ? currentFrameIdx + 1 : 0} / {frameCount}
-            {currentFrameTime && <span className="ml-2">{dayjs(currentFrameTime).format(config.format)}</span>}</div>
+          <div className="air-quality-player-frame-info">{frameCount ? currentFrameIdx + 1 : 0} / {frameCount}</div>
         </div>
       )}
     </div>

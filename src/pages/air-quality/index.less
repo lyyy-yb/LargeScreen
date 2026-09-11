@@ -365,11 +365,30 @@
 }
 
 .air-quality-player-slider {
+  .ant-slider-mark { top: 0; }
+  .ant-slider-dot { display: none; }
+  .air-playback-mark {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 10px;
+    height: 12px;
+    cursor: pointer;
+    &::after {
+      content: '';
+      width: 4px;
+      height: 4px;
+      border-radius: 50%;
+      background: #8bc4e8;
+      border: 1px solid #16436e;
+    }
+    &:hover::after, &:focus-visible::after { background: #00e5ff; }
+  }
   flex: 1;
   min-width: 0;
 }
 
-.air-quality-mock-badge {
+.air-quality-data-badge {
   display: inline-flex;
   align-items: center;
   gap: 4px;

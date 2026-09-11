@@ -117,6 +117,7 @@ export default function AirStationConcentrationPopup({
     const loadTrend = async () => {
       setLoading(true)
       setError(null)
+      setTrend([])
       try {
         const res = await dataSourceApi.aqiDetail(station.dataSourceId)
         if (cancelled) return

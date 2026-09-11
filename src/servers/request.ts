@@ -173,7 +173,7 @@ function createRequest(url: string, tokenKey: string) {
           return Promise.reject(err)
         }
         const status = axios.isAxiosError(err) ? err.response?.status : undefined
-        console.warn(`接口请求失败${status ? `（${status}）` : ''}，页面将回退到模拟数据`)
+        console.warn(`接口请求失败${status ? `（${status}）` : ''}，请检查接口或网络状态`)
         return Promise.reject(err)
       },
     },

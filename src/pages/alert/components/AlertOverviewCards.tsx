@@ -7,7 +7,6 @@ import {
   FileTextOutlined,
   RadarChartOutlined,
   SafetyCertificateOutlined,
-  DeploymentUnitOutlined,
 } from '@ant-design/icons'
 
 interface MetricCardProps {
@@ -51,6 +50,7 @@ export interface AlertOverviewCardsProps {
   dashboard: AlertDashboardVO | null
   totalAlerts?: number
   totalTasks?: number
+  taskCounts?: Partial<Record<'pending' | 'processing' | 'completed', number>>
 }
 
 export default function AlertOverviewCards({
@@ -58,99 +58,27 @@ export default function AlertOverviewCards({
   dashboard,
   totalAlerts,
   totalTasks,
+  taskCounts,
 }: AlertOverviewCardsProps) {
   const cards = useMemo(() => {
     if (mode === 'alerts') {
-      const total = totalAlerts ?? dashboard?.effectiveCount ?? 23
-      const pending = dashboard?.pendingCount ?? 15
-      const processing = dashboard?.processingCount ?? 6
-      const closed = dashboard?.todayClosedCount ?? dashboard?.completedCount ?? 8
-      const closeRate = total > 0 ? ((closed / total) * 100).toFixed(1) : '34.8'
-
       return [
-        {
-          label: '今日预警总数',
-          value: total,
-          subText: '较昨日 +8',
-          color: '#ff4d4f',
-          icon: <ExclamationCircleOutlined />,
-        },
-        {
-          label: '待取证',
-          value: pending,
-          subText: '较昨日 1条',
-          color: '#fa8c16',
-          icon: <SafetyCertificateOutlined />,
-        },
-        {
-          label: '取证中',
-          value: processing,
-          subText: '非常规核实',
-          color: '#1890ff',
-          icon: <RadarChartOutlined />,
-        },
-        {
-          label: '今日已闭环',
-          value: closed,
-          subText: `闭环率 ${closeRate}%`,
-          color: '#52c41a',
-          icon: <CheckCircleOutlined />,
-        },
-        {
-          label: '平均响应时长',
-          value: '42min',
-          subText: '较昨日 -12min',
-          color: '#b37feb',
-          icon: <ClockCircleOutlined />,
-        },
+        { label: '预警总数', value: totalAlerts ?? '--', subText: '当前筛选', color: '#ff4d4f', icon: <ExclamationCircleOutlined /> },
+        { label: '待处置预警', value: dashboard?.pendingCount ?? '--', color: '#fa8c16', icon: <SafetyCertificateOutlined /> },
+        { label: '处置中预警', value: dashboard?.processingCount ?? '--', color: '#1890ff', icon: <RadarChartOutlined /> },
+        { label: '今日已闭环', value: dashboard?.todayClosedCount ?? '--', color: '#52c41a', icon: <CheckCircleOutlined /> },
+        { label: '平均响应时长', value: '--', subText: '统计接口未提供', color: '#b37feb', icon: <ClockCircleOutlined /> },
       ]
     }
-
-    // 处置任务管理 (对标图二)
-    const pendingTasks = dashboard?.pendingCount ?? 5
-    const processingTasks = dashboard?.processingCount ?? 6
-    const total = totalTasks ?? (dashboard ? dashboard.effectiveCount : 24)
-    const closed = dashboard?.todayClosedCount ?? dashboard?.completedCount ?? 8
-    const closeRate = total > 0 ? ((closed / total) * 100).toFixed(1) : '34.8'
-
+    // dashboard 是预警口径，不能冒充处置任务各状态的数量。
     return [
-      {
-        label: '待签收',
-        value: pendingTasks,
-        subText: '平均认领',
-        color: '#d48806',
-        icon: <FileTextOutlined />,
-      },
-      {
-        label: '取证中',
-        value: processingTasks,
-        subText: '非常规核实',
-        color: '#1890ff',
-        icon: <RadarChartOutlined />,
-      },
-      {
-        label: '现场核查中',
-        value: Math.max(1, Math.floor(processingTasks / 2)),
-        subText: '已派发现场',
-        color: '#9254de',
-        icon: <DeploymentUnitOutlined />,
-      },
-      {
-        label: '今日已闭环',
-        value: closed,
-        subText: `闭环率 ${closeRate}%`,
-        color: '#52c41a',
-        icon: <CheckCircleOutlined />,
-      },
-      {
-        label: '超时未处置',
-        value: 2,
-        subText: '重点关注',
-        color: '#f5222d',
-        icon: <ExclamationCircleOutlined />,
-      },
+      { label: '任务总数', value: totalTasks ?? '--', subText: '当前筛选', color: '#d48806', icon: <FileTextOutlined /> },
+      { label: '待签收任务', value: taskCounts?.pending ?? '--', subText: '当前区域 / 类型', color: '#fa8c16', icon: <SafetyCertificateOutlined /> },
+      { label: '处置中任务', value: taskCounts?.processing ?? '--', subText: '当前区域 / 类型', color: '#1890ff', icon: <RadarChartOutlined /> },
+      { label: '已完成任务', value: taskCounts?.completed ?? '--', subText: '当前区域 / 类型', color: '#52c41a', icon: <CheckCircleOutlined /> },
+      { label: '超时未处置', value: '--', subText: '统计接口未提供', color: '#f5222d', icon: <ExclamationCircleOutlined /> },
     ]
-  }, [mode, dashboard, totalAlerts, totalTasks])
+  }, [mode, dashboard, totalAlerts, totalTasks, taskCounts])
 
   return (
     <div className="alert-overview-bar">

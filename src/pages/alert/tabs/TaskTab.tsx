@@ -1,22 +1,24 @@
-import { Select, Table } from 'antd'
+import { Button, Select, Table } from 'antd'
 import type { TableColumnsType } from 'antd'
 import { DATA_TYPE_OPTIONS, TASK_TYPE_OPTIONS } from './shared/tabConstants'
 import type { DisposalTask } from '../modals/TaskDetailModal'
 
 export interface TaskTabHandlers {
   onOpenDetail: (r: DisposalTask) => void
+  onOpenFollowUp: (r: DisposalTask) => void
   onUpdateStatus: (id: string, status: string) => void
   onOpenCommit: (r: DisposalTask) => void
   onDispatchToTown: (r: DisposalTask) => void
   onConfirm: (alertId: string) => void
   onReturn: (alertId: string) => void
-  onOpenDisposalView: (r: DisposalTask) => void
   onDelete: (id: string) => void
 }
 
 export interface TaskTabProps {
   tasks: DisposalTask[]
   loading: boolean
+  refreshing: boolean
+  onRefresh: () => void
   page: number
   size: number
   total: number
@@ -37,6 +39,8 @@ export interface TaskTabProps {
 export default function TaskTab({
   tasks,
   loading,
+  refreshing,
+  onRefresh,
   page,
   size,
   total,
@@ -98,7 +102,7 @@ export default function TaskTab({
     },
     {
       title: '操作',
-      width: 220,
+      width: 290,
       align: 'center' as const,
       render: (_: unknown, r: DisposalTask) => (
         <div className="flex items-center gap-1.5 justify-center whitespace-nowrap">
@@ -109,6 +113,9 @@ export default function TaskTab({
           >
             详情
           </button>
+          {r.status === 'completed' && (
+            <button type="button" className="tech-action-btn btn-dispatch" onClick={() => handlers.onOpenFollowUp(r)}>后续处置</button>
+          )}
           {!isTown && r.status === 'pending' && (
             <button
               type="button"
@@ -153,15 +160,6 @@ export default function TaskTab({
                 退回
               </button>
             </>
-          )}
-          {(r.status === 'committed' || r.status === 'completed') && r.disposalContent && (
-            <button
-              type="button"
-              className="tech-action-btn btn-detail"
-              onClick={() => handlers.onOpenDisposalView(r)}
-            >
-              查看
-            </button>
           )}
           {!isTown && r.status === 'completed' && (
             <button
@@ -222,6 +220,7 @@ export default function TaskTab({
           ]}
           allowClear
         />
+        <Button type="primary" className="alert-refresh-button !ml-auto flex-shrink-0" disabled={refreshing} onClick={onRefresh}>{refreshing ? '刷新中…' : '刷新'}</Button>
       </div>
 
       {/* 表格 */}

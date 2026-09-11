@@ -66,13 +66,13 @@ export function useLayerVisibility(
     if (showDronePoints) d.show(); else d.hide()
   }, [deviceLayersRef, showDronePoints, ready])
 
-  // 雷达扫描效果已下线（监控大屏地图不再渲染扫描盘/名称层，统一收敛到 radar 页）；
-  // 保留雷达突发告警点（标准 ILayer）的开关 + 名称层（缩放阈值 + 开关双条件控制）
+  // 雷达真实周期栅格、图标、告警点和名称同步显隐；隐藏时取消扫描订阅。
   useEffect(() => {
     const r = radarAlarmLayersRef.current
+    deviceLayersRef.current?.setRadarVisible(showRadarPoints)
     if (showRadarPoints) { r?.layer.show() } else { r?.layer.hide() }
     r?.setNameVisible(showRadarPoints)
-  }, [radarAlarmLayersRef, showRadarPoints, ready])
+  }, [radarAlarmLayersRef, deviceLayersRef, showRadarPoints, ready])
 
   // 企业排口打点：开关只更新基础显隐态，图标/文字的缩放门控仍然生效。
   useEffect(() => {

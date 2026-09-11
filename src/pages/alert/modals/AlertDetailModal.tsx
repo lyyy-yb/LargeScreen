@@ -1,4 +1,8 @@
 import { Modal, Tag } from 'antd'
+import EvidenceSections from '../components/EvidenceSections'
+import FollowUpRecords from '../components/FollowUpRecords'
+import { AlertFacts, AlertTaskResults } from '../components/DetailSections'
+import { ALERT_STATUS_LABEL_MAP, ALERT_STATUS_COLOR_MAP } from '../tabs/shared/tabConstants'
 
 export interface AlertEvent {
   id: string
@@ -29,50 +33,17 @@ interface AlertDetailModalProps {
   alert: AlertEvent | null
   onClose: () => void
   alertLevelOptions: AlertLevelOption[]
+  deptNameOf?: (id?: number) => string | undefined
 }
 
-export default function AlertDetailModal({
-  open,
-  alert,
-  onClose,
-  alertLevelOptions,
-}: AlertDetailModalProps) {
-  const level = alert ? alertLevelOptions.find((o) => o.value === alert.alertLevel) : null
-  return (
-    <Modal
-      title={<span className="text-[#03FBFD] font-bold">预警详情</span>}
-      open={open}
-      onCancel={onClose}
-      width={550}
-      footer={null}
-      styles={{ body: { padding: '20px 24px' } }}
-    >
-      {alert && (
-        <div
-          className="space-y-2 p-3 rounded"
-          style={{ backgroundColor: 'rgba(3,251,253,0.05)', border: '1px solid rgba(3,251,253,0.15)' }}
-        >
-          {(
-            [
-              ['预警ID', alert.id],
-              ['规则', alert.ruleName],
-              ['设备', alert.deviceName],
-              ['位置', alert.location],
-              ['时间', alert.createdAt],
-              ['原因', alert.triggerReason],
-            ] as const
-          ).map(([k, v]) => (
-            <div key={k} className="flex justify-between">
-              <span className="text-[#03FBFD]">{k}</span>
-              <span className="text-white/75 text-right max-w-[60%]">{v}</span>
-            </div>
-          ))}
-          <div className="flex justify-between">
-            <span className="text-[#03FBFD]">级别</span>
-            <Tag color={level?.color}>{level?.label}</Tag>
-          </div>
-        </div>
-      )}
-    </Modal>
-  )
+export default function AlertDetailModal({ open, alert, onClose, deptNameOf }: AlertDetailModalProps) {
+  return <Modal title={<span>预警详情 {alert && <Tag color={ALERT_STATUS_COLOR_MAP[alert.status]}>{ALERT_STATUS_LABEL_MAP[alert.status] || alert.status}</Tag>}</span>}
+    open={open} onCancel={onClose} width={760} footer={null} className="alert-evidence-modal evidence-fullscreen-modal" destroyOnHidden>
+    {open && alert && <div key={alert.id}>
+      <section className="evidence-section"><h3>基础信息</h3><AlertFacts alert={alert} /></section>
+      <EvidenceSections alertId={alert.id} />
+      <AlertTaskResults alert={alert} deptNameOf={deptNameOf} />
+      <FollowUpRecords alertId={alert.id} />
+    </div>}
+  </Modal>
 }

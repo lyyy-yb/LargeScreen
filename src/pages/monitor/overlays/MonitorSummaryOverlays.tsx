@@ -7,13 +7,13 @@ export default function SourceSummary({ onlineSourceCount }: SourceSummaryProps)
   return (
     <div className="source-summary absolute bottom-56px left-3 z-20 text-11px text-[#b2d9ff]/90 space-y-1 font-mono p-2.5 rounded-6px bg-[rgba(4,22,52,0.45)] border border-[#00d4ff]/25">
       <div>
-        在线数据源：<span className="text-[#00ffff] font-bold">{onlineSourceCount}</span>
+        数据源总数：<span className="text-[#00ffff] font-bold">{onlineSourceCount}</span>
       </div>
       <div>
-        数据总量：<span className="text-[#00ffff] font-bold">0</span>
+        数据总量：<span className="text-[#00ffff] font-bold" title="接口未提供该统计">--</span>
       </div>
       <div>
-        数据准确性：<span className="text-[#00ffff] font-bold">0%</span>
+        数据准确性：<span className="text-[#00ffff] font-bold" title="接口未提供该统计">--</span>
       </div>
     </div>
   )

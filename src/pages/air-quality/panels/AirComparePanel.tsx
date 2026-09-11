@@ -3,20 +3,20 @@
  *  - 多站：N 条站折线，污染物 = 父级 tab 选中
  *  - 时间范围：
  *    - 空：dataSourceApi.aqiDetail 取近 12h
- *    - 有：dataManageApi.airStationDetail 按 level + 自动翻页（每站一次）
+ *    - 有：复用父级 airData/series 全站历史帧，不重复逐站请求
  *  - 多站并发 4，过期 requestId 丢弃
  *  - 关闭按钮：清空全部已选站点（父级处理）
  *  - 缺测点保留 null，G2 断点
  *  - tooltip 明示单位（CO mg/m³，其他 μg/m³）
  */
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Chart } from '@antv/g2'
 import { Spin } from 'antd'
 import MapPanelHeader from '@/components/MapPanelHeader'
 import dayjs, { type Dayjs } from 'dayjs'
 import { POLLUTANTS, POLLUTANT_BY_KEY } from '../constants'
-import type { AirStationViewModel, PollutantKey } from '../types'
-import { fetchStation12h, fetchStationRange, runWithConcurrency, type ComparePoint, type CompareSeries } from '../data/compareRepository'
+import type { AirPlaybackFrame, AirStationViewModel, PollutantKey } from '../types'
+import { fetchStation12h, runWithConcurrency, type ComparePoint, type CompareSeries } from '../data/compareRepository'
 import { AGGREGATIONS, type AirAggregation } from '../utils/aggregation'
 
 interface AirComparePanelProps {
@@ -26,6 +26,9 @@ interface AirComparePanelProps {
   activePollutant: PollutantKey
   /** 父级时间范围；null = 近 12h */
   timeRange: [Dayjs, Dayjs] | null
+  historyFrames: AirPlaybackFrame[]
+  historyLoading: boolean
+  historyError: string | null
   onClose: () => void
   /** 单站从 stations 里移除（与 popup 同步） */
   onRemoveStation?: (deviceId: string) => void
@@ -38,28 +41,36 @@ export default function AirComparePanel({
   stations,
   activePollutant,
   timeRange,
+  historyFrames,
+  historyLoading,
+  historyError,
   onClose,
   onRemoveStation,
 }: AirComparePanelProps) {
   const chartBoxRef = useRef<HTMLDivElement>(null)
-  const [series, setSeries] = useState<CompareSeries[]>([])
+  const [detailSeries, setSeries] = useState<CompareSeries[]>([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const requestIdRef = useRef(0)
 
   const isSingle = stations.length === 1
+  const series = useMemo(() => timeRange
+    ? historyLoading || historyError ? [] : stations.map(station => ({
+      deviceId: station.deviceId, stationName: station.name, stationType: station.stationType,
+      points: historyFrames.map(frame => ({ time: frame.startTime, values: frame.valuesByDeviceId[station.deviceId] ?? {} })),
+    }))
+    : detailSeries, [timeRange, historyLoading, historyError, stations, historyFrames, detailSeries])
 
   useEffect(() => {
     const myReqId = ++requestIdRef.current
+    if (timeRange) return
     let cancelled = false
     const loadSeries = async () => {
       setLoading(true)
       setError(null)
       const tasks = stations.map(station => ({ station }))
       const fetchOne = async ({ station }: { station: AirStationViewModel }) => {
-        const points: ComparePoint[] = timeRange
-          ? await fetchStationRange(station.deviceId, timeRange[0], timeRange[1], aggregation)
-          : await fetchStation12h(station.dataSourceId)
+        const points: ComparePoint[] = await fetchStation12h(station.dataSourceId)
         return {
           deviceId: station.deviceId,
           stationName: station.name,
@@ -82,7 +93,7 @@ export default function AirComparePanel({
     void loadSeries()
 
     return () => { cancelled = true }
-  }, [stations, timeRange, aggregation])
+  }, [stations, timeRange])
 
   // 折线图渲染
   useEffect(() => {
@@ -153,8 +164,8 @@ export default function AirComparePanel({
         <span className={`air-mode-tag${!isSingle ? ' is-active' : ''}`} aria-current={!isSingle}>多站点单污染物</span>
         <span className="air-compare-step">步长 {AGGREGATIONS[timeRange ? aggregation : 'hourly'].stepLabel}</span>
         {!isSingle && <span className="air-compare-factor">{POLLUTANT_BY_KEY[activePollutant].label}</span>}
-      </div>} subtitle={error} extra={<>
-        {loading && <Spin size="small" />}
+      </div>} subtitle={timeRange ? historyError : error} extra={<>
+        {(timeRange ? historyLoading : loading) && <Spin size="small" />}
         <button type="button" className="map-overlay-close" onClick={onClose} aria-label="关闭并清空所有对比" title="关闭并清空所有对比">✕</button>
       </>} />
       <div className="air-quality-compare-station-chips">
@@ -182,9 +193,9 @@ export default function AirComparePanel({
           })}
       </div>
       <div className="relative flex-1 min-h-0">
-        {!loading && series.length === 0 && (
+        {!(timeRange ? historyLoading : loading) && series.every(item => item.points.length === 0) && (
           <div className="absolute inset-0 flex items-center justify-center text-[#5ca2d9] text-12px">
-            {error ? '' : '暂无对比数据'}
+            {(timeRange ? historyError : error) || '暂无对比数据'}
           </div>
         )}
         <div ref={chartBoxRef} className="w-full h-full" />

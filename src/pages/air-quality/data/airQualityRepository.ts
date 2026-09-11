@@ -24,6 +24,8 @@ export async function fetchAllAirSources(
   let pageNum = 1
   while (true) {
     const response = await dataSourceApi.list({ ...query, pageNum, pageSize: SOURCE_PAGE_SIZE })
+    const succeeded = response.resultCode != null ? response.resultCode === 0 : response.code === 200
+    if (!succeeded) throw new Error(response.message || response.msg || '站点列表查询失败')
     const records = Array.isArray(response.data?.records) ? response.data.records : []
     result.push(...records)
     const total = Number(response.data?.total) || result.length

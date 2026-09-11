@@ -6,7 +6,7 @@ import { EnvironmentOutlined, ExclamationCircleOutlined, InboxOutlined, SendOutl
 import { type Dayjs } from 'dayjs'
 import L7MapView from '@/components/L7MapView'
 import FlyListModel from '@/components/MapBox/FlyListModel'
-import { leidaList, alarmPointAll, dockList, options4leixing, wuranListByLngLat } from '@/servers/mapBox'
+import { leidaList, alarmPointAll, dockList, wrjPatrol, options4leixing, wuranListByLngLat } from '@/servers/mapBox'
 import { cities, districts } from '@/utils/city'
 import RegionSelector from '@/components/RegionSelector'
 import { useAppStore } from '@/stores'
@@ -22,8 +22,21 @@ import CreatePollutionModal from './modals/CreatePollutionModal'
 import AlarmPointPanel from './panels/AlarmPointPanel'
 import MapPanelHeader from '@/components/MapPanelHeader'
 import MapPopupPortal from '@/components/MapPopupPortal'
+import RadarHeatView from '@/features/radar-heat/RadarHeatView'
+import '@/features/radar-heat/index.less'
 
 export default function Radar() {
+  const [view, setView] = useState<'alarm'|'heat'>('alarm')
+  return <div className="radar-view-container">
+    {view === 'alarm' ? <RadarAlarmView/> : <RadarHeatView/>}
+    <div className="radar-view-toggle map-overlay-toolbar" role="group" aria-label="雷达地图模式">
+      <button aria-pressed={view==='alarm'} onClick={()=>setView('alarm')}>报警点位图</button>
+      <button aria-pressed={view==='heat'} onClick={()=>setView('heat')}>浓度热力图</button>
+    </div>
+  </div>
+}
+
+function RadarAlarmView() {
   const navigate = useNavigate()
   const regionContext = useAppStore(state => state.regionContext)
   const querySelection = regionContext?.querySelection
@@ -272,11 +285,21 @@ export default function Radar() {
     message.info(`定位到: ${obj.address}`)
   }
 
-  const showConfirm = (dockName: string, _dockCode: string, obj: AlarmItem) => {
+  const showConfirm = (dockName: string, dockCode: string, obj: AlarmItem) => {
     modal.confirm({
       title: '请确认派遣任务', icon: <ExclamationCircleOutlined className="!text-[#faad14]" />,
       content: `派遣无人机[${dockName}]前往[${obj.address}]？`, okText: '确认', cancelText: '取消',
-      onOk: () => message.success('派遣成功！无人机正在起飞...')
+      onOk: async () => {
+        try {
+          if (!Number.isFinite(obj.dapLng) || !Number.isFinite(obj.dapLat)) throw new Error('点位缺少有效坐标')
+          const response = await wrjPatrol({ dockCode, lng: obj.dapLng, lat: obj.dapLat })
+          if (response?.resultCode !== 0) throw new Error(String(response?.message || '派遣请求失败'))
+          message.success('派遣请求已受理，请通过飞行任务查看执行状态')
+        } catch (error) {
+          message.error(error instanceof Error ? error.message : '派遣失败，请稍后重试')
+          throw error
+        }
+      }
     })
   }
   const showTitle = (title: string) => <span className="text-[#A8D6FF]">{title}</span>

@@ -69,6 +69,9 @@ export default function DataSource() {
   const [submitting, setSubmitting] = useState(false)
   const [detailLoading, setDetailLoading] = useState(false)
   const [form] = Form.useForm()
+  // 无人机（drone_video）列表 - 供"无人机传感器"选择所属无人机时使用
+  const [droneList, setDroneList] = useState<DataSourceDTO[]>([])
+  const [droneListLoading, setDroneListLoading] = useState(false)
 
   const allDepts = useMemo(() => {
     const departments = [...(regionContext?.departments ?? [])]
@@ -191,7 +194,28 @@ export default function DataSource() {
     if (value !== 'air_quality_station') {
       form.setFieldValue('stationType', undefined)
     }
+    // 切到非无人机传感器时清空所属无人机
+    if (value !== 'drone_sensor') {
+      form.setFieldValue('droneId', undefined)
+    } else {
+      // 切到无人机传感器时按需拉取无人机列表
+      ensureDroneList()
+    }
   }
+
+  // 加载无人机（drone_video）列表，仅在切到无人机传感器且未加载时拉取
+  const ensureDroneList = useCallback(async () => {
+    if (droneList.length > 0 || droneListLoading) return
+    setDroneListLoading(true)
+    try {
+      const res = await dataSourceApi.screenList('drone_video')
+      setDroneList(res.data ?? [])
+    } catch {
+      message.error('获取无人机列表失败')
+    } finally {
+      setDroneListLoading(false)
+    }
+  }, [droneList.length, droneListLoading, message])
 
   const showAddModal = () => {
     setEditingItem(null)
@@ -213,6 +237,10 @@ export default function DataSource() {
     setEditingItem(record)
     setSelectedType(record.dataType)
     form.resetFields()
+    // 编辑无人机传感器时，确保下拉里的无人机列表已加载
+    if (record.dataType === 'drone_sensor') {
+      ensureDroneList()
+    }
     // 先用表格行数据回填基础字段，避免弹窗打开时空白
     form.setFieldsValue({
       deviceName: record.deviceName,
@@ -222,6 +250,7 @@ export default function DataSource() {
       deviceId: record.deviceId,
       location: record.location,
       description: record.description,
+      droneId: record.droneId,
       lng: record.lng != null && record.lng !== 0 ? String(record.lng) : undefined,
       lat: record.lat != null && record.lat !== 0 ? String(record.lat) : undefined,
       enabled: record.enabled === 1,
@@ -245,6 +274,7 @@ export default function DataSource() {
       deviceId: detail.deviceId,
       location: detail.location,
       description: detail.description,
+      droneId: detail.droneId,
       lng: detail.lng != null && detail.lng !== 0 ? String(detail.lng) : undefined,
       lat: detail.lat != null && detail.lat !== 0 ? String(detail.lat) : undefined,
       enabled: detail.enabled === 1,
@@ -258,6 +288,10 @@ export default function DataSource() {
     setEditingItem(record)
     setIsDetailModalVisible(true)
     setDetailLoading(true)
+    // 详情里要展示所属无人机名称，提前确保无人机列表已加载
+    if (record.dataType === 'drone_sensor') {
+      ensureDroneList()
+    }
     try {
       const res = await dataSourceApi.detail(record.id)
       if (res.data) setEditingItem(res.data)
@@ -522,6 +556,25 @@ export default function DataSource() {
               </Form.Item>
             )}
           </div>
+          {selectedType === 'drone_sensor' && (
+            <Form.Item
+              label="所属无人机"
+              name="droneId"
+              tooltip="选择该传感器挂载的无人机（无人机视频数据源）"
+            >
+              <Select
+                className="model_from_sel"
+                classNames={{ popup: { root: 'alert-rule-dropdown' } }}
+                placeholder={droneListLoading ? '加载中…' : '请选择所属无人机'}
+                loading={droneListLoading}
+                allowClear
+                showSearch
+                optionFilterProp="label"
+                options={droneList.map(d => ({ value: d.id, label: d.deviceName }))}
+                notFoundContent={droneListLoading ? null : '暂无可用无人机，请先新增"无人机视频"类型数据源'}
+              />
+            </Form.Item>
+          )}
           <Form.Item label="安装位置" name="location">
             <Input className="model_from_input" placeholder="如：杭州超山森林公园监测站" />
           </Form.Item>
@@ -597,6 +650,9 @@ export default function DataSource() {
               <div className="flex justify-between"><span className="text-[#03FBFD]">站点类型</span><span>{stationTypeOptions.find(o => o.value === editingItem.stationType)?.label || '-'}</span></div>
             )}
             <div className="flex justify-between"><span className="text-[#03FBFD]">协议</span><span>{protocolOptions.find(o => o.value === editingItem.protocol)?.label || '-'}</span></div>
+            {editingItem.dataType === 'drone_sensor' && (
+              <div className="flex justify-between"><span className="text-[#03FBFD]">所属无人机</span><span>{droneList.find(d => d.id === editingItem.droneId)?.deviceName || (editingItem.droneId ? `#${editingItem.droneId}` : '-')}</span></div>
+            )}
             <div className="flex justify-between"><span className="text-[#03FBFD]">连接状态</span><span className={editingItem.connectionStatus === 'online' ? 'text-green-400' : 'text-red-400'}>{getStatusText(editingItem.connectionStatus)}</span></div>
             <div className="flex justify-between"><span className="text-[#03FBFD]">安装位置</span><span>{editingItem.location || '-'}</span></div>
             <div className="flex justify-between"><span className="text-[#03FBFD]">经纬度</span><span>{editingItem.lng != null && editingItem.lat != null ? `${editingItem.lng}, ${editingItem.lat}` : '-'}</span></div>

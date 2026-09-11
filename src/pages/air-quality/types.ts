@@ -67,7 +67,7 @@ export const PLAYBACK_STEP_MS: Record<PlaybackStep, number> = {
   '1month': 30 * 86_400_000, // 自然月用 dayjs.add(1,'month') 计算，不使用此值
 }
 
-/** 回放帧（来自 provider，可来自真实接口或 mock） */
+/** 回放帧（来自真实接口 provider） */
 export interface AirPlaybackFrame {
   index: number
   startTime: string
@@ -76,7 +76,7 @@ export interface AirPlaybackFrame {
   valuesByDeviceId: Record<string, Record<PollutantKey, number | null>>
 }
 
-/** 回放 provider 接口（真实接口缺失时用 mock 实现） */
+/** 回放 provider 接口（由真实接口实现） */
 export interface AirPlaybackProvider {
   getFrames(query: import('./utils/aggregation').AirHistoryQuery, stations: AirStationViewModel[]): Promise<AirPlaybackFrame[]>
 }

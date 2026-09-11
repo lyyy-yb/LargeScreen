@@ -62,7 +62,7 @@ export default function FlyListModel({ visible, setVisible, curCity, curDistrict
         return
       }
     } catch (e) { console.warn('派遣API不可用', e) }
-    Modal.success({ title: '派遣失败', content: '网络异常，请稍后重试' })
+    Modal.error({ title: '派遣失败', content: '网络异常，请稍后重试' })
     setVisible(false)
   }
 

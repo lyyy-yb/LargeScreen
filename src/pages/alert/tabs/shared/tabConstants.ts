@@ -82,6 +82,10 @@ export const ALERT_STATUS_LABEL_MAP: Record<string, string> = {
   cleared: '已清除',
 }
 
+export const ALERT_STATUS_COLOR_MAP: Record<string, string> = {
+  undispatched: 'orange', pending: 'orange', processing: 'blue', completed: 'green', closed: 'default', cleared: 'default',
+}
+
 /** 处置任务 status（tasks 表） */
 export const TASK_STATUS_LABEL_MAP: Record<string, { label: string; color: string }> = {
   pending: { label: '待接收', color: 'orange' },

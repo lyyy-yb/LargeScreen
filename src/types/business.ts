@@ -141,6 +141,23 @@ export interface AlertDashboardVO {
   latestAlerts: AlertDashboardItem[]
 }
 
+export interface DisposalPhotoDTO {
+  id: string | number
+  fileName?: string
+  uploadTime?: string
+  uploadBy?: string
+  delFlag?: string
+}
+
+export interface DisposalVerificationDTO {
+  id: string | number
+  verificationResult?: string
+  verifyTime?: string
+  verifyBy?: string
+  photos?: DisposalPhotoDTO[] | null
+  delFlag?: string
+}
+
 export interface DisposalTaskDTO {
   id: number
   alertId: number
@@ -154,6 +171,8 @@ export interface DisposalTaskDTO {
   requesterName?: string
   requireTime?: string
   disposalContent?: string
+  verificationResult?: string
+  verifications?: DisposalVerificationDTO[] | null
   photos?: string | string[]
   completedAt?: string
   /** 地市部门 ID（后端不再返回名称） */
@@ -226,6 +245,8 @@ export interface DataSourceDTO {
   enabled: 0 | 1
   connectionStatus: string
   description?: string
+  /** 所属无人机（drone_video）数据源 ID，仅 drone_sensor 类型有效 */
+  droneId?: number
   createBy?: string
   createTime?: string
   updateBy?: string

@@ -1,4 +1,17 @@
-/** 站点最新实时数据（对应后端 AirDataLatestVO） */
+export type AirResolution = 'minute' | 'hour' | 'day'
+export type AirConcentrations = Record<'pm25' | 'pm10' | 'so2' | 'no2' | 'co' | 'o3' | 'vocs' | 'tsp', number | null>
+export interface AirSeriesVO {
+  resolution: AirResolution
+  stations: Array<{ deviceId: string; deviceName: string; lng: number; lat: number }>
+  series: Array<AirConcentrations & { time: string; deviceId: string; sampleCount?: number | null }>
+}
+export interface MicroStationAvgVO extends AirConcentrations {
+  startTime: string
+  endTime: string
+  stationCount: number
+}
+
+/** 各设备上一完整小时均值（对应后端 AirDataLatestVO） */
 export interface AirDataLatestVO {
   id: number
   mnCode: string

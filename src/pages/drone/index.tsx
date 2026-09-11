@@ -336,7 +336,7 @@ export default function Drone() {
                 ))}
               </div>
             ) : (
-              <div className="text-[rgba(168,214,255,0.4)] text-12px py-4 text-center">暂无传感器数据</div>
+              <div className="text-[rgba(168,214,255,0.4)] text-12px py-4 text-center">传感器数据接口暂未接入</div>
             )}
           </div>
         </div>

@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Select, App } from 'antd'
 import { ArrowLeftOutlined } from '@ant-design/icons'
 import RegionSelector from '@/components/RegionSelector'
 import './index.less'
+import './evidence.less'
 import { useAppStore, useAuthStore } from '@/stores'
 import { addOption, buildDeptRegionOptions, nameEquals } from '@/utils/deptRegion'
 import { getVisibleAlertTabs, type AlertTab } from '@/utils/region'
@@ -14,8 +15,12 @@ import type { AlertEventDTO, DisposalTaskDTO } from '@/types/business'
 import { type RoleLevel } from './modals/RuleModal'
 import AlertDetailModal, { type AlertEvent } from './modals/AlertDetailModal'
 import TaskDetailModal, { type DisposalTask } from './modals/TaskDetailModal'
+import EvidenceModal from './modals/EvidenceModal'
+import FollowUpModal from './modals/FollowUpModal'
+import { normalizePhotos } from './data/normalizePhotos'
+import { requireSuccess } from '@/servers/alertFollowUp'
+import { canCollectEvidence } from './data/evidenceWorkflow'
 import { usePolling } from '@/pages/monitor/hooks/usePolling'
-import DisposalViewModal from './modals/DisposalViewModal'
 import CommitModal from './modals/CommitModal'
 import DispatchModal from './modals/DispatchModal'
 import TrendsTab from './tabs/TrendsTab'
@@ -41,11 +46,7 @@ function toAlertEvent(item: AlertEventDTO): AlertEvent {
 }
 
 function toDisposalTask(item: DisposalTaskDTO): DisposalTask {
-  const photos = Array.isArray(item.photos)
-    ? item.photos
-    : typeof item.photos === 'string'
-      ? item.photos.split(',').filter(Boolean)
-      : []
+  const photos = normalizePhotos(item.photos)
   return {
     ...item,
     id: String(item.id),
@@ -59,16 +60,6 @@ function toDisposalTask(item: DisposalTaskDTO): DisposalTask {
 }
 
 // 5 个枚举字典 + 3 个 status 映射 已迁到 tabs/shared/tabConstants.ts（按需 import）
-
-// 任务下派使用的硬编码街道列表（仅 dispatchToTown 用）
-const TOWN_OPTIONS = [
-  { value: 'fengshan', label: '凤山街道' },
-  { value: 'yangming', label: '阳明街道' },
-  { value: 'lizhou', label: '梨洲街道' },
-  { value: 'lanjiang', label: '兰江街道' },
-  { value: 'langxia', label: '朗霞街道' },
-  { value: 'ditang', label: '低塘街道' },
-]
 
 export default function AlertPage() {
   const navigate = useNavigate()
@@ -84,36 +75,32 @@ export default function AlertPage() {
   const [alerts, setAlerts] = useState<AlertEvent[]>([])
   const [tasks, setTasks] = useState<DisposalTask[]>([])
   const [loading, setLoading] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
+  const requestVersions = useRef({ alerts: 0, tasks: 0, counts: 0, dashboard: 0, refresh: 0 })
   const [dashboard, setDashboard] = useState<AlertDashboardVO | null>(null)
   // 4 个 Modal 的状态合并：open + data 二元组（RuleModal 由 RuleTab 内部自管）
   const [alertDetail, setAlertDetail] = useState<{ open: boolean; alert: AlertEvent | null }>({ open: false, alert: null })
-  const [dispatchModal, setDispatchModal] = useState<{ open: boolean; alert: AlertEvent | null }>({ open: false, alert: null })
+  const [dispatchModal, setDispatchModal] = useState<{ open: boolean; alert: AlertEvent | null; fromEvidence?: boolean }>({ open: false, alert: null })
+  const [evidenceAlert, setEvidenceAlert] = useState<AlertEvent | null>(null)
+  const [followUpTask, setFollowUpTask] = useState<DisposalTask | null>(null)
   const [taskDetail, setTaskDetail] = useState<{ open: boolean; task: DisposalTask | null }>({ open: false, task: null })
   const [commitModal, setCommitModal] = useState<{ open: boolean; task: DisposalTask | null }>({ open: false, task: null })
-  const [disposalView, setDisposalView] = useState<{ open: boolean; task: DisposalTask | null }>({ open: false, task: null })
 
   // 详情数据预填：先打开 Modal（用列表数据），异步加载详情后回填
   const openAlertDetail = (r: AlertEvent) => {
     setAlertDetail({ open: true, alert: r })
     alertEventApi.detail(Number(r.id))
       .then((res) => {
-        if (res?.data) {
-          const full = toAlertEvent(res.data)
-          setAlertDetail((prev) => (prev.open ? { open: true, alert: full } : prev))
+        const data = requireSuccess(res)
+        if (data) {
+          const full = toAlertEvent(data)
+          setAlertDetail((prev) => (prev.open && prev.alert?.id === r.id ? { open: true, alert: full } : prev))
         }
       })
-      .catch(() => {})
+      .catch(() => message.error('预警详情加载失败，当前显示列表信息'))
   }
   const openTaskDetail = (r: DisposalTask) => {
     setTaskDetail({ open: true, task: r })
-    disposalTaskApi.detail(Number(r.id))
-      .then((res) => {
-        if (res?.data) {
-          const full = toDisposalTask(res.data)
-          setTaskDetail((prev) => (prev.open ? { open: true, task: full } : prev))
-        }
-      })
-      .catch(() => {})
   }
   // 三个列表的服务端分页与筛选状态（默认每页 15 条）
   // rules/* 已迁到 tabs/RuleTab.tsx
@@ -132,6 +119,7 @@ export default function AlertPage() {
   const [tasksPage, setTasksPage] = useState(1)
   const [tasksSize, setTasksSize] = useState(15)
   const [tasksTotal, setTasksTotal] = useState(0)
+  const [taskCounts, setTaskCounts] = useState<Partial<Record<'pending' | 'processing' | 'completed', number>>>({})
   const [taskFilterDataType, setTaskFilterDataType] = useState<string | undefined>(undefined)
   const [taskFilterType, setTaskFilterType] = useState<string | undefined>(undefined)
   const [taskFilterStatus, setTaskFilterStatus] = useState<string | undefined>(undefined)
@@ -194,6 +182,7 @@ export default function AlertPage() {
   // loadRules / rulesPage etc 已迁到 tabs/RuleTab.tsx
 
   const loadAlerts = useCallback(async (silent = false) => {
+    const version = ++requestVersions.current.alerts
     if (!silent) setLoading(true)
     try {
       const response = await alertEventApi.list({
@@ -208,20 +197,25 @@ export default function AlertPage() {
         startTime: alertTimeRange?.[0]?.format('YYYY-MM-DD HH:mm:ss'),
         endTime: alertTimeRange?.[1]?.format('YYYY-MM-DD HH:mm:ss'),
       })
-      setAlerts((response.data?.records ?? []).map(toAlertEvent))
-      setAlertsTotal(response.data?.total ?? 0)
+      const data = requireSuccess(response)
+      if (version !== requestVersions.current.alerts) return
+      setAlerts((data?.records ?? []).map(toAlertEvent))
+      setAlertsTotal(data?.total ?? 0)
+      const lastPage = Math.max(1, Math.ceil((data?.total ?? 0) / alertsSize))
+      if (alertsPage > lastPage) setAlertsPage(lastPage)
     } catch {
       if (!silent) message.error('实时预警加载失败')
     } finally {
       if (!silent) setLoading(false)
     }
   }, [
-    message, regionParams,
+    message, regionParams, setAlertsPage,
     alertsPage, alertsSize, alertAppliedDevice, alertFilterDataType, alertFilterLevel, alertFilterStatus,
     alertIncludeHistory, alertTimeRange,
   ])
 
   const loadTasks = useCallback(async () => {
+    const version = ++requestVersions.current.tasks
     setLoading(true)
     try {
       const response = await disposalTaskApi.list({
@@ -232,26 +226,59 @@ export default function AlertPage() {
         taskType: taskFilterType,
         status: taskFilterStatus,
       })
-      setTasks((response.data?.records ?? []).map(toDisposalTask))
-      setTasksTotal(response.data?.total ?? 0)
+      const data = requireSuccess(response)
+      if (version !== requestVersions.current.tasks) return
+      setTasks((data?.records ?? []).map(toDisposalTask))
+      setTasksTotal(data?.total ?? 0)
+      const lastPage = Math.max(1, Math.ceil((data?.total ?? 0) / tasksSize))
+      if (tasksPage > lastPage) setTasksPage(lastPage)
     } catch {
-      setTasks([])
       message.error('处置任务加载失败')
     } finally {
       setLoading(false)
     }
-  }, [message, regionParams, tasksPage, tasksSize, taskFilterDataType, taskFilterType, taskFilterStatus])
+  }, [message, regionParams, tasksPage, tasksSize, taskFilterDataType, taskFilterType, taskFilterStatus, setTasksPage])
+
+  // 使用真实分页 total 分别统计各任务状态，不借用预警统计或当前页行数。
+  const loadTaskCounts = useCallback(async () => {
+    const version = ++requestVersions.current.counts
+    const statuses = ['pending', 'processing', 'completed'] as const
+    const entries = await Promise.all(statuses.map(async status => {
+      try {
+        const res = await disposalTaskApi.list({ pageNum: 1, pageSize: 1, ...regionParams, dataType: taskFilterDataType, taskType: taskFilterType, status })
+        const succeeded = res.resultCode != null ? res.resultCode === 0 : res.code === 200
+        return [status, succeeded && typeof res.data?.total === 'number' ? res.data.total : undefined] as const
+      } catch { return [status, undefined] as const }
+    }))
+    if (version !== requestVersions.current.counts) return
+    setTaskCounts(Object.fromEntries(entries))
+    if (entries.some(([, value]) => value == null)) message.error('部分任务统计加载失败，请刷新重试')
+  }, [message, regionParams, taskFilterDataType, taskFilterType])
 
   // loadRules effect 已迁到 tabs/RuleTab.tsx
 
-  useEffect(() => {
-    alertEventApi
-      .dashboard()
-      .then((res) => {
-        if (res?.data) setDashboard(res.data)
-      })
-      .catch(() => {})
-  }, [])
+  const loadDashboard = useCallback(async () => {
+    const version = ++requestVersions.current.dashboard
+    try {
+      const data = requireSuccess(await alertEventApi.dashboard())
+      if (version === requestVersions.current.dashboard) setDashboard(data)
+    } catch {
+      if (version === requestVersions.current.dashboard) {
+        setDashboard(null)
+        message.error('预警统计加载失败，请刷新重试')
+      }
+    }
+  }, [message])
+
+  useEffect(() => { void loadTaskCounts() }, [loadTaskCounts])
+  useEffect(() => { queueMicrotask(() => void loadDashboard()) }, [loadDashboard])
+
+  const refreshAll = async () => {
+    const version = ++requestVersions.current.refresh
+    setRefreshing(true)
+    try { await Promise.all([loadAlerts(), loadTasks(), loadTaskCounts(), loadDashboard()]) }
+    finally { if (version === requestVersions.current.refresh) setRefreshing(false) }
+  }
 
   useEffect(() => {
     queueMicrotask(() => void loadAlerts())
@@ -271,8 +298,10 @@ export default function AlertPage() {
   // 搜索框 300ms 防抖：连续输入停止 300ms 后才应用到查询，避免每次按键打接口
   const debouncedAlertSearch = useDebounce(alertSearchDevice, 300)
   useEffect(() => {
-    setAlertAppliedDevice(debouncedAlertSearch.trim())
-    setAlertsPage(1)
+    queueMicrotask(() => {
+      setAlertAppliedDevice(debouncedAlertSearch.trim())
+      setAlertsPage(1)
+    })
   }, [debouncedAlertSearch])
 
   // AlertTab 的 onPressEnter / onClear 仍保留立即查询入口（用户主动回车或清空不应等防抖）
@@ -292,9 +321,9 @@ export default function AlertPage() {
       content: '确定确认关闭该预警？',
       onOk: async () => {
         try {
-          await alertEventApi.review({ alertId: Number(id), action: 'confirm' })
+          requireSuccess(await alertEventApi.review({ alertId: Number(id), action: 'confirm' }))
           message.success('已确认关闭')
-          await loadAlerts()
+          await refreshAll()
         } catch {
           message.error('预警确认失败')
         }
@@ -309,9 +338,9 @@ export default function AlertPage() {
       content: '确定将该预警退回重办？',
       onOk: async () => {
         try {
-          await alertEventApi.review({ alertId: Number(id), action: 'return' })
+          requireSuccess(await alertEventApi.review({ alertId: Number(id), action: 'return' }))
           message.success('已退回重办')
-          await loadAlerts()
+          await refreshAll()
         } catch {
           message.error('预警退回失败')
         }
@@ -326,9 +355,9 @@ export default function AlertPage() {
       content: '确定清除该预警？',
       onOk: async () => {
         try {
-          await alertEventApi.clear(Number(id))
+          requireSuccess(await alertEventApi.clear(Number(id)))
           message.success('已清除')
-          await loadAlerts()
+          await refreshAll()
         } catch {
           message.error('预警清除失败')
         }
@@ -342,9 +371,9 @@ export default function AlertPage() {
       content: '确定要永久删除该预警记录吗？此操作不可恢复。',
       onOk: async () => {
         try {
-          await alertEventApi.remove(Number(id))
+          requireSuccess(await alertEventApi.remove(Number(id)))
           message.success('删除成功')
-          await loadAlerts()
+          await refreshAll()
         } catch {
           message.error('删除失败')
         }
@@ -353,9 +382,9 @@ export default function AlertPage() {
   }
   const updateTaskStatus = async (id: string, status: string) => {
     try {
-      await disposalTaskApi.changeStatus(Number(id), status as DisposalTaskDTO['status'])
+      requireSuccess(await disposalTaskApi.changeStatus(Number(id), status as DisposalTaskDTO['status']))
       message.success('状态已更新')
-      await loadTasks()
+      await refreshAll()
     } catch {
       message.error('任务状态更新失败')
     }
@@ -367,9 +396,9 @@ export default function AlertPage() {
       content: '确定要删除该处置任务吗？',
       onOk: async () => {
         try {
-          await disposalTaskApi.remove(Number(id))
+          requireSuccess(await disposalTaskApi.remove(Number(id)))
           message.success('删除成功')
-          await loadTasks()
+          await refreshAll()
         } catch {
           message.error('删除失败')
         }
@@ -384,9 +413,9 @@ export default function AlertPage() {
       content: '确定确认该处置任务已完成？',
       onOk: async () => {
         try {
-          await alertEventApi.review({ alertId: Number(alertId), action: 'confirm' })
+          requireSuccess(await alertEventApi.review({ alertId: Number(alertId), action: 'confirm' }))
           message.success('已确认完成')
-          await loadTasks()
+          await refreshAll()
         } catch {
           message.error('任务确认失败')
         }
@@ -401,9 +430,9 @@ export default function AlertPage() {
       content: '确定将该处置任务退回重办？',
       onOk: async () => {
         try {
-          await alertEventApi.review({ alertId: Number(alertId), action: 'return' })
+          requireSuccess(await alertEventApi.review({ alertId: Number(alertId), action: 'return' }))
           message.success('已退回重办')
-          await loadTasks()
+          await refreshAll()
         } catch {
           message.error('任务退回失败')
         }
@@ -412,9 +441,12 @@ export default function AlertPage() {
   }
   // 提交处置/任务详情/查看处置 的 Modal state + handler 已迁到 modals/
   const dispatchToTown = (task: DisposalTask) => {
-    const availableTownOptions = selection?.townName
-      ? [{ value: selection.townName, label: selection.townName }]
-      : TOWN_OPTIONS
+    const availableTownOptions = deptRegionOptions.getTownOptions(task.districtId ?? lockedRegion.districtId)
+      .filter(option => !selection?.townName || nameEquals(option.label, selection.townName))
+    if (!availableTownOptions.length) {
+      message.warning('当前任务所属区县没有可用的乡镇部门，请先维护部门数据')
+      return
+    }
     let selectedTownValue = ''
     modal.confirm({
       className: 'dark-confirm-modal',
@@ -433,7 +465,7 @@ export default function AlertPage() {
           message.warning('请选择乡镇')
           throw new Error('town is required')
         }
-        await disposalTaskApi.edit({
+        requireSuccess(await disposalTaskApi.edit({
           id: Number(task.id),
           alertId: Number(task.alertId),
           dataType: task.dataType,
@@ -447,10 +479,10 @@ export default function AlertPage() {
           completedAt: task.completedAt,
           cityId: task.cityId,
           districtId: task.districtId,
-          townId: allDepts.find(dept => nameEquals(dept.deptName, town.label))?.deptId ?? task.townId,
-        })
+          townId: Number(town.value),
+        }))
         message.success(`已下派至${town.label}`)
-        await loadTasks()
+        await refreshAll()
       },
     })
   }
@@ -521,7 +553,7 @@ export default function AlertPage() {
           mode={activeTab}
           dashboard={dashboard}
           totalAlerts={alertsTotal}
-          totalTasks={tasksTotal}
+          totalTasks={tasksTotal} taskCounts={taskCounts}
         />
       )}
 
@@ -541,6 +573,8 @@ export default function AlertPage() {
         )}
         {activeTab === 'alerts' && (
           <AlertTabView
+            refreshing={refreshing}
+            onRefresh={() => void refreshAll()}
             alerts={alerts}
             loading={loading}
             page={alertsPage}
@@ -566,6 +600,7 @@ export default function AlertPage() {
             handlers={{
               onOpenDetail: openAlertDetail,
               onOpenDispatch: (r: AlertEvent) => setDispatchModal({ open: true, alert: r }),
+              onOpenEvidence: (r: AlertEvent) => { if (canCollectEvidence(r.status)) setEvidenceAlert(r) },
               onConfirm: confirmAlert,
               onReturn: returnAlert,
               onClear: clearAlert,
@@ -576,6 +611,8 @@ export default function AlertPage() {
         )}
         {activeTab === 'tasks' && (
           <TaskTab
+            refreshing={refreshing}
+            onRefresh={() => void refreshAll()}
             tasks={tasks}
             loading={loading}
             page={tasksPage}
@@ -592,12 +629,12 @@ export default function AlertPage() {
             isTown={isTown}
             handlers={{
               onOpenDetail: openTaskDetail,
+              onOpenFollowUp: (r: DisposalTask) => { if (r.status === 'completed') setFollowUpTask(r) },
               onUpdateStatus: updateTaskStatus,
               onOpenCommit: (r: DisposalTask) => setCommitModal({ open: true, task: r }),
               onDispatchToTown: dispatchToTown,
               onConfirm: confirmTask,
               onReturn: returnTask,
-              onOpenDisposalView: (r: DisposalTask) => setDisposalView({ open: true, task: r }),
               onDelete: deleteTask,
             }}
           />
@@ -614,14 +651,24 @@ export default function AlertPage() {
         alert={alertDetail.alert}
         onClose={() => setAlertDetail({ open: false, alert: null })}
         alertLevelOptions={alertLevelOptions}
+        deptNameOf={deptNameOf}
       />
+
+      <EvidenceModal alert={evidenceAlert} onClose={() => setEvidenceAlert(null)} onSaved={() => void refreshAll()}
+        onDispatch={() => { if (evidenceAlert) setDispatchModal({ open: true, alert: evidenceAlert, fromEvidence: true }) }} />
+      <FollowUpModal task={followUpTask} onClose={() => setFollowUpTask(null)} onSaved={(task) => { void refreshAll(); openTaskDetail(task) }} />
 
       {/* 派发任务 Modal（已抽到 modals/DispatchModal.tsx） */}
       <DispatchModal
         open={dispatchModal.open}
         alert={dispatchModal.alert}
         onClose={() => setDispatchModal({ open: false, alert: null })}
-        onSaved={() => Promise.all([loadAlerts(), loadTasks()])}
+        onSaved={() => {
+          void refreshAll()
+          if (dispatchModal.fromEvidence && dispatchModal.alert) {
+            setEvidenceAlert({ ...dispatchModal.alert, status: 'pending' })
+          }
+        }}
         roleLevel={roleLevel}
         canSelectRegion={canSelectRegion}
         lockedRegion={lockedRegion}
@@ -639,19 +686,13 @@ export default function AlertPage() {
         taskTypeOptions={taskTypeOptions}
       />
 
-      {/* 查看处置 Modal（已抽到 modals/DisposalViewModal.tsx） */}
-      <DisposalViewModal
-        open={disposalView.open}
-        task={disposalView.task}
-        onClose={() => setDisposalView({ open: false, task: null })}
-      />
 
       {/* 提交处置结果 Modal（已抽到 modals/CommitModal.tsx） */}
       <CommitModal
         open={commitModal.open}
         task={commitModal.task}
         onClose={() => setCommitModal({ open: false, task: null })}
-        onSaved={loadTasks}
+        onSaved={() => void refreshAll()}
       />
     </div>
   )

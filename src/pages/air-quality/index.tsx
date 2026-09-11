@@ -7,7 +7,7 @@
  *  - 右侧范围 + 热力图
  *  - 左栏 4 等级预警 + 20 条
  */
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Spin } from 'antd'
 import { type Dayjs } from 'dayjs'
 import './index.less'
@@ -17,12 +17,12 @@ import ZJ3DMap from '@/components/ZJ3DMap'
 import CityDistrictMap from '@/components/CityDistrictMap'
 import CountyBoundaryMap from '@/components/CountyBoundaryMap'
 import { flattenDepts, findCityDeptId, findDistrictDeptId } from '@/utils/airQuality'
-import { airDataLatest } from '@/servers/airData'
-import type { AirDataLatestVO } from '@/types/airData'
+import { airDataLatest, airDataMicroStationAvg } from '@/servers/airData'
+import type { AirDataLatestVO, MicroStationAvgVO } from '@/types/airData'
 import type { AlertEventDTO } from '@/types/business'
 import type { MapFocusTarget } from '@/types/mapFocus'
 import { buildAirStations, fetchAllAirSources, type BuildAirStationsInput } from './data/airQualityRepository'
-import { createMockAirPlaybackProvider } from './data/mockAirPlaybackProvider'
+import { getAirHistory, emptyAirValues } from './data/apiAirPlaybackProvider'
 import type { AirPlaybackFrame, AirStationViewModel, PollutantKey } from './types'
 import { toHistoryQuery, type AirAggregation } from './utils/aggregation'
 import AirAveragePanel from './panels/AirAveragePanel'
@@ -62,7 +62,8 @@ export default function AirQuality() {
 
   const [activePollutant, setActivePollutant] = useState<PollutantKey>(DEFAULT_POLLUTANT)
   const [stations, setStations] = useState<AirStationViewModel[]>([])
-  const [averageRecords, setAverageRecords] = useState<AirDataLatestVO[]>([])
+  const [average, setAverage] = useState<MicroStationAvgVO | null>(null)
+  const [averageError, setAverageError] = useState<string | null>(null)
   const [focusTarget, setFocusTarget] = useState<MapFocusTarget | null>(null)
   const [stationLoading, setStationLoading] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -72,10 +73,11 @@ export default function AirQuality() {
   const [timeRange, setTimeRange] = useState<[Dayjs, Dayjs] | null>(null)
   const [aggregation, setAggregation] = useState<AirAggregation>('hourly')
   const [playbackStations, setPlaybackStations] = useState<AirStationViewModel[]>([])
+  const [historyStations, setHistoryStations] = useState<AirStationViewModel[]>([])
   const [frames, setFrames] = useState<AirPlaybackFrame[]>([])
   const [currentFrameIdx, setCurrentFrameIdx] = useState(0)
   const [playbackLoading, setPlaybackLoading] = useState(false)
-  const [isMockPlayback, setIsMockPlayback] = useState(false)
+  const [playbackError, setPlaybackError] = useState<string | null>(null)
 
   const allDepts = useMemo(
     () => flattenDepts(regionContext?.departments ?? []),
@@ -98,27 +100,32 @@ export default function AirQuality() {
       if (districtDeptId != null) query.districtId = Number(districtDeptId)
       else if (cityDeptId != null) query.cityId = Number(cityDeptId)
 
-      const [srcRes, latestRes] = await Promise.allSettled([
+      const [srcRes, latestRes, avgRes] = await Promise.allSettled([
         fetchAllAirSources(query),
         airDataLatest({ dataType: 'air_quality_station' }),
+        airDataMicroStationAvg(),
       ])
       if (cancelled) return
+      if (avgRes.status === 'fulfilled' && avgRes.value.resultCode === 0 && avgRes.value.data) {
+        setAverage(avgRes.value.data); setAverageError(null)
+      } else {
+        setAverage(null); setAverageError('上一小时微站均值查询失败')
+      }
       if (srcRes.status === 'rejected') {
         setLoadError(srcRes.reason instanceof Error ? srcRes.reason.message : '站点列表请求失败')
-        if (!silent) { setStations([]); setAverageRecords([]) }
+        if (!silent) setStations([])
         setStationLoading(false)
         return
       }
-      if (latestRes.status === 'rejected' && silent) {
-        setLoadError(latestRes.reason instanceof Error ? latestRes.reason.message : '站点当前浓度请求失败')
+      const latestFailed = latestRes.status === 'rejected' || latestRes.value.resultCode !== 0 || !Array.isArray(latestRes.value.data)
+      if (latestFailed && silent) {
+        setLoadError('站点当前浓度请求失败')
         return
       }
       const latest: AirDataLatestVO[] = latestRes.status === 'fulfilled' && Array.isArray(latestRes.value?.data)
         ? latestRes.value.data
         : []
       const input: BuildAirStationsInput = { sources: srcRes.value, latest }
-      const sourceCodes = new Set(srcRes.value.map(source => source.deviceId?.trim()))
-      setAverageRecords(latest.filter(row => sourceCodes.has(row.mnCode?.trim())))
       const merged = buildAirStations(input)
       const validDeviceIds = new Set(merged.map(station => station.deviceId))
       setStations(merged)
@@ -126,7 +133,7 @@ export default function AirQuality() {
         const next = new Set([...previous].filter(deviceId => validDeviceIds.has(deviceId)))
         return next.size === previous.size ? previous : next
       })
-      setLoadError(latestRes.status === 'rejected' ? '站点当前浓度请求失败' : null)
+      setLoadError(latestFailed ? '站点当前浓度请求失败' : null)
       setStationLoading(false)
     }
     void loadStations()
@@ -140,21 +147,21 @@ export default function AirQuality() {
     if (frames.length > 0 && currentFrameIdx < frames.length) {
       const frame = frames[currentFrameIdx]
       stations.forEach(s => {
-        out[s.deviceId] = frame.valuesByDeviceId[s.deviceId] ?? s.values
+        out[s.deviceId] = frame.valuesByDeviceId[s.deviceId] ?? emptyAirValues()
       })
       return out
     }
-    stations.forEach(s => { out[s.deviceId] = s.values })
+    stations.forEach(s => { out[s.deviceId] = timeRange ? emptyAirValues() : s.values })
     return out
-  }, [frames, currentFrameIdx, stations])
+  }, [frames, currentFrameIdx, stations, timeRange])
 
   // 地图点位必须读取当前播放帧；无回放时 currentFrameValuesByDevice 已退化为真实当前值。
   const airPoints = useMemo(
-    () => stations.map(station => toAirQualityPoint({
+    () => (timeRange && historyStations.length ? historyStations : stations).map(station => toAirQualityPoint({
       ...station,
       values: currentFrameValuesByDevice[station.deviceId] ?? station.values,
     }, activePollutant)),
-    [stations, currentFrameValuesByDevice, activePollutant],
+    [stations, historyStations, timeRange, currentFrameValuesByDevice, activePollutant],
   )
 
   // dataSourceId → station 索引，用于点击点位时反查
@@ -187,7 +194,8 @@ export default function AirQuality() {
     setFrames([])
     setCurrentFrameIdx(0)
     setPlaybackLoading(false)
-    setIsMockPlayback(false)
+    setHistoryStations([])
+    setPlaybackError(null)
   }
 
   const handleAlertLocate = (item: AlertEventDTO) => {
@@ -199,33 +207,30 @@ export default function AirQuality() {
     setFocusTarget({ lng, lat, zoom: 16, animate: true, requestId: Date.now() })
   }
 
-  // 时间范围变化 → 通过 mock provider 拉取全站回放帧（C 阶段；后端批量接口就位后换 apiAirPlaybackProvider）
-  const mockProviderRef = useRef(createMockAirPlaybackProvider())
+  // 真实全站时间序列；地图、热力和对比使用同一批数据。
   useEffect(() => {
     if (!timeRange) return
     let cancelled = false
     const loadFrames = async () => {
       setPlaybackLoading(true)
+      setPlaybackError(null)
       try {
-        const result = await mockProviderRef.current.getFrames(toHistoryQuery(timeRange, aggregation), playbackStations)
+        const result = await getAirHistory(toHistoryQuery(timeRange, aggregation), playbackStations)
         if (cancelled) return
-        setFrames(result)
+        setFrames(result.frames)
+        setHistoryStations(result.stations)
         setCurrentFrameIdx(0)
-        setIsMockPlayback(true)
         setPlaybackLoading(false)
       } catch (error) {
         if (cancelled) return
-        console.warn('[air-quality] 回放帧生成失败', error)
+        setPlaybackError(error instanceof Error ? error.message : '历史数据查询失败')
         setFrames([])
-        setIsMockPlayback(false)
         setPlaybackLoading(false)
       }
     }
     void loadFrames()
     return () => { cancelled = true }
   }, [timeRange, aggregation, playbackStations])
-
-  const currentFrameTime = frames[currentFrameIdx]?.startTime
 
   // 对比选站列表（按选择顺序）
   const comparedStations = useMemo(
@@ -311,10 +316,10 @@ export default function AirQuality() {
             onClose={() => setActiveStation(null)}
             compared={activeStationCompared}
             onCompareToggle={handleCompareToggle}
-            liveValues={isMockPlayback && frames.length > 0
-              ? currentFrameValuesByDevice[activeStation.station.deviceId] ?? activeStation.station.values
+            liveValues={timeRange
+              ? currentFrameValuesByDevice[activeStation.station.deviceId] ?? emptyAirValues()
               : null}
-            isPlayback={isMockPlayback && frames.length > 0}
+            isPlayback={Boolean(timeRange)}
           />
           </MapPopupPortal>
         )}
@@ -329,9 +334,9 @@ export default function AirQuality() {
 
       {/* 右栏：浮在地图上 */}
       <aside className="air-quality-side air-quality-side-right">
-        <AirAveragePanel records={averageRecords} loading={stationLoading} error={loadError} />
+        <AirAveragePanel average={average} loading={stationLoading} error={averageError} />
         <AirHeatmapPanel
-          stations={stations}
+          stations={timeRange && historyStations.length ? historyStations : stations}
           activePollutant={activePollutant}
           timeRange={timeRange}
           currentFrameValuesByDevice={currentFrameValuesByDevice}
@@ -351,8 +356,9 @@ export default function AirQuality() {
           onTimeRangeChange={handleTimeRangeChange}
           currentFrameIdx={currentFrameIdx}
           frameCount={frames.length}
-          currentFrameTime={currentFrameTime}
+          frameTimes={frames.map(frame => frame.startTime)}
           loading={playbackLoading}
+          error={playbackError}
           onFrameChange={setCurrentFrameIdx}
         />
       </div>
@@ -365,6 +371,9 @@ export default function AirQuality() {
             stations={comparedStations}
             activePollutant={activePollutant}
             timeRange={timeRange}
+            historyFrames={frames}
+            historyLoading={playbackLoading}
+            historyError={playbackError}
             onClose={() => setComparedDeviceIds(new Set())}
             onRemoveStation={deviceId => handleCompareToggle(deviceId, false)}
           />

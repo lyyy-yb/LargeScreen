@@ -1,4 +1,9 @@
-import { useMemo, useRef, useState } from 'react'
+import { useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { Select } from 'antd'
+import { RADAR_FACTORS, type RadarHeatFactor } from '@/features/radar-heat/model'
+import { radarHeatStatuses } from '@/features/radar-heat/status'
+import { resolveRadarSiteYaw } from '@/features/radar-heat/siteYaw'
+import '@/features/radar-heat/index.less'
 import { useNavigate } from 'react-router-dom'
 import { useAsyncEffect } from '@/hooks/useAsyncEffect'
 import CityDistrictMap from '@/components/CityDistrictMap'
@@ -54,6 +59,7 @@ interface MonitorStation {
   online: boolean
   lng?: number
   lat?: number
+  yaw?: number
   /** 无人机工作模式：0=空闲，1=调试，2=远程调试，3=升级，4=工作中 */
   modeCode?: number
   modeLabel?: string
@@ -110,6 +116,9 @@ function stationOnline(item: UnknownRecord, kind: 'drone' | 'radar') {
 function normalizeStations(value: unknown, kind: 'drone' | 'radar'): MonitorStation[] {
   return extractRecords(value).map((item, index) => {
     const modeCode = kind === 'drone' ? Number(item.modeCode ?? NaN) : NaN
+    const yaw = kind === 'radar'
+      ? resolveRadarSiteYaw(item.bsiYaw)
+      : undefined
     return {
       id: firstText(item, ['id', 'bsId', 'bsiId', 'dockId', 'dockCode', 'stationId'], `${kind}-${index}`),
       name: firstText(
@@ -125,6 +134,7 @@ function normalizeStations(value: unknown, kind: 'drone' | 'radar'): MonitorStat
         '地址未维护'
       ),
       online: stationOnline(item, kind),
+      yaw,
       lng: Number(firstText(
         item,
         kind === 'drone'
@@ -188,7 +198,7 @@ export default function Monitor() {
   const [airRanges, setAirRanges] = useState<StationAirRange[]>([])
   // 站点数据弹窗（固定站/移动站）
   const [stationModal, setStationModal] = useState<{ open: boolean; type: 'fixed' | 'mobile' }>({ open: false, type: 'fixed' })
-  // 预警处置：dashboard 面板数据（统计 + 近一小时最新预警，接口异常时回退 mock）
+  // 预警处置：dashboard 面板数据（统计 + 近一小时最新预警，接口异常时展示空态）
   const [alertDashboard, setAlertDashboard] = useState<AlertDashboardVO | null>(null)
   const [airPoints, setAirPoints] = useState<AirQualityPoint[]>([])
   // 预警点位打点（alertEvent/list 经纬度，同经纬度已聚合）
@@ -198,6 +208,8 @@ export default function Monitor() {
   const [pointMode, setPointMode] = useState<'alert' | 'air'>('air')
   const [showDronePoints, setShowDronePoints] = useState(true)
   const [showRadarPoints, setShowRadarPoints] = useState(true)
+  const [radarHeatFactor, setRadarHeatFactor] = useState<RadarHeatFactor>('source')
+  const heatStatuses = useSyncExternalStore(radarHeatStatuses.subscribe, radarHeatStatuses.getSnapshot)
   const [showEmissionOutletPoints, setShowEmissionOutletPoints] = useState(true)
   const [mapFocusTarget, setMapFocusTarget] = useState<MapFocusTarget | null>(null)
   const focusRequestRef = useRef(0)
@@ -305,11 +317,12 @@ export default function Monitor() {
         name: item.name,
         address: item.address,
         online: item.online,
+        scanFactor: radarHeatFactor,
         lng,
         lat,
       }]
     })
-  }, [droneStations, radarStations])
+  }, [droneStations, radarStations, radarHeatFactor])
 
   // 近一小时污染物值区间（stationAirRange）：全域统计，不随区域切换
   useAsyncEffect((cancelled) => {
@@ -522,6 +535,15 @@ export default function Monitor() {
         data-device-point-count={legacyDevicePoints.length}
         className="monitor-map-stage flex-1 relative overflow-hidden min-w-0 rounded-12px border border-[#00d4ff]/35 shadow-[0_0_24px_rgba(0,180,255,0.15)]"
       >
+        {showRadarPoints && <div className="monitor-radar-heat-control map-overlay-toolbar">
+          <span className="radar-data-tag">雷达 · 上一周期</span>
+          <Select aria-label="首页雷达扫描污染物" value={radarHeatFactor} onChange={setRadarHeatFactor} size="small" className="screen-select" style={{width:95}}
+            options={Object.entries(RADAR_FACTORS).map(([value,item])=>({value,label:value==='source'?item.label:`${item.label}（暂未支持）`,disabled:value!=='source'}))}/>
+          <span className="text-10px text-[#a6cee7]">{RADAR_FACTORS[radarHeatFactor].unit}</span>
+          <span className="text-10px text-[#a6cee7]" title={heatStatuses.map(item=>`${item.name}：${item.message || ({loading:'查询中',ready:'已加载',empty:'暂无扫描',error:'查询失败'}[item.state])}`).join('\n')}>
+            {heatStatuses.filter(item=>item.state==='ready').length} 有数据 / {heatStatuses.filter(item=>item.state==='empty').length} 无数据 / {heatStatuses.filter(item=>item.state==='error').length} 失败
+          </span>
+        </div>}
         {isProvinceView ? (
           <ZJ3DMap
             selectedCity={selection?.cityName}

@@ -1,4 +1,13 @@
-import { Modal } from 'antd'
+import { useEffect, useState } from 'react'
+import { Alert, Button, Modal, Spin, Tag } from 'antd'
+import { disposalTaskApi } from '@/servers/business'
+import { requireSuccess } from '@/servers/alertFollowUp'
+import type { DisposalVerificationDTO } from '@/types/business'
+import { normalizePhotos } from '../data/normalizePhotos'
+import EvidenceSections from '../components/EvidenceSections'
+import FollowUpRecords from '../components/FollowUpRecords'
+import { DetailGrid, LinkedAlert, TaskResult } from '../components/DetailSections'
+import { TASK_STATUS_LABEL_MAP } from '../tabs/shared/tabConstants'
 
 export interface DisposalTask {
   id: string
@@ -11,6 +20,8 @@ export interface DisposalTask {
   requireTime: string
   createdAt: string
   disposalContent?: string
+  verificationResult?: string
+  verifications?: DisposalVerificationDTO[] | null
   photos?: string[]
   completedAt?: string
   cityId?: number
@@ -35,71 +46,47 @@ interface TaskDetailModalProps {
   taskTypeOptions: SelectOption[]
 }
 
-const taskStatusText = (status: string): string =>
-  (
-    {
-      pending: '待接收',
-      processing: '处置中',
-      committed: '已提交',
-      completed: '已完成',
-    } as Record<string, string>
-  )[status] ?? status
+export default function TaskDetailModal({ open, task, onClose, deptNameOf, dataTypeOptions, taskTypeOptions }: TaskDetailModalProps) {
+  return <Modal title="任务详情" open={open} onCancel={onClose} width={760} footer={null}
+    className="alert-evidence-modal evidence-fullscreen-modal" destroyOnHidden>
+    {open && task && <TaskDetailContent key={task.id} taskId={task.id} deptNameOf={deptNameOf}
+      dataTypeOptions={dataTypeOptions} taskTypeOptions={taskTypeOptions} />}
+  </Modal>
+}
 
-const taskRegionOf = (task: DisposalTask, deptNameOf: DeptNameLookup) =>
-  [deptNameOf(task.cityId), deptNameOf(task.districtId), deptNameOf(task.townId)]
-    .filter(Boolean)
-    .join(' / ') || '—'
-
-export default function TaskDetailModal({
-  open,
-  task,
-  onClose,
-  deptNameOf,
-  dataTypeOptions,
-  taskTypeOptions,
-}: TaskDetailModalProps) {
-  return (
-    <Modal
-      title={<span className="text-[#03FBFD] font-bold">任务详情</span>}
-      open={open}
-      onCancel={onClose}
-      width={550}
-      footer={null}
-      styles={{ body: { padding: '20px 24px' } }}
-    >
-      {task && (
-        <div
-          className="space-y-2 p-3 rounded"
-          style={{ backgroundColor: 'rgba(3,251,253,0.05)', border: '1px solid rgba(3,251,253,0.15)' }}
-        >
-          {(
-            [
-              ['任务ID', task.id],
-              ['关联预警', task.alertId],
-              ['接入类型', dataTypeOptions.find((o) => o.value === task.dataType)?.label || task.dataType],
-              ['任务类型', taskTypeOptions.find((o) => o.value === task.taskType)?.label || ''],
-              ['状态', taskStatusText(task.status)],
-              ['处置人', task.assigneeName || '未分配'],
-              ['派发人', task.requesterName],
-              ['所属区域', taskRegionOf(task, deptNameOf)],
-              ['要求时间', task.requireTime],
-              ['创建时间', task.createdAt],
-              ...(task.completedAt ? [['完成时间', task.completedAt]] : []),
-            ] as const
-          ).map(([k, v]) => (
-            <div key={k} className="flex justify-between">
-              <span className="text-[#03FBFD]">{k}</span>
-              <span className="text-white/75 text-right max-w-[62%]">{v}</span>
-            </div>
-          ))}
-          {task.disposalContent && (
-            <div className="mt-2 pt-2" style={{ borderTop: '1px solid rgba(3,251,253,0.15)' }}>
-              <span className="text-[#03FBFD] block mb-1">处置内容</span>
-              <p className="text-white/75">{task.disposalContent}</p>
-            </div>
-          )}
-        </div>
-      )}
-    </Modal>
-  )
+function TaskDetailContent({ taskId, deptNameOf, dataTypeOptions, taskTypeOptions }: {
+  taskId: string
+} & Pick<TaskDetailModalProps, 'deptNameOf' | 'dataTypeOptions' | 'taskTypeOptions'>) {
+  const [task, setTask] = useState<DisposalTask | null>(null)
+  const [error, setError] = useState('')
+  const [revision, setRevision] = useState(0)
+  useEffect(() => {
+    let active = true
+    disposalTaskApi.detail(Number(taskId)).then(requireSuccess).then(data => {
+      if (!data) throw new Error('任务不存在或已删除')
+      if (active) setTask({ ...data, id: String(data.id), alertId: String(data.alertId),
+        assigneeName: data.assigneeName || '', requesterName: data.requesterName || '',
+        requireTime: data.requireTime || '', createdAt: data.createTime || '', photos: normalizePhotos(data.photos) })
+    }).catch(err => { if (active) setError(err instanceof Error ? err.message : '任务详情加载失败') })
+    return () => { active = false }
+  }, [taskId, revision])
+  if (error) return <Alert type="error" title={error} action={<Button onClick={() => { setError(''); setRevision(value => value + 1) }}>重试</Button>} />
+  if (!task) return <Spin />
+  const status = task ? TASK_STATUS_LABEL_MAP[task.status] : undefined
+  return <div>
+      <section className="evidence-section"><h3>基础信息</h3>
+        <DetailGrid items={[
+          ['任务 ID', task.id], ['关联预警', task.alertId], ['状态', <Tag color={status?.color}>{status?.label || task.status}</Tag>],
+          ['接入类型', dataTypeOptions.find(item => item.value === task.dataType)?.label || task.dataType],
+          ['任务类型', taskTypeOptions.find(item => item.value === task.taskType)?.label || task.taskType],
+          ['处置人', task.assigneeName || '未分配'], ['派发人', task.requesterName],
+          ['所属区域', [deptNameOf(task.cityId), deptNameOf(task.districtId), deptNameOf(task.townId)].filter(Boolean).join(' / ')],
+          ['创建时间', task.createdAt], ['要求完成时间', task.requireTime], ['完成时间', task.completedAt],
+        ]} />
+      </section>
+      <LinkedAlert alertId={task.alertId} />
+      <EvidenceSections alertId={task.alertId} />
+      <section className="evidence-section"><h3>现场核查结果</h3><TaskResult task={task} deptNameOf={deptNameOf} /></section>
+      <FollowUpRecords alertId={task.alertId} />
+    </div>
 }

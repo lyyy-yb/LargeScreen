@@ -1421,3 +1421,73 @@ textarea.ant-input {
     animation: none;
   }
 }
+
+/* 全局表格操作列小按钮（对标图一图二线框圆角风格，无背景色 + 同色边框 + 同色文字）
+   供所有使用 antd Table 的页面（alert/manage 等）统一调用。
+   之前放在 pages/alert/index.less，会导致直接进入非 alert 页面时按钮样式丢失（less 走按需加载），
+   故移入 global.less，由 main.tsx 一次性注入。 */
+.tech-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 24px;
+  padding: 0 10px;
+  font-size: 12px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  user-select: none;
+  background: transparent !important;
+  border: 1px solid transparent;
+  font-family: inherit;
+  line-height: 1;
+
+  &.btn-detail {
+    color: #69c0ff;
+    border-color: rgba(24, 144, 255, 0.6);
+
+    &:hover {
+      color: #ffffff;
+      border-color: #1890ff;
+      background: rgba(24, 144, 255, 0.18) !important;
+      box-shadow: 0 0 8px rgba(24, 144, 255, 0.4);
+    }
+  }
+
+  &.btn-dispatch,
+  &.btn-receive {
+    color: #ffc069;
+    border-color: rgba(250, 140, 22, 0.65);
+
+    &:hover {
+      color: #ffffff;
+      border-color: #fa8c16;
+      background: rgba(250, 140, 22, 0.2) !important;
+      box-shadow: 0 0 8px rgba(250, 140, 22, 0.4);
+    }
+  }
+
+  &.btn-success {
+    color: #95de64;
+    border-color: rgba(82, 196, 26, 0.65);
+
+    &:hover {
+      color: #ffffff;
+      border-color: #52c41a;
+      background: rgba(82, 196, 26, 0.2) !important;
+      box-shadow: 0 0 8px rgba(82, 196, 26, 0.4);
+    }
+  }
+
+  &.btn-danger {
+    color: #ff7875;
+    border-color: rgba(255, 77, 79, 0.65);
+
+    &:hover {
+      color: #ffffff;
+      border-color: #ff4d4f;
+      background: rgba(255, 77, 79, 0.2) !important;
+      box-shadow: 0 0 8px rgba(255, 77, 79, 0.4);
+    }
+  }
+}

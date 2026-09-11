@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Modal, Form, Input, DatePicker, Button, App } from 'antd'
 import dayjs from 'dayjs'
 import { disposalTaskApi } from '@/servers/business'
+import { requireSuccess } from '@/servers/alertFollowUp'
 import { disabledFutureDate } from '@/utils/helpers'
 import type { DisposalTask } from './TaskDetailModal'
 
@@ -32,7 +33,7 @@ export default function CommitModal({ open, task, onClose, onSaved }: CommitModa
         if (!task) return
         setSubmitting(true)
         try {
-          await disposalTaskApi.edit({
+          requireSuccess(await disposalTaskApi.edit({
             id: Number(task.id),
             alertId: Number(task.alertId),
             dataType: task.dataType,
@@ -47,7 +48,7 @@ export default function CommitModal({ open, task, onClose, onSaved }: CommitModa
             cityId: task.cityId,
             districtId: task.districtId,
             townId: task.townId,
-          })
+          }))
           message.success('处置结果已提交')
           onSaved()
           onClose()

@@ -35,7 +35,6 @@ export default function Patrol() {
   const mapSelection = regionContext?.mapSelection
   const [cars, setCars] = useState<CarItem[]>([])
   const [curCarCode, setCurCarCode] = useState('')
-  const [wakingCar, setWakingCar] = useState<string | null>(null)
   const [wageVal, setWageVal] = useState('a34001')
   const [showHeatmap, setShowHeatmap] = useState(false)
   // 历史任务日期列表（原项目 taskList 返回 string[]）与走航轨迹明细（taskDetail）
@@ -89,15 +88,6 @@ export default function Patrol() {
       .finally(() => { if (!cancelled) setTasksLoading(false) })
     return () => { cancelled = true }
   }, [curCarCode])
-
-  const handleWake = (mnCode: string) => {
-    setWakingCar(mnCode)
-    setTimeout(() => {
-      setCars(prev => prev.map(i => i.mnCode === mnCode ? { ...i, status: '在线' } : i))
-      setWakingCar(null)
-      message.success(`${mnCode} 已唤醒`)
-    }, 1500)
-  }
 
   const handleSelectCar = (mnCode: string) => { setCurCarCode(mnCode); setTaskDates([]); setShowHeatmap(false); setDetailData([]) }
 
@@ -199,8 +189,8 @@ export default function Patrol() {
               </div>
               <div className="text-[rgba(168,214,255,0.6)] text-12px">{item.belongUnit || item.siteName}</div>
               {item.status === '离线' && (
-                <button className="text-[#01C2FF] text-12px mt-1 hover:underline" onClick={(e) => { e.stopPropagation(); handleWake(item.mnCode) }}>
-                  {wakingCar === item.mnCode ? '唤醒中...' : '唤醒'}
+                <button className="text-[#94a3b8] text-12px mt-1" disabled title="尚未提供车辆唤醒接口">
+                  唤醒未接入
                 </button>
               )}
             </div>

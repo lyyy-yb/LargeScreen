@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Modal, Form, Input, Select, DatePicker, Button, App } from 'antd'
 import dayjs from 'dayjs'
 import { alertEventApi } from '@/servers/business'
+import { requireSuccess } from '@/servers/alertFollowUp'
 import { userList } from '@/servers/api'
 import { addOption } from '@/utils/deptRegion'
 import type { LockedRegion, DeptRegionOptions, RoleLevel, SelectOption } from './RuleModal'
@@ -108,14 +109,14 @@ export default function DispatchModal({
         if (!alert) return
         setSubmitting(true)
         try {
-          await alertEventApi.dispatch({
+          requireSuccess(await alertEventApi.dispatch({
             alertId: Number(alert.id),
             taskType: values.taskType,
             assigneeId: Number(values.assigneeId),
             townId: values.townId ? Number(values.townId) : undefined,
             requireTime: dayjs(values.requireTime).format('YYYY-MM-DD HH:mm:ss'),
             disposalContent: values.disposalContent,
-          })
+          }))
           message.success('派发成功')
           onSaved()
           onClose()
@@ -124,13 +125,14 @@ export default function DispatchModal({
         } finally {
           setSubmitting(false)
         }
-      })
+      }).catch(() => { /* 表单校验提示由 Form.Item 展示 */ })
   }
 
   return (
     <Modal
       title={<span className="alert-rule-modal-title">派发处置任务</span>}
       open={open}
+      zIndex={1200}
       onCancel={onClose}
       width={720}
       className="alert-rule-modal"
