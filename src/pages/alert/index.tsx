@@ -8,6 +8,13 @@ import './evidence.less'
 import { useAppStore, useAuthStore } from '@/stores'
 import { addOption, buildDeptRegionOptions, nameEquals } from '@/utils/deptRegion'
 import { getVisibleAlertTabs, type AlertTab } from '@/utils/region'
+import {
+  DL_ALERT_ID,
+  DL_LIST,
+  DL_LIST_HIS,
+  consumeDeepLinkParams,
+  parseAlertDeepLink,
+} from '@/utils/deepLink'
 import { useDebounce } from '@/hooks/useDebounce'
 import type { Dayjs } from 'dayjs'
 import { alertEventApi, disposalTaskApi } from '@/servers/business'
@@ -303,6 +310,62 @@ export default function AlertPage() {
       setAlertsPage(1)
     })
   }, [debouncedAlertSearch])
+
+  // 跨平台 deep-link：URL 含 ?list=his&alertId=4066 时
+  //   - list=his：开启"历史预警"开关（includeHistory=true），让 4066 这类已关闭的预警也能查到
+  //   - alertId：加载该预警详情并自动打开详情弹窗
+  // 处理完后立即清理 URL 参数，避免刷新或被分享时重复触发；空 deps 保证仅在首次挂载时执行
+  useEffect(() => {
+    const params = parseAlertDeepLink()
+    if (!params.list && params.alertId == null) return
+
+    // 1. 清理 URL：list / alertId 消费即清（type 在 main.tsx 已处理过）
+    consumeDeepLinkParams([DL_LIST, DL_ALERT_ID])
+
+    // 把状态写入包在 microtask 里，与项目里其他 useEffect（loadAlerts / setAlertAppliedDevice 等）保持一致，
+    // 规避 react-hooks/set-state-in-effect 对 effect body 同步 setState 的告警
+    const targetList = params.list
+    const targetAlertId = params.alertId
+    queueMicrotask(() => {
+      // 2. list=his → 开启历史预警开关
+      if (targetList === DL_LIST_HIS) {
+        setAlertIncludeHistory(true)
+      }
+
+      // 3. alertId → 加载详情并打开弹窗（占位先开，详情回填，符合 openAlertDetail 既有节奏）
+      if (targetAlertId != null) {
+        const placeholder: AlertEvent = {
+          id: String(targetAlertId),
+          ruleName: '',
+          alertLevel: '',
+          dataType: '',
+          deviceName: '',
+          location: '',
+          triggerReason: '',
+          createdAt: '',
+          status: '',
+        }
+        setAlertDetail({ open: true, alert: placeholder })
+        alertEventApi.detail(targetAlertId)
+          .then((res) => {
+            const data = requireSuccess(res)
+            if (data) {
+              const full = toAlertEvent(data)
+              // 仅在用户尚未关闭/切换过弹窗时回填（避免覆盖用户后续操作）
+              setAlertDetail((prev) => (prev.open && prev.alert?.id === String(targetAlertId) ? { open: true, alert: full } : prev))
+            } else {
+              setAlertDetail({ open: false, alert: null })
+              message.error('预警详情加载失败')
+            }
+          })
+          .catch(() => {
+            setAlertDetail({ open: false, alert: null })
+            message.error('预警详情加载失败')
+          })
+      }
+    })
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- 一次性 deep-link，只在首屏执行
+  }, [])
 
   // AlertTab 的 onPressEnter / onClear 仍保留立即查询入口（用户主动回车或清空不应等防抖）
   const applyAlertSearch = (value?: string) => {
