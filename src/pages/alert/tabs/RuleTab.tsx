@@ -10,6 +10,7 @@ import {
 import dayjs from 'dayjs'
 import { useDebounce } from '@/hooks/useDebounce'
 import { warningRuleApi } from '@/servers/business'
+import { requireSuccess } from '@/servers/request'
 import type { WarningRuleExportQuery } from '@/types/business'
 import RuleModal, {
   type AlertRule,
@@ -133,19 +134,23 @@ export default function RuleTab({
       title: '确认删除',
       content: '确定删除该规则？',
       onOk: async () => {
-        await warningRuleApi.remove(Number(id))
-        message.success('删除成功')
-        await loadRules()
+        try {
+          requireSuccess(await warningRuleApi.remove(Number(id)))
+          message.success('删除成功')
+          await loadRules()
+        } catch (err) {
+          message.error(err instanceof Error ? err.message : '删除失败')
+        }
       },
     })
   }
 
   const toggleRule = async (id: string, enabled: boolean) => {
     try {
-      await warningRuleApi.changeStatus(Number(id), enabled ? 0 : 1)
+      requireSuccess(await warningRuleApi.changeStatus(Number(id), enabled ? 0 : 1))
       await loadRules()
-    } catch {
-      message.error('规则状态更新失败')
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '规则状态更新失败')
     }
   }
 
@@ -210,11 +215,12 @@ export default function RuleTab({
     setRuleImporting(true)
     try {
       const res = await warningRuleApi.importData(file)
-      message.success(res.msg || '导入成功')
+      const data = requireSuccess(res)
+      message.success(data || res.msg || '导入成功')
       setRulesPage(1)
       await loadRules()
-    } catch {
-      message.error('导入失败')
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '导入失败')
     } finally {
       setRuleImporting(false)
     }

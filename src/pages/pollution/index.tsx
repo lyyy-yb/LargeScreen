@@ -5,7 +5,7 @@ import type { TableColumnsType } from 'antd'
 import type { UploadProps } from 'antd'
 import { PlusOutlined, ArrowLeftOutlined, UploadOutlined, ExclamationCircleOutlined } from '@ant-design/icons'
 import { wuranyuanPage, wuranyuanAdd, wuranyuanEdit, wuranyuanDelete } from '@/servers/api'
-import { request } from '@/servers/request'
+import { request, requireSuccess } from '@/servers/request'
 import { useAppStore } from '@/stores'
 import { toRegionQuery } from '@/utils/region'
 import { cities, districts } from '@/utils/city'
@@ -92,11 +92,11 @@ export default function Pollution() {
       content: `确认删除[ ${row.name} ]？删除后无法恢复！`, okText: '确认', cancelText: '取消',
       onOk: async () => {
         try {
-          await wuranyuanDelete({ id: row.id })
+          requireSuccess(await wuranyuanDelete({ id: row.id }))
           message.success('删除成功')
           loadList()
-        } catch {
-          message.error('删除失败')
+        } catch (err) {
+          message.error(err instanceof Error ? err.message : '删除失败')
         }
       }
     })
@@ -106,16 +106,16 @@ export default function Pollution() {
       setSubmitting(true)
       try {
         if (curRow) {
-          await wuranyuanEdit({ ...values, id: curRow.id })
+          requireSuccess(await wuranyuanEdit({ ...values, id: curRow.id }))
           message.success('更新成功')
         } else {
-          await wuranyuanAdd(values)
+          requireSuccess(await wuranyuanAdd(values))
           message.success('新增成功')
         }
         setVisible(false); form.resetFields()
         loadList()
-      } catch {
-        message.error('保存失败，请重试')
+      } catch (err) {
+        message.error(err instanceof Error ? err.message : '保存失败，请重试')
       } finally {
         setSubmitting(false)
       }
@@ -140,12 +140,13 @@ export default function Pollution() {
       const fileName = (file as File).name ?? '文件'
       try {
         const res = await request.post('/dpSys/hbdp/wuranyuan/load', fd)
+        requireSuccess(res)
         onSuccess(res)
         message.success(`${fileName} 批量导入成功`)
         void loadList()
       } catch (err) {
         onError(err as Error)
-        message.error(`${fileName} 批量导入失败`)
+        message.error(err instanceof Error ? err.message : `${fileName} 批量导入失败`)
       }
     },
   }

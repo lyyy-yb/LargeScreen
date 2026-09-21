@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Modal, Form, Input, InputNumber, Select, Radio, Space, Button, App } from 'antd'
 import { warningRuleApi } from '@/servers/business'
+import { requireSuccess } from '@/servers/request'
 import type { WarningRuleDTO } from '@/types/business'
 import { addOption, type RegionOption } from '@/utils/deptRegion'
 
@@ -283,15 +284,15 @@ export default function RuleModal({
       try {
         setSaving(true)
         if (mode === 'edit' && sourceRule) {
-          await warningRuleApi.edit({ ...payload, id: Number(sourceRule.id) })
+          requireSuccess(await warningRuleApi.edit({ ...payload, id: Number(sourceRule.id) }))
         } else {
-          await warningRuleApi.add(payload)
+          requireSuccess(await warningRuleApi.add(payload))
         }
         message.success(mode === 'edit' ? '更新成功' : '创建成功')
         onSaved()
         onClose()
-      } catch {
-        message.error('规则保存失败')
+      } catch (err) {
+        message.error(err instanceof Error ? err.message : '规则保存失败')
       } finally {
         setSaving(false)
       }

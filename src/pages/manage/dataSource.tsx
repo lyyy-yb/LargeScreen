@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Button, Table, Modal, Form, Input, Select, Switch, App } from 'antd'
 import { PlusOutlined, CheckCircleOutlined, AlertFilled, AlertOutlined, ArrowLeftOutlined } from '@ant-design/icons'
 import { dataSourceApi } from '@/servers/business'
+import { requireSuccess } from '@/servers/alertFollowUp'
 import { useAppStore, useAuthStore } from '@/stores'
 import { addOption, buildDeptRegionOptions, nameEquals } from '@/utils/deptRegion'
 import { useDebounce } from '@/hooks/useDebounce'
@@ -315,17 +316,17 @@ export default function DataSource() {
       setSubmitting(true)
       try {
         if (editingItem) {
-          await dataSourceApi.edit({ ...editingItem, ...values, ...regionPayload, deptId })
+          requireSuccess(await dataSourceApi.edit({ ...editingItem, ...values, ...regionPayload, deptId }))
           message.success('编辑成功')
         } else {
-          await dataSourceApi.add({ ...values, ...regionPayload, deptId, connectionStatus: 'online' })
+          requireSuccess(await dataSourceApi.add({ ...values, ...regionPayload, deptId, connectionStatus: 'online' }))
           message.success('新增成功')
         }
         setIsModalVisible(false)
         form.resetFields()
         fetchData()
-      } catch {
-        message.error(editingItem ? '编辑失败' : '新增失败')
+      } catch (error) {
+        message.error(error instanceof Error ? error.message : (editingItem ? '编辑失败' : '新增失败'))
       } finally {
         setSubmitting(false)
       }
@@ -340,11 +341,12 @@ export default function DataSource() {
       cancelText: '取消',
       onOk: async () => {
         try {
-          await dataSourceApi.remove(id)
+          requireSuccess(await dataSourceApi.remove(id))
           message.success('删除成功')
           fetchData()
-        } catch {
-          message.error('删除失败')
+        } catch (error) {
+          message.error(error instanceof Error ? error.message : '删除失败')
+          throw error
         }
       },
     })
@@ -353,11 +355,11 @@ export default function DataSource() {
   const toggleStatus = async (record: DataSourceDTO) => {
     const nextEnabled = record.enabled === 1 ? 0 : 1
     try {
-      await dataSourceApi.changeStatus(record.id, nextEnabled as 0 | 1)
+      requireSuccess(await dataSourceApi.changeStatus(record.id, nextEnabled as 0 | 1))
       message.success(nextEnabled === 1 ? '已启用' : '已禁用')
       fetchData()
-    } catch {
-      message.error('状态切换失败')
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '状态切换失败')
     }
   }
 

@@ -115,7 +115,7 @@ export type MobileMonitorExportQuery = MobileMonitorQuery
 // ============ 无人机任务（drone-task） ============
 
 /**
- * 任务状态：与 /drone 飞行任务（listFlyJob.jobStatus）同一套枚举，值为**字符串**
+ * 任务状态：与 /drone 飞行任务（droneTaskVO.taskStatus）同一套枚举，值为**字符串**
  * 0-等待中 1-进行中 a-已完成 f-失败
  * 注意：Swagger 声明为 int32，实际返回 jobStatus 字符串枚举，以实际数据为准。
  */
@@ -154,8 +154,13 @@ export interface DroneTaskVO {
   taskName: string
   /** 任务状态 */
   taskStatus: DroneTaskStatus
-  /** 任务执行时间 */
+  /** 任务执行（开始）时间 */
   taskTime: string
+  /**
+   * 任务结束时间。后端尚未提供该字段（drone-task/list 当前只返 taskTime），
+   * 前端按 taskTime + 1h 兜底。
+   */
+  completedTime?: string
   /** 失败原因 */
   failReason: string
   /** 任务执行结果数 */
@@ -172,3 +177,49 @@ export interface DroneTaskVO {
 
 /** 无人机任务导出查询参数：不带分页（后端全量导出） */
 export type DroneTaskExportQuery = Omit<DroneTaskQuery, 'pageNum' | 'pageSize'>
+
+// ============ 通用上传资源（/hbdp/resource/*） ============
+
+/**
+ * 已上传的资源记录（来自 /hbdp/wurenji/task/resources 与 /hbdp/resource/upload）。
+ * 一个资源代表一个图片或视频文件，最终由无人机任务的"上传"操作管理起来。
+ */
+export interface HbdpUploadResource {
+  /** 主键 ID（上传后回填，用于预览 / 删除 / 关联到任务结果） */
+  id: number
+  /** 原始文件名 */
+  fileName: string
+  /** 相对存储路径 */
+  filePath: string
+  /** 文件大小（字节） */
+  fileSize?: number
+  /** 文件类型：image-图片 video-视频 */
+  fileType: 'image' | 'video' | string
+  /** MIME 类型（image/jpeg, video/mp4 等） */
+  mimeType?: string
+  /** 图片/视频宽度 */
+  width?: number
+  /** 图片/视频高度 */
+  height?: number
+  /** 视频时长（秒） */
+  duration?: number
+  /** 缩略图路径 */
+  thumbnailPath?: string
+  /** 业务类型：drone_task-无人机任务 evidence-举证 disposal-后续处置 */
+  businessType?: string
+  /** 业务 ID（一般等于 taskId） */
+  businessId?: string
+  /** 上传人 */
+  createBy?: string
+  /** 上传时间 */
+  createTime?: string
+}
+
+/**
+ * 资源关联提交入参（POST /data-manage/drone-task/result）。
+ * 后端按 taskId + resourceIds[] 写入中间表。
+ */
+export interface DroneTaskResultSubmit {
+  taskId: string
+  resourceIds: number[]
+}

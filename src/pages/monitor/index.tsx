@@ -15,10 +15,10 @@ import { toRegionQuery } from '@/utils/region'
 import {
   dockList,
   leidaList,
-  listFlyJob,
   alarmPointTop5,
   emissionOutletList,
 } from '@/servers/mapBox'
+import { dataManageApi } from '@/servers/dataManage'
 import { leiDaBaojingTongji } from '@/servers/api'
 import { getDockModeLabel, getDockModeColor, getDockOnlineStatus } from '@/utils/dock'
 import { airDataStationAirRange } from '@/servers/airData'
@@ -226,7 +226,13 @@ export default function Monitor() {
     Promise.allSettled([
       dockList(params),
       leidaList(params),
-      listFlyJob({ ...params, pageNum: 1, pageSize: 100 }),
+      // 无人机飞行任务（统一接口 /data-manage/drone-task/list）
+      // 后端按当前用户的 dockCode 权限自动过滤，不传 city/district
+      dataManageApi.droneTaskList({
+        pageNum: 1,
+        pageSize: 100,
+        includeThirdParty: true,
+      }),
       leiDaBaojingTongji(params),
     ]).then(([dockResult, radarResult, taskResult, alarmResult]) => {
       if (cancelled()) return
@@ -238,7 +244,8 @@ export default function Monitor() {
       }
       if (radarResult.status === 'fulfilled') setRadarStations(normalizeStations(radarResult.value.data, 'radar'))
       if (taskResult.status === 'fulfilled') {
-        const tasks = extractRecords(taskResult.value.data)
+        // droneTaskList 已 unwrap，taskResult.value 是 IPage（含 records）
+        const tasks = extractRecords(taskResult.value)
         setDroneTaskStats({
           pending: tasks.filter(item => ['pending', 'waiting', '待执行', '待飞'].includes(firstText(item, ['jobStatus', 'status', 'taskStatus']))).length,
           flying: tasks.filter(item => ['flying', 'running', 'processing', '执行中', '飞行中'].includes(firstText(item, ['jobStatus', 'status', 'taskStatus']))).length,

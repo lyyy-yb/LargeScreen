@@ -51,15 +51,11 @@ export function globalSearch(keyword: string) {
 }
 
 // ========== 无人机 ==========
+// 注意：飞行任务（listFlyJob）已迁移至 /data-manage/drone-task/list
+// 封装在 src/servers/dataManage.ts 的 dataManageApi.droneTaskList，类型定义见 src/types/dataManage.ts
 // 无人机机场列表
 export function dockList(params?: object) {
   return request.get('/dpSys/hbdp/wurenji/dockList', { params })
-}
-// 飞行任务列表（startDate 必传，默认近30天）
-export function listFlyJob(params?: object) {
-  return request.get('/dpSys/hbdp/wurenji/listFlyJob', {
-    params: { startDate: dayjs().subtract(30, 'day').format('YYYY-MM-DD'), ...params },
-  })
 }
 // 飞行计划列表（startDate 必传，默认近30天）
 export function listFlyPlan(params?: object) {
@@ -74,6 +70,22 @@ export function listFlyResult(params?: object) {
 // 无人机派遣
 export function wrjPatrol(data: object) {
   return request.post('/dpSys/hbdp/wurenji/patrol', data)
+}
+// 清洗后的无人机传感器数据列表（带经纬度与环境指标，默认查全量 4000 条）
+export function listCleanedData(params: {
+  siteCode: string
+  startTime: string
+  endTime: string
+  pageNum?: number
+  pageSize?: number
+}) {
+  return request.get('/dpSys/hbdp/drone-sensor/cleaned/list', {
+    params: {
+      pageNum: 1,
+      pageSize: 4000,
+      ...params,
+    },
+  })
 }
 
 // ========== 走航 ==========

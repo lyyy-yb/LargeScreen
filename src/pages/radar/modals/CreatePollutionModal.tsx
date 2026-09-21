@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Button, Form, Input, message, Modal, Select } from 'antd'
 import { cities as allCities, districts as allDistricts } from '@/utils/city'
 import { wuranyuanAdd } from '@/servers/api'
+import { requireSuccess } from '@/servers/request'
 
 export interface CreatePollutionInitial {
   weizhi?: string
@@ -62,13 +63,13 @@ export default function CreatePollutionModal({
     }
     setSubmitting(true)
     try {
-      await wuranyuanAdd({ ...values, lng: Number(values.lng), lat: Number(values.lat), type: '0' })
+      requireSuccess(await wuranyuanAdd({ ...values, lng: Number(values.lng), lat: Number(values.lat), type: '0' }))
       message.success('新增污染源成功')
       onCreated()
       onClose()
       form.resetFields()
-    } catch {
-      message.error('保存失败，请重试')
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '保存失败，请重试')
     } finally {
       setSubmitting(false)
     }

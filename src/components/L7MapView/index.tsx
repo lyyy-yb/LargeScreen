@@ -21,6 +21,7 @@ interface L7MapViewProps {
   onSceneLoaded?: (scene: Scene) => void
   /** 点位点击回调：feature 为打点原始数据，pos 为相对地图容器的像素坐标 */
   onMarkerClick?: (feature: Record<string, unknown>, pos: { x: number; y: number }) => void
+  onMarkerContextMenu?: (feature: Record<string, unknown>, pos: { x: number; y: number }) => void
 }
 
 export default function L7MapView({
@@ -36,6 +37,7 @@ export default function L7MapView({
   markerIconUrl,
   onSceneLoaded,
   onMarkerClick,
+  onMarkerContextMenu,
 }: L7MapViewProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const sceneRef = useRef<Scene | null>(null)
@@ -43,6 +45,8 @@ export default function L7MapView({
   const markerDataRef = useRef(markers)
   const markerIconRef = useRef(markerIconUrl)
   const onMarkerClickRef = useRef(onMarkerClick)
+  const onMarkerContextMenuRef = useRef(onMarkerContextMenu)
+  useEffect(() => { onMarkerContextMenuRef.current = onMarkerContextMenu }, [onMarkerContextMenu])
   useEffect(() => {
     onMarkerClickRef.current = onMarkerClick
   }, [onMarkerClick])
@@ -241,10 +245,40 @@ export default function L7MapView({
     if (sceneRef.current) void renderMarkers(sceneRef.current, markers, markerIconUrl)
   }, [markerIconUrl, markers])
 
+  // 大屏缩放会使 GPU 拾取坐标偏移；在捕获阶段按地图投影命中点位。
+  const handleContextMenuCapture = (event: React.MouseEvent<HTMLDivElement>) => {
+    const scene = sceneRef.current
+    const container = containerRef.current
+    const onContextMenu = onMarkerContextMenuRef.current
+    if (!scene || !container || !onContextMenu) return
+    const rect = container.getBoundingClientRect()
+    const pos = {
+      x: (event.clientX - rect.left) / (rect.width / container.offsetWidth || 1),
+      y: (event.clientY - rect.top) / (rect.height / container.offsetHeight || 1),
+    }
+    let hit: NonNullable<L7MapViewProps['markers']>[number] | undefined
+    let nearest = Infinity
+    for (const marker of markerDataRef.current) {
+      if (!Number.isFinite(marker.lng) || !Number.isFinite(marker.lat)) continue
+      const point = scene.lngLatToContainer([marker.lng, marker.lat])
+      const distance = Math.hypot(point.x - pos.x, point.y - pos.y)
+      const radius = markerIconRef.current ? 26 : (marker.size || 10) + 4
+      if (distance <= radius && distance <= nearest) {
+        hit = marker
+        nearest = distance
+      }
+    }
+    if (!hit) return
+    event.preventDefault()
+    event.stopPropagation()
+    onContextMenu(hit, pos)
+  }
+
   return (
     <div
       id={id}
       ref={containerRef}
+      onContextMenuCapture={handleContextMenuCapture}
       className={`w-full h-full ${className}`}
       style={{ background: '#1a5ab0' }}
     />

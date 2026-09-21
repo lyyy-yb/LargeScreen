@@ -1,14 +1,7 @@
 import type { RegionSelection } from '@/types/region'
 import { cities, districts } from '@/utils/city'
 
-/** 飞行任务（listFlyJob 返回结构） */
-export interface TaskItem {
-  jobID: string
-  jobName: string
-  jobTime: string
-  jobStatus: string
-  dockCode: string
-}
+/** 飞行任务结构迁移至 @/types/dataManage 的 DroneTaskVO，来源接口已切换到 /data-manage/drone-task/list */
 
 /** 待执飞计划（listFlyPlan 返回结构） */
 export interface PlanItem {
@@ -28,14 +21,81 @@ export interface FlyResultItem {
   resultsUrl: string
 }
 
-/** 无人机实时传感器数据（暂未接入 SSE，仅做类型占位） */
+/**
+ * 飞行任务采集结果 - drone 端"视频采集"侧栏统一的展示模型。
+ *
+ * 数据来源由 selected task.dataSource 决定：
+ * - api：原有 /dpSys/hbdp/wurenji/listFlyResult?jobID=...，resultsUrl 直接是公网 URL
+ * - import：/dpSys/hbdp/wurenji/task/resources?taskId=...，resourceId 是关键，
+ *   实际访问预览需要走 /dpSys/hbdp/resource/preview/{id}（带 token），
+ *   渲染组件会通过 useResourceBlobUrl 钩子把 resourceId 转成 blob URL
+ */
+export interface DroneMediaItem {
+  /** 唯一标识（api 用 resultsID、import 用 String(resourceId)） */
+  resultsID: string
+  /** p 图片 / v 视频 */
+  resultsType: 'p' | 'v' | string
+  /** 直接可用的 URL；import 来源留空，由渲染端按 resourceId 自动 fetch  */
+  resultsUrl?: string
+  /** import 来源的资源 ID（/hbdp/resource/preview/{id} 的 id） */
+  resourceId?: number
+  /** 显示用时间 */
+  resultsTime: string
+  /** 文件名（import 来源携带） */
+  fileName?: string
+  /** 数据来源标记，仅用于区分 UI 渲染路径 */
+  source: 'api' | 'import'
+}
+
+/** 清洗后的无人机传感器数据接口单项结构（/hbdp/drone-sensor/cleaned/list） */
+export interface CleanedSensorItem {
+  id: number
+  rawId?: number
+  siteCode: string
+  dataTime: string
+  longitude: string | number
+  latitude: string | number
+  altitude: string | number
+  so2?: number | null
+  no2?: number | null
+  co?: number | null
+  o3?: number | null
+  vocs?: number | null
+  tsp?: number | null
+  pm25?: number | null
+  pm10?: number | null
+  temperature?: number | null
+  humidity?: number | null
+  pressure?: number | null
+  windSpeed?: number | null
+  windDirection?: number | null
+  cleanStatus?: string
+  cleanMessage?: string
+  cleanTime?: string
+  createTime?: string
+}
+
+/** 底部面板显示的传感器读数模型 */
 export interface SensorData {
   pm25: number
   pm10: number
   altitude: number
-  battery: number
-  speed: number
-  signal: number
+  vocs: number
+  tsp: number
+  /** 二氧化硫 μg/m³ */
+  so2: number
+  /** 二氧化氮 μg/m³ */
+  no2: number
+  /** 臭氧 μg/m³ */
+  o3: number
+  /** 一氧化碳 mg/m³ */
+  co: number
+  temperature: number
+  humidity: number
+  battery?: number
+  speed?: number
+  signal?: number
+  dataTime?: string
 }
 
 /**

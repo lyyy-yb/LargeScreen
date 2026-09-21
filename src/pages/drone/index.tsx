@@ -1,11 +1,22 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { Button, DatePicker, Image, Input, Modal, Popover, Spin, message } from 'antd'
-import { RocketOutlined, VideoCameraOutlined, PictureOutlined, SendOutlined, PlayCircleOutlined, CloseOutlined, FilterOutlined } from '@ant-design/icons'
+import {
+  RocketOutlined,
+  VideoCameraOutlined,
+  PictureOutlined,
+  SendOutlined,
+  PlayCircleOutlined,
+  PauseCircleOutlined,
+  ReloadOutlined,
+  CloseOutlined,
+  FilterOutlined,
+} from '@ant-design/icons'
 import dayjs, { type Dayjs } from 'dayjs'
 import { disabledFutureDate } from '@/utils/helpers'
 import './index.less'
 import L7MapView from '@/components/L7MapView'
-import { dockList, listFlyJob, listFlyPlan, listFlyResult } from '@/servers/mapBox'
+import { dockList, listFlyPlan, listFlyResult, listCleanedData } from '@/servers/mapBox'
+import { dataManageApi } from '@/servers/dataManage'
 import RegionSelector from '@/components/RegionSelector'
 import MapPanelHeader from '@/components/MapPanelHeader'
 import MapPopupPortal from '@/components/MapPopupPortal'
@@ -14,34 +25,49 @@ import { toRegionQuery } from '@/utils/region'
 import FlyListModel from '@/components/MapBox/FlyListModel'
 import type { Scene } from '@antv/l7'
 import { normalizeDock, getDockModeColor, type NormalizedDock } from '@/utils/dock'
-import type { TaskItem, PlanItem, FlyResultItem, SensorData } from './shared'
+import type { DroneTaskVO, HbdpUploadResource } from '@/types/dataManage'
+import type { PlanItem, FlyResultItem, DroneMediaItem, SensorData, CleanedSensorItem } from './shared'
 import { isValidCoordinate, getRegionCamera, statusObj } from './shared'
+import { useTrajectoryPlayback } from './useTrajectoryPlayback'
+import { useResourceBlobUrl } from '@/utils/useResourceBlobUrl'
 
 export default function Drone() {
   const [docks, setDocks] = useState<NormalizedDock[]>([])
   const [dockCode, setDockCode] = useState<string | null>(null)
-  // sensorData 仅作为展示用读数，setter 未在写路径上触发（依赖后端 SSE 后续接入）
-  const [sensorData] = useState<SensorData | null>(null)
+  const [mapScene, setMapScene] = useState<Scene | null>(null)
+
+  // 传感器清洗数据与轨迹数据列表
+  const [sensorItems, setSensorItems] = useState<CleanedSensorItem[]>([])
+  const [sensorLoading, setSensorLoading] = useState(false)
+
   const regionContext = useAppStore(state => state.regionContext)
   const querySelection = regionContext?.querySelection
   const mapSelection = regionContext?.mapSelection
 
+  // 当前选中的机场对象
+  const currentDock = useMemo(
+    () => docks.find(d => d.dockCode === dockCode) ?? null,
+    [docks, dockCode],
+  )
+
   // 飞行任务 / 待执飞任务
-  const [jobs, setJobs] = useState<TaskItem[]>([])
+  const [jobs, setJobs] = useState<DroneTaskVO[]>([])
   const [plans, setPlans] = useState<PlanItem[]>([])
   const [docksLoading, setDocksLoading] = useState(true)
   const [jobsLoading, setJobsLoading] = useState(false)
   const [plansLoading, setPlansLoading] = useState(false)
-  // 当前选中的飞行任务，用于在视频采集面板展示 listFlyResult 图片/视频结果（默认不选中）
+
+  // 当前选中的飞行任务，用于在视频采集面板展示图片/视频结果（默认不选中）
   const [curJobID, setCurJobID] = useState('')
-  const [jobResults, setJobResults] = useState<FlyResultItem[]>([])
+  /** 视频采集面板：按当前任务 dataSource 拉取的成果（api = listFlyResult 直 URL；import = task/resources 经 Blob URL 渲染） */
+  const [jobResults, setJobResults] = useState<DroneMediaItem[]>([])
   const [resultsLoading, setResultsLoading] = useState(false)
 
   // 搜索关键字
   const [jobSearchText, setJobSearchText] = useState('')
   const [planSearchText, setPlanSearchText] = useState('')
 
-  // 飞行任务日期范围过滤（默认年初 → 今天，与原默认值一致）
+  // 飞行任务日期范围过滤（默认年初 → 今天）
   const [jobDateRange, setJobDateRange] = useState<[Dayjs, Dayjs]>(() => [
     dayjs().startOf('year'),
     dayjs(),
@@ -63,12 +89,36 @@ export default function Drone() {
     }
   }, [])
 
+  // 轨迹播放控制器（虚线未走、实线已走、起终点、移动无人机）
+  const trajectory = useTrajectoryPlayback({
+    scene: mapScene,
+    items: sensorItems,
+    autoPlay: true,
+  })
+
+  // 当前动画进度点位对应的传感器读数
+  const activeSensorPoint = trajectory.currentPoint?.raw
+  const displaySensorData: SensorData | null = activeSensorPoint ? {
+    pm25: Number(activeSensorPoint.pm25 ?? 0),
+    pm10: Number(activeSensorPoint.pm10 ?? 0),
+    tsp: Number(activeSensorPoint.tsp ?? 0),
+    vocs: Number(activeSensorPoint.vocs ?? 0),
+    so2: Number(activeSensorPoint.so2 ?? 0),
+    no2: Number(activeSensorPoint.no2 ?? 0),
+    o3: Number(activeSensorPoint.o3 ?? 0),
+    co: Number(activeSensorPoint.co ?? 0),
+    altitude: Number(activeSensorPoint.altitude ?? 0),
+    temperature: Number(activeSensorPoint.temperature ?? 0),
+    humidity: Number(activeSensorPoint.humidity ?? 0),
+    dataTime: activeSensorPoint.dataTime,
+  } : null
+
   // 派遣无人机巡逻（右键菜单）
   const [flyVisible, setFlyVisible] = useState(false)
   const [flyLngLat, setFlyLngLat] = useState<{ lng: number; lat: number }>({ lng: 0, lat: 0 })
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; lng: number; lat: number } | null>(null)
 
-  // 加载无人机数据
+  // 加载无人机机场数据
   useEffect(() => {
     let cancelled = false
     const loadDroneData = async () => {
@@ -113,13 +163,24 @@ export default function Drone() {
 
     setJobsLoading(true)
     setPlansLoading(true)
-    listFlyJob(param)
-      .then(res => {
+    dataManageApi.droneTaskList({
+      dockCode,
+      startTime: `${jobDateRange[0].format('YYYY-MM-DD')} 00:00:00`,
+      endTime: `${jobDateRange[1].format('YYYY-MM-DD')} 23:59:59`,
+      pageNum: 1,
+      pageSize: 800,
+      includeThirdParty: true,
+    })
+      .then(page => {
         if (cancelled) return
-        setJobs(res?.resultCode === 0 && Array.isArray(res.data) ? res.data : [])
+        const records = Array.isArray(page?.records) ? page.records : []
+        setJobs(records)
       })
-      .catch(() => { if (!cancelled) setJobs([]) })
+      .catch(() => {
+        if (!cancelled) setJobs([])
+      })
       .finally(() => { if (!cancelled) setJobsLoading(false) })
+
     listFlyPlan(param)
       .then(res => {
         if (cancelled) return
@@ -127,42 +188,127 @@ export default function Drone() {
       })
       .catch(() => { if (!cancelled) setPlans([]) })
       .finally(() => { if (!cancelled) setPlansLoading(false) })
+
     return () => { cancelled = true }
   }, [dockCode, jobDateRange])
 
-  // 点击飞行任务 → 选中该任务，加载其 listFlyResult 图片/视频
-  const selectJob = (jobID: string) => {
-    setCurJobID(jobID)
+  // 加载传感器清洗数据与轨迹
+  const loadSensorData = useCallback(async (siteCode: string, startTime: string, completedTime?: string | null) => {
+    setSensorLoading(true)
+    try {
+      // 结束时间：为空或与开始时间相同则自动延展 2 小时
+      const isEndTimeValid = completedTime && completedTime.trim() !== '' && completedTime !== startTime
+      const endTime = isEndTimeValid
+        ? completedTime
+        : dayjs(startTime).add(2, 'hour').format('YYYY-MM-DD HH:mm:ss')
+      const res = await listCleanedData({
+        siteCode,
+        startTime,
+        endTime,
+        pageSize: 4000,
+      })
+      const rawList: CleanedSensorItem[] = Array.isArray((res as any)?.rows)
+        ? (res as any).rows
+        : (Array.isArray((res as any)?.data) ? (res as any).data : [])
+      setSensorItems(rawList)
+      if (rawList.length === 0) {
+        message.info('该飞行时段暂无传感器轨迹记录')
+      } else {
+        message.success(`已加载 ${rawList.length} 条轨迹点位并绘制航线`)
+      }
+    } catch (e) {
+      console.warn('获取传感器清洗数据失败', e)
+      setSensorItems([])
+      message.error('获取传感器数据失败')
+    } finally {
+      setSensorLoading(false)
+    }
+  }, [])
+
+  // 点击飞行任务 → 选中该任务，加载传感器轨迹与媒体采集成果
+  const selectJob = (item: DroneTaskVO) => {
+    setCurJobID(item.taskId)
+    if (currentDock?.sensorDeviceId) {
+      // 新接口（drone-task/list）不再返回 completedTime，
+      // loadSensorData 内部会以 startTime + 2h 作为兜底结束时间
+      void loadSensorData(currentDock.sensorDeviceId, item.taskTime, undefined)
+    } else {
+      setSensorItems([])
+    }
   }
 
   // 媒体成果预览弹窗选中项
-  const [previewItem, setPreviewItem] = useState<FlyResultItem | null>(null)
+  const [previewItem, setPreviewItem] = useState<DroneMediaItem | null>(null)
 
   // 点击采集成果 → 弹出 Modal 预览
-  const openMediaPreview = (item: FlyResultItem) => {
+  const openMediaPreview = (item: DroneMediaItem) => {
     setPreviewItem(item)
   }
 
+  /**
+   * 根据当前选中任务的 dataSource 分流调用不同接口，统一写入 jobResults:
+   * - api：GET /dpSys/hbdp/wurenji/listFlyResult?jobID=...，resultsUrl 是公网可访问 URL
+   * - import：GET /dpSys/hbdp/wurenji/task/resources?taskId=...，resourceId 传渲染端再走带 token 的 preview
+   */
   useEffect(() => {
-    if (!curJobID) return
+    if (!curJobID) {
+      setJobResults([])
+      return
+    }
+    const curJob = jobs.find(j => j.taskId === curJobID)
+    if (!curJob) {
+      setJobResults([])
+      return
+    }
     let cancelled = false
     setResultsLoading(true)
-    listFlyResult({ jobID: curJobID })
-      .then(res => {
-        if (!cancelled) setJobResults(res?.resultCode === 0 && Array.isArray(res.data) ? res.data : [])
-      })
-      .catch(() => { if (!cancelled) setJobResults([]) })
-      .finally(() => { if (!cancelled) setResultsLoading(false) })
+
+    if (curJob.dataSource === 'import') {
+      dataManageApi.getDroneTaskResources(curJobID)
+        .then(res => {
+          if (cancelled) return
+          const list: HbdpUploadResource[] = Array.isArray(res) ? res : []
+          const items: DroneMediaItem[] = list.map(r => ({
+            resultsID: String(r.id),
+            resultsType: r.fileType === 'video' ? 'v' : 'p',
+            resultsTime: r.createTime || '',
+            resourceId: r.id,
+            fileName: r.fileName,
+            source: 'import',
+          }))
+          setJobResults(items)
+        })
+        .catch(() => { if (!cancelled) setJobResults([]) })
+        .finally(() => { if (!cancelled) setResultsLoading(false) })
+    } else {
+      // api 来源（含未知类型兜底走 listFlyResult）
+      listFlyResult({ jobID: curJobID })
+        .then(res => {
+          if (cancelled) return
+          const list: FlyResultItem[] = res?.resultCode === 0 && Array.isArray(res.data) ? res.data : []
+          const items: DroneMediaItem[] = list.map(r => ({
+            resultsID: r.resultsID,
+            resultsType: r.resultsType,
+            resultsUrl: r.resultsUrl,
+            resultsTime: r.resultsTime,
+            source: 'api',
+          }))
+          setJobResults(items)
+        })
+        .catch(() => { if (!cancelled) setJobResults([]) })
+        .finally(() => { if (!cancelled) setResultsLoading(false) })
+    }
+
     return () => { cancelled = true }
-  }, [curJobID])
+  }, [curJobID, jobs])
 
   // 纯前端搜索过滤
   const filteredJobs = useMemo(() => {
     if (!jobSearchText.trim()) return jobs
     const q = jobSearchText.trim().toLowerCase()
     return jobs.filter(j =>
-      ((j.jobName || j.jobID) && (j.jobName || j.jobID).toLowerCase().includes(q)) ||
-      (j.jobID && String(j.jobID).toLowerCase().includes(q)),
+      ((j.taskName || j.taskId) && (j.taskName || j.taskId).toLowerCase().includes(q)) ||
+      (j.taskId && String(j.taskId).toLowerCase().includes(q)),
     )
   }, [jobs, jobSearchText])
 
@@ -181,6 +327,7 @@ export default function Drone() {
       setJobs([])
       setPlans([])
       setCurJobID('')
+      setSensorItems([])
     }
     setDockCode(item.dockCode)
     if (isValidCoordinate(item.dockLng, item.dockLat)) {
@@ -200,6 +347,7 @@ export default function Drone() {
   // 地图右键 → 显示上下文菜单（无人机派遣入口）
   const handleSceneLoaded = useCallback((scene: Scene) => {
     mapSceneRef.current = scene
+    setMapScene(scene)
     scene.on('contextmenu', (ev: any) => {
       ev.originalEvent?.preventDefault()
       ev.originalEvent?.stopPropagation()
@@ -232,11 +380,22 @@ export default function Drone() {
 
   return (
     <div className="map-screen w-full h-full relative overflow-hidden" style={{ background: '#1a5ab0' }}>
-      <L7MapView id="drone-map" center={mapCenter ?? regionCamera.center} zoom={mapZoom ?? regionCamera.zoom} minZoom={6} maxZoom={14} showTiles markers={markers} markerIconUrl="/marker/drone-on.png" onSceneLoaded={handleSceneLoaded} />
+      <L7MapView
+        id="drone-map"
+        center={mapCenter ?? regionCamera.center}
+        zoom={mapZoom ?? regionCamera.zoom}
+        minZoom={6}
+        maxZoom={14}
+        showTiles
+        markers={markers}
+        markerIconUrl="/marker/drone-on.png"
+        onSceneLoaded={handleSceneLoaded}
+      />
       {/* 顶部选择器 */}
       <div className="map-overlay-toolbar map-top-controls">
         <RegionSelector />
       </div>
+
       {/* 左侧 - 机场列表 */}
       <div className="absolute left-16px top-10px bottom-10px z-50 w-330px pointer-events-none">
         <div className="screen-glass-panel h-full flex flex-col pointer-events-auto">
@@ -283,12 +442,22 @@ export default function Drone() {
                 </span>
               </div>
 
-              <div className="mb-2 pr-18">
+              <div className="mb-1.5 pr-18">
                 <span className="text-[#A8D6FF] text-16px font-bold flex items-center gap-1.5 min-w-0 truncate">
                   <RocketOutlined className="text-[#01C2FF] shrink-0" />
                   <span className="truncate" title={item.dockName}>{item.dockName}</span>
                 </span>
               </div>
+
+              {/* 仅在有传感器编码时展示，取数组第一个作为对应传感器编码 */}
+              {item.sensorDeviceId && (
+                <div className="mb-2">
+                  <span className="text-11px font-mono px-2 py-0.5 rounded bg-[rgba(1,194,255,0.12)] border border-[rgba(1,194,255,0.35)] text-[#00E5FF] inline-flex items-center gap-1.5 shadow-[0_0_8px_rgba(0,229,255,0.15)]">
+                    <span className="w-1.5 h-1.5 rounded-full bg-[#00E5FF]" />
+                    传感器: {item.sensorDeviceId}
+                  </span>
+                </div>
+              )}
 
               <div className="flex items-start justify-between gap-2">
                 <div className="flex-1 text-[rgba(168,214,255,0.6)] text-12px line-clamp-2 min-h-[2.6em] leading-relaxed">
@@ -315,28 +484,223 @@ export default function Drone() {
 
       {/* 底部中间 - 传感器数据面板 */}
       {dockCode && (
-        <div className="map-sensor-panel absolute bottom-60px left-1/2 -translate-x-1/2 z-40">
+        <div className="map-sensor-panel absolute bottom-60px left-1/2 -translate-x-1/2 z-40 min-w-720px">
           <div className="screen-glass-panel">
-            <MapPanelHeader title="无人机传感器数据" extra={<span>{sensorData ? '实时更新中' : '暂无数据'}</span>} />
-            {sensorData ? (
-              <div className="grid grid-cols-6 gap-3">
-                {[
-                  { label: 'PM2.5', value: sensorData.pm25, unit: 'μg/m³', color: sensorData.pm25 > 75 ? '#FF4D4F' : sensorData.pm25 > 35 ? '#FAAD14' : '#52C41A' },
-                  { label: 'PM10', value: sensorData.pm10, unit: 'μg/m³', color: sensorData.pm10 > 150 ? '#FF4D4F' : sensorData.pm10 > 75 ? '#FAAD14' : '#52C41A' },
-                  { label: '高度', value: sensorData.altitude, unit: 'm', color: '#01C2FF' },
-                  { label: '电量', value: sensorData.battery, unit: '%', color: sensorData.battery < 20 ? '#FF4D4F' : sensorData.battery < 50 ? '#FAAD14' : '#52C41A' },
-                  { label: '速度', value: sensorData.speed, unit: 'm/s', color: '#01C2FF' },
-                  { label: '信号', value: sensorData.signal, unit: '%', color: sensorData.signal < 70 ? '#FAAD14' : '#52C41A' },
-                ].map(item => (
-                  <div key={item.label} className="text-center">
-                    <div className="text-18px font-bold" style={{ color: item.color }}>{item.value}</div>
-                    <div className="text-[rgba(168,214,255,0.5)] text-10px">{item.unit}</div>
-                    <div className="text-[#A8D6FF] text-11px mt-0.5">{item.label}</div>
-                  </div>
-                ))}
+            <MapPanelHeader
+              title={
+                <div className="flex items-center gap-2">
+                  <span>无人机传感器数据</span>
+                  {currentDock?.sensorDeviceId && (
+                    <span className="text-11px font-normal px-2 py-0.5 rounded bg-[rgba(1,194,255,0.15)] border border-[rgba(1,194,255,0.3)] text-[#00E5FF] font-mono">
+                      设备: {currentDock.sensorDeviceId}
+                    </span>
+                  )}
+                </div>
+              }
+              extra={
+                <div className="flex items-center gap-3">
+                  {trajectory.totalPoints > 0 && (
+                    <div className="flex items-center gap-2 text-11px text-[#A8D6FF]">
+                      <Button
+                        size="small"
+                        type="text"
+                        icon={
+                          trajectory.isPlaying ? (
+                            <PauseCircleOutlined className="text-16px text-[#01C2FF]" />
+                          ) : (
+                            <PlayCircleOutlined className="text-16px text-[#01C2FF]" />
+                          )
+                        }
+                        onClick={trajectory.isPlaying ? trajectory.pause : trajectory.play}
+                        title={trajectory.isPlaying ? '暂停' : '播放'}
+                      />
+                      <Button
+                        size="small"
+                        type="text"
+                        icon={<ReloadOutlined className="text-14px text-[#A8D6FF]" />}
+                        onClick={trajectory.reset}
+                        title="重新播放"
+                      />
+                      <span className="text-[rgba(168,214,255,0.7)] font-mono">
+                        {trajectory.currentIndex + 1} / {trajectory.totalPoints}
+                      </span>
+                      {displaySensorData?.dataTime && (
+                        <span className="text-[#01C2FF] font-mono text-11px">
+                          {displaySensorData.dataTime}
+                        </span>
+                      )}
+                      <div className="flex items-center gap-1 ml-1">
+                        {([1, 2, 4] as const).map(s => (
+                          <button
+                            key={s}
+                            type="button"
+                            onClick={() => trajectory.setSpeed(s)}
+                            className={`px-1.5 py-0.5 text-10px rounded cursor-pointer transition-colors border ${
+                              trajectory.speed === s
+                                ? 'bg-[#01C2FF] text-[#002B49] border-[#01C2FF] font-bold'
+                                : 'bg-[rgba(0,0,0,0.3)] text-[#A8D6FF] border-[rgba(255,255,255,0.2)] hover:border-[#01C2FF]'
+                            }`}
+                          >
+                            {s}x
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  <span className="text-11px text-[rgba(168,214,255,0.7)]">
+                    {sensorLoading
+                      ? '加载中…'
+                      : !currentDock?.sensorDeviceId
+                        ? '未配置传感器'
+                        : trajectory.totalPoints > 0
+                          ? trajectory.isPlaying
+                            ? '航线播放中'
+                            : '播放已暂停'
+                          : '暂无轨迹数据'}
+                  </span>
+                </div>
+              }
+            />
+            {displaySensorData ? (
+              <div className="space-y-1.5 pt-0.5">
+                {/* 第一行：PM2.5 / PM10 / TSP / VOCs / SO₂ */}
+                <div className="grid grid-cols-5 gap-2">
+                  {[
+                    {
+                      label: 'PM2.5',
+                      value: displaySensorData.pm25,
+                      unit: 'μg/m³',
+                      color:
+                        displaySensorData.pm25 > 75
+                          ? '#FF4D4F'
+                          : displaySensorData.pm25 > 35
+                            ? '#FAAD14'
+                            : '#52C41A',
+                    },
+                    {
+                      label: 'PM10',
+                      value: displaySensorData.pm10,
+                      unit: 'μg/m³',
+                      color:
+                        displaySensorData.pm10 > 150
+                          ? '#FF4D4F'
+                          : displaySensorData.pm10 > 75
+                            ? '#FAAD14'
+                            : '#52C41A',
+                    },
+                    {
+                      label: 'TSP',
+                      value: displaySensorData.tsp,
+                      unit: 'μg/m³',
+                      color: '#01C2FF',
+                    },
+                    {
+                      label: 'VOCs',
+                      value: displaySensorData.vocs,
+                      unit: 'ppb',
+                      color:
+                        displaySensorData.vocs > 200
+                          ? '#FF4D4F'
+                          : displaySensorData.vocs > 100
+                            ? '#FAAD14'
+                            : '#52C41A',
+                    },
+                    {
+                      label: 'SO₂',
+                      value: displaySensorData.so2,
+                      unit: 'μg/m³',
+                      color:
+                        displaySensorData.so2 > 150
+                          ? '#FF4D4F'
+                          : displaySensorData.so2 > 75
+                            ? '#FAAD14'
+                            : '#52C41A',
+                    },
+                  ].map(item => (
+                    <div
+                      key={item.label}
+                      className="text-center py-1.5 px-2 rounded-lg bg-[rgba(0,0,0,0.2)] border border-[rgba(255,255,255,0.06)]"
+                    >
+                      <div className="text-16px font-bold font-mono leading-tight" style={{ color: item.color }}>
+                        {item.value}
+                      </div>
+                      <div className="text-[rgba(168,214,255,0.5)] text-10px leading-tight">{item.unit}</div>
+                      <div className="text-[#A8D6FF] text-11px mt-px font-medium leading-tight">{item.label}</div>
+                    </div>
+                  ))}
+                </div>
+                {/* 第二行：NO₂ / O₃ / CO / 高度 / 温度 */}
+                <div className="grid grid-cols-5 gap-2">
+                  {[
+                    {
+                      label: 'NO₂',
+                      value: displaySensorData.no2,
+                      unit: 'μg/m³',
+                      color:
+                        displaySensorData.no2 > 80
+                          ? '#FF4D4F'
+                          : displaySensorData.no2 > 40
+                            ? '#FAAD14'
+                            : '#52C41A',
+                    },
+                    {
+                      label: 'O₃',
+                      value: displaySensorData.o3,
+                      unit: 'μg/m³',
+                      color:
+                        displaySensorData.o3 > 160
+                          ? '#FF4D4F'
+                          : displaySensorData.o3 > 100
+                            ? '#FAAD14'
+                            : '#52C41A',
+                    },
+                    {
+                      label: 'CO',
+                      value: displaySensorData.co,
+                      unit: 'mg/m³',
+                      color:
+                        displaySensorData.co > 10
+                          ? '#FF4D4F'
+                          : displaySensorData.co > 5
+                            ? '#FAAD14'
+                            : '#52C41A',
+                    },
+                    {
+                      label: '高度',
+                      value: displaySensorData.altitude,
+                      unit: 'm',
+                      color: '#01C2FF',
+                    },
+                    {
+                      label: '温度',
+                      value: displaySensorData.temperature,
+                      unit: '℃',
+                      color: displaySensorData.temperature > 35 ? '#FAAD14' : '#00E5FF',
+                    },
+                  ].map(item => (
+                    <div
+                      key={item.label}
+                      className="text-center py-1.5 px-2 rounded-lg bg-[rgba(0,0,0,0.2)] border border-[rgba(255,255,255,0.06)]"
+                    >
+                      <div className="text-16px font-bold font-mono leading-tight" style={{ color: item.color }}>
+                        {item.value}
+                      </div>
+                      <div className="text-[rgba(168,214,255,0.5)] text-10px leading-tight">{item.unit}</div>
+                      <div className="text-[#A8D6FF] text-11px mt-px font-medium leading-tight">{item.label}</div>
+                    </div>
+                  ))}
+                </div>
               </div>
             ) : (
-              <div className="text-[rgba(168,214,255,0.4)] text-12px py-4 text-center">传感器数据接口暂未接入</div>
+              <div className="text-[rgba(168,214,255,0.45)] text-12px py-4 text-center">
+                {sensorLoading
+                  ? '正在查询清洗传感器数据与航线轨迹…'
+                  : !currentDock?.sensorDeviceId
+                    ? '当前机场未绑定传感器编码，无传感器数据'
+                    : curJobID
+                      ? '该飞行任务时间段内暂无传感器轨迹数据'
+                      : '请在右侧选择飞行任务以查看航线与传感器数据'}
+              </div>
             )}
           </div>
         </div>
@@ -371,29 +735,11 @@ export default function Drone() {
                 <div className="text-[rgba(168,214,255,0.5)] text-11px py-8 text-center">该任务暂无关联视频或图片</div>
               )}
               {!resultsLoading && jobResults.map(item => (
-                <div
+                <DroneMediaThumbnail
                   key={item.resultsID}
-                  className="group rounded-lg overflow-hidden border border-[rgba(255,255,255,0.12)] bg-[rgba(0,0,0,0.25)] hover:border-[#01C2FF] hover:shadow-[0_0_8px_rgba(1,194,255,0.15)] transition-all cursor-pointer"
+                  item={item}
                   onClick={() => openMediaPreview(item)}
-                  title="点击打开弹窗预览/播放"
-                >
-                  <div className="relative w-full h-110px overflow-hidden bg-[rgba(0,0,0,0.35)]">
-                    {item.resultsType === 'p' ? (
-                      <Image src={item.resultsUrl} preview={false} className="w-full h-full object-cover" fallback="" />
-                    ) : (
-                      <div className="w-full h-full relative">
-                        <video src={item.resultsUrl} className="w-full h-full object-cover" preload="metadata" />
-                        <div className="absolute inset-0 flex items-center justify-center bg-[rgba(0,0,0,0.3)] group-hover:bg-[rgba(0,0,0,0.15)] transition-all">
-                          <PlayCircleOutlined className="text-36px text-white/90 drop-shadow-md group-hover:scale-110 transition-transform" />
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                  <div className="px-2.5 py-1.5 flex items-center justify-between bg-[rgba(0,0,0,0.2)]">
-                    <span className="text-[#A8D6FF] text-11px truncate flex-1">{item.resultsType === 'v' ? '视频' : '图片'}</span>
-                    <span className="text-[rgba(168,214,255,0.5)] text-10px shrink-0">{item.resultsTime}</span>
-                  </div>
-                </div>
+                />
               ))}
             </div>
           </div>
@@ -461,36 +807,36 @@ export default function Drone() {
               {!dockCode && <div className="text-[rgba(168,214,255,0.4)] text-11px py-2 text-center">请先在左侧选择无人机机场</div>}
               {dockCode && jobsLoading && <div className="flex items-center justify-center gap-2 py-2 text-[#A8D6FF] text-11px"><Spin size="small" />加载中…</div>}
               {dockCode && !jobsLoading && filteredJobs.length === 0 && (
-                <div className="text-[rgba(168,214,255,0.4)] text-11px py-2 text-center">
+                <div className="text-[rgba(168,214,255,0.4)] text-11px py-3 text-center">
                   {jobSearchText ? '未搜索到匹配任务' : '暂无飞行任务'}
                 </div>
               )}
               {dockCode && filteredJobs.map(item => (
                 <div
-                  key={item.jobID}
+                  key={item.taskId}
                   className={`rounded-xl p-3 cursor-pointer transition-all border ${
-                    curJobID === item.jobID
+                    curJobID === item.taskId
                       ? 'bg-[rgba(1,194,255,0.18)] border-[#01C2FF] shadow-[0_0_10px_rgba(1,194,255,0.18)]'
                       : 'bg-[rgba(0,0,0,0.2)] border-[rgba(255,255,255,0.15)] hover:bg-[rgba(255,255,255,0.06)]'
                   }`}
-                  onClick={() => selectJob(item.jobID)}
+                  onClick={() => selectJob(item)}
                 >
                   <div className="flex items-center justify-between mb-1.5">
-                    <div className="text-[#A8D6FF] text-13px font-medium truncate flex-1 pr-2" title={item.jobName || item.jobID}>
-                      {item.jobName || item.jobID}
+                    <div className="text-[#A8D6FF] text-13px font-medium truncate flex-1 pr-2" title={item.taskName || item.taskId}>
+                      {item.taskName || item.taskId}
                     </div>
                     <span
                       className="px-2 py-0.5 rounded text-11px font-medium shrink-0"
                       style={{
-                        backgroundColor: statusObj[item.jobStatus]?.color || 'rgba(255,255,255,0.2)',
-                        color: ['a', '3'].includes(item.jobStatus) ? '#003881' : '#ffffff',
+                        backgroundColor: statusObj[item.taskStatus]?.color || 'rgba(255,255,255,0.2)',
+                        color: ['a', '3'].includes(item.taskStatus) ? '#003881' : '#ffffff',
                       }}
                     >
-                      {statusObj[item.jobStatus]?.message || '未知状态'}
+                      {statusObj[item.taskStatus]?.message || '未知状态'}
                     </span>
                   </div>
-                  <div className="text-[rgba(168,214,255,0.5)] text-11px font-normal">
-                    {item.jobTime}
+                  <div className="flex items-center justify-between gap-2 text-[rgba(168,214,255,0.55)] text-11px font-normal">
+                    <TimeRangeCell taskTime={item.taskTime} completedTime={item.completedTime} />
                   </div>
                 </div>
               ))}
@@ -599,32 +945,7 @@ export default function Drone() {
           }
         >
           <div className="flex flex-col items-center justify-center p-4 min-h-[300px] overflow-hidden">
-            {previewItem.resultsType === 'v' ? (
-              <div className="w-full flex flex-col items-center gap-3">
-                <div className="w-full rounded-2xl overflow-hidden shadow-[0_0_30px_rgba(0,0,0,0.5)] border border-[rgba(255,255,255,0.2)] bg-black">
-                  <video
-                    src={previewItem.resultsUrl}
-                    controls
-                    autoPlay
-                    className="w-full max-h-[65vh] object-contain"
-                  />
-                </div>
-                <div className="text-[rgba(168,214,255,0.6)] text-12px">提示：支持画中画、全屏播放与倍速调节</div>
-              </div>
-            ) : (
-              <div className="w-full flex flex-col items-center gap-3">
-                <div className="p-2 rounded-2xl bg-[rgba(0,56,129,0.5)] border border-[rgba(255,255,255,0.2)] shadow-[0_0_30px_rgba(0,0,0,0.4)] flex items-center justify-center">
-                  <Image
-                    src={previewItem.resultsUrl}
-                    preview={{
-                      mask: <div className="text-[#03FBFD] text-14px font-medium flex items-center gap-1">点击放大旋转预览</div>,
-                    }}
-                    className="max-h-[62vh] max-w-full object-contain rounded-xl"
-                  />
-                </div>
-                <div className="text-[rgba(168,214,255,0.6)] text-12px">提示：点击图片可直接进行放大、旋转、全屏预览</div>
-              </div>
-            )}
+            <DroneMediaPreviewBody item={previewItem} />
           </div>
         </Modal>
       )}
@@ -632,4 +953,138 @@ export default function Drone() {
   )
 }
 
+/**
+ * drone 视频采集列表缩略图
+ * - api：直接用公网 URL，<Image> / 带 PlayCircle 的 <video>
+ * - import：拿带 token 的 blob URL（useResourceBlobUrl）后再渲染
+ *   - 加载中显示 Spin 占位（容器保持固定高度，避免高度抖动）
+ */
+function DroneMediaThumbnail({ item, onClick }: { item: DroneMediaItem; onClick: () => void }) {
+  return (
+    <div
+      className="group rounded-lg overflow-hidden border border-[rgba(255,255,255,0.12)] bg-[rgba(0,0,0,0.25)] hover:border-[#01C2FF] hover:shadow-[0_0_8px_rgba(1,194,255,0.15)] transition-all cursor-pointer"
+      onClick={onClick}
+      title="点击打开弹窗预览/播放"
+    >
+      <div className="relative w-full h-110px overflow-hidden bg-[rgba(0,0,0,0.35)]">
+        <MediaSourceView item={item} variant="thumb" />
+      </div>
+      <div className="px-2.5 py-1.5 flex items-center justify-between bg-[rgba(0,0,0,0.2)]">
+        <span className="text-[#A8D6FF] text-11px truncate flex-1">{item.resultsType === 'v' ? '视频' : '图片'}</span>
+        <span className="text-[rgba(168,214,255,0.5)] text-10px shrink-0">{item.resultsTime || '-'}</span>
+      </div>
+    </div>
+  )
+}
 
+/**
+ * drone 视频采集预览 Modal 内容
+ * - api：直接 src；import：拿 blob URL
+ * - 视频：controls autoPlay；图片：包在圆角渐变底框里给点击放大
+ */
+function DroneMediaPreviewBody({ item }: { item: DroneMediaItem }) {
+  const isVideo = item.resultsType === 'v'
+  if (isVideo) {
+    return (
+      <div className="w-full flex flex-col items-center gap-3">
+        <div className="w-full rounded-2xl overflow-hidden shadow-[0_0_30px_rgba(0,0,0,0.5)] border border-[rgba(255,255,255,0.2)] bg-black">
+          <MediaSourceView item={item} variant="preview" autoPlay />
+        </div>
+        <div className="text-[rgba(168,214,255,0.6)] text-12px">提示：支持画中画、全屏播放与倍速调节</div>
+      </div>
+    )
+  }
+  return (
+    <div className="w-full flex flex-col items-center gap-3">
+      <div className="p-2 rounded-2xl bg-[rgba(0,56,129,0.5)] border border-[rgba(255,255,255,0.2)] shadow-[0_0_30px_rgba(0,0,0,0.4)] flex items-center justify-center">
+        <MediaSourceView item={item} variant="preview" />
+      </div>
+      <div className="text-[rgba(168,214,255,0.6)] text-12px">提示：点击图片可直接进行放大、旋转、全屏预览</div>
+    </div>
+  )
+}
+
+/**
+ * 按数据源切换 URL 来源的统一渲染组件：
+ * - api：resultsUrl 直接给 <video>/<Image>，不带 token
+ * - import：自动调 useResourceBlobUrl(resourceId) 拉带 token 的 blob URL
+ *
+ * variant 控制两种用途：
+ * - 'thumb'   —— 列表缩略图（视频带 PlayCircle overlay，图片 object-cover）
+ * - 'preview' —— 二次预览（视频 controls autoPlay，图片可不加 preview mask，由父组件决定）
+ */
+function MediaSourceView({
+  item,
+  variant,
+  autoPlay,
+}: {
+  item: DroneMediaItem
+  variant: 'thumb' | 'preview'
+  autoPlay?: boolean
+}) {
+  const isVideo = item.resultsType === 'v'
+  // import 来源：跑 hook 拿 blob URL；api 来源传 null 跳过取数
+  const { url: blobUrl, error: blobError } = useResourceBlobUrl(
+    item.source === 'import' && item.resourceId != null ? item.resourceId : null,
+  )
+  const url = item.source === 'api' ? (item.resultsUrl ?? '') : blobUrl
+
+  if (!url) {
+    if (blobError) {
+      return <Button size="small" type="link" disabled>加载失败</Button>
+    }
+    return <Spin size="small" />
+  }
+  if (isVideo) {
+    if (variant === 'thumb') {
+      return (
+        <div className="w-full h-full relative">
+          <video src={url} className="w-full h-full object-cover" preload="metadata" muted />
+          <div className="absolute inset-0 flex items-center justify-center bg-[rgba(0,0,0,0.3)] group-hover:bg-[rgba(0,0,0,0.15)] transition-all">
+            <PlayCircleOutlined className="text-36px text-white/90 drop-shadow-md group-hover:scale-110 transition-transform" />
+          </div>
+        </div>
+      )
+    }
+    return <video src={url} controls autoPlay={autoPlay !== false} className="w-full max-h-[65vh] object-contain" />
+  }
+  if (variant === 'thumb') {
+    return <Image src={url} preview={false} className="w-full h-full object-cover" fallback="" />
+  }
+  return (
+    <Image
+      src={url}
+      preview={{
+        mask: <div className="text-[#03FBFD] text-14px font-medium flex items-center gap-1">点击放大旋转预览</div>,
+      }}
+      className="max-h-[62vh] max-w-full object-contain rounded-xl"
+    />
+  )
+}
+
+/**
+ * 飞行任务列表底部"开始 → 结束"时间区间
+ * - 后端未返 completedTime 时按 taskTime + 1h 兜底
+ * - 永远完整显示日期 + 时间，避免跨日时看不到日期
+ */
+function TimeRangeCell({ taskTime, completedTime }: { taskTime?: string; completedTime?: string }) {
+  if (!taskTime) {
+    return (
+      <>
+        <span className="flex-1 text-center">-</span>
+      </>
+    )
+  }
+  const endStr = completedTime || dayjs(taskTime).add(1, 'hour').format('YYYY-MM-DD HH:mm:ss')
+  return (
+    <>
+      <span className="truncate flex-1 min-w-0" title={`开始：${taskTime}`}>
+        {dayjs(taskTime).format('YYYY-MM-DD HH:mm:ss')}
+      </span>
+      <span className="shrink-0 text-[rgba(168,214,255,0.4)]">→</span>
+      <span className="shrink-0 text-right" title={`结束：${endStr}`}>
+        {endStr}
+      </span>
+    </>
+  )
+}

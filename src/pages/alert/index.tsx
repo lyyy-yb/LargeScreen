@@ -86,7 +86,9 @@ export default function AlertPage() {
   const requestVersions = useRef({ alerts: 0, tasks: 0, counts: 0, dashboard: 0, refresh: 0 })
   const [dashboard, setDashboard] = useState<AlertDashboardVO | null>(null)
   // 4 个 Modal 的状态合并：open + data 二元组（RuleModal 由 RuleTab 内部自管）
-  const [alertDetail, setAlertDetail] = useState<{ open: boolean; alert: AlertEvent | null }>({ open: false, alert: null })
+  // nologinMode：跨平台免登录 deep-link 打开的弹窗为最大化（100vw × 100dvh）+ 隐藏 X；
+  //              普通点击"详情"打开的为默认尺寸 + 显示 X。
+  const [alertDetail, setAlertDetail] = useState<{ open: boolean; alert: AlertEvent | null; nologinMode?: boolean }>({ open: false, alert: null })
   const [dispatchModal, setDispatchModal] = useState<{ open: boolean; alert: AlertEvent | null; fromEvidence?: boolean }>({ open: false, alert: null })
   const [evidenceAlert, setEvidenceAlert] = useState<AlertEvent | null>(null)
   const [followUpTask, setFollowUpTask] = useState<DisposalTask | null>(null)
@@ -95,13 +97,13 @@ export default function AlertPage() {
 
   // 详情数据预填：先打开 Modal（用列表数据），异步加载详情后回填
   const openAlertDetail = (r: AlertEvent) => {
-    setAlertDetail({ open: true, alert: r })
+    setAlertDetail({ open: true, alert: r, nologinMode: false })
     alertEventApi.detail(Number(r.id))
       .then((res) => {
         const data = requireSuccess(res)
         if (data) {
           const full = toAlertEvent(data)
-          setAlertDetail((prev) => (prev.open && prev.alert?.id === r.id ? { open: true, alert: full } : prev))
+          setAlertDetail((prev) => (prev.open && prev.alert?.id === r.id ? { ...prev, alert: full } : prev))
         }
       })
       .catch(() => message.error('预警详情加载失败，当前显示列表信息'))
@@ -345,21 +347,23 @@ export default function AlertPage() {
           createdAt: '',
           status: '',
         }
-        setAlertDetail({ open: true, alert: placeholder })
+        // 关键：nologinMode: true → 弹窗最大化 + 隐藏 X；只在 deep-link 进入时生效
+        setAlertDetail({ open: true, alert: placeholder, nologinMode: true })
         alertEventApi.detail(targetAlertId)
           .then((res) => {
             const data = requireSuccess(res)
             if (data) {
               const full = toAlertEvent(data)
               // 仅在用户尚未关闭/切换过弹窗时回填（避免覆盖用户后续操作）
-              setAlertDetail((prev) => (prev.open && prev.alert?.id === String(targetAlertId) ? { open: true, alert: full } : prev))
+              // 用 ...prev 保留 nologinMode（详情回填不能丢这个标记）
+              setAlertDetail((prev) => (prev.open && prev.alert?.id === String(targetAlertId) ? { ...prev, alert: full } : prev))
             } else {
-              setAlertDetail({ open: false, alert: null })
+              setAlertDetail({ open: false, alert: null, nologinMode: false })
               message.error('预警详情加载失败')
             }
           })
           .catch(() => {
-            setAlertDetail({ open: false, alert: null })
+            setAlertDetail({ open: false, alert: null, nologinMode: false })
             message.error('预警详情加载失败')
           })
       }
@@ -712,9 +716,10 @@ export default function AlertPage() {
       <AlertDetailModal
         open={alertDetail.open}
         alert={alertDetail.alert}
-        onClose={() => setAlertDetail({ open: false, alert: null })}
+        onClose={() => setAlertDetail({ open: false, alert: null, nologinMode: false })}
         alertLevelOptions={alertLevelOptions}
         deptNameOf={deptNameOf}
+        nologinMode={alertDetail.nologinMode}
       />
 
       <EvidenceModal alert={evidenceAlert} onClose={() => setEvidenceAlert(null)} onSaved={() => void refreshAll()}

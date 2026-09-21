@@ -214,6 +214,24 @@ export function redirectToLoginOnExpiredWithMsg(msgApi: { warning: (s: string) =
   window.location.href = '/login'
 }
 
+/** 同时兼容业务接口 resultCode=0 与若依 AjaxResult code=200；业务失败不可显示保存成功。 */
+export function requireSuccess<T>(response: ServerResult<T>): T {
+  if (response.code === 401 || response.resultCode === 401) {
+    redirectToLoginOnExpired()
+    throw new Error('登录已过期，请重新登录')
+  }
+  if ((response.code != null && response.code !== 200)
+    || (response.resultCode != null && response.resultCode !== 0)
+    || (response.code == null && response.resultCode == null)) {
+    const reason = response.msg || response.message || '操作失败，请稍后重试'
+    if (/Duplicate entry/i.test(reason) && /uk_mn_code/i.test(reason)) {
+      throw new Error('设备编号（MN码）已存在，请修改后重试')
+    }
+    throw new Error(/SQL|Exception|###/i.test(reason) ? '操作失败，请稍后重试或联系管理员' : reason)
+  }
+  return response.data
+}
+
 // ---------------- 全局网络错误提示 ----------------
 
 /** 错误频率限制：同一类型错误 3s 内只提示一次 */

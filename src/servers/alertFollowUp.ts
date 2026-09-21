@@ -1,6 +1,5 @@
-import { request, redirectToLoginOnExpired, type ServerResult } from './request'
+import { request, requireSuccess } from './request'
 import { imageBlob } from './imageBlob'
-
 const PREFIX = '/dpSys/hbdp/alert/follow-up'
 
 export interface FollowUpImage {
@@ -17,18 +16,7 @@ export interface FollowUpRecord {
   images?: FollowUpImage[]
 }
 
-/** 同时兼容业务接口 resultCode=0 与若依 AjaxResult code=200；业务失败不可显示保存成功。 */
-export function requireSuccess<T>(response: ServerResult<T>): T {
-  if (response.code === 401 || response.resultCode === 401) {
-    redirectToLoginOnExpired()
-    throw new Error('登录已过期，请重新登录')
-  }
-  if (response.resultCode != null ? response.resultCode !== 0 : response.code !== 200) {
-    const reason = response.msg || response.message || '操作失败，请稍后重试'
-    throw new Error(/SQL|Exception|###/.test(reason) ? `${reason.split('\n')[0].replace(/[:：]\s*$/, '')}，请稍后重试或联系管理员` : reason)
-  }
-  return response.data
-}
+export { requireSuccess }
 
 export const alertFollowUpApi = {
   async list(alertEventId: string) {

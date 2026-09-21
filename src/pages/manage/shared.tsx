@@ -8,9 +8,12 @@ export type TabKey = 'station' | 'mobile' | 'drone'
 /** 查询条件变更后防抖触发接口查询的时长 */
 export const QUERY_DEBOUNCE = 500
 
-/** 默认时间范围：昨天 00:00:00 ~ 今天 00:00:00（默认查一天） */
+/**
+ * 默认时间范围：昨天 00:00:00 ~ 今天 23:59:59（含完整一天）
+ * 结束时间用 endOf('day') 而非 startOf('day')：否则当天数据会被排除
+ */
 export function defaultDayRange(): [Dayjs, Dayjs] {
-  return [dayjs().subtract(1, 'day').startOf('day'), dayjs().startOf('day')]
+  return [dayjs().subtract(1, 'day').startOf('day'), dayjs().endOf('day')]
 }
 
 /**
@@ -51,7 +54,7 @@ export const LEVEL_COLOR: Record<AirDataLevel, string> = {
 }
 
 /**
- * 无人机任务状态：与 /drone 飞行任务（listFlyJob.jobStatus）同一套字符串枚举
+ * 无人机任务状态：与 /drone 飞行任务（droneTaskVO.taskStatus）同一套字符串枚举
  * 0-等待中 1-进行中 a-已完成 f-失败
  */
 export const TASK_STATUS_MAP: Record<DroneTaskStatus, { label: string; color: string }> = {

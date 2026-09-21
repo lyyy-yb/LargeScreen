@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { Button, Table, Modal, Form, Input, Select, Switch, InputNumber, App } from 'antd'
 import { PlusOutlined, ArrowLeftOutlined } from '@ant-design/icons'
 import { cleanRuleApi } from '@/servers/business'
+import { requireSuccess } from '@/servers/request'
 import { useDebounce } from '@/hooks/useDebounce'
 import type { CleanRuleDTO } from '@/types/business'
 
@@ -220,17 +221,17 @@ export default function CleanRule() {
           config: JSON.stringify(config),
         }
         if (editingItem) {
-          await cleanRuleApi.edit({ ...payload, id: Number(editingItem.id) })
+          requireSuccess(await cleanRuleApi.edit({ ...payload, id: Number(editingItem.id) }))
           message.success('编辑成功')
         } else {
-          await cleanRuleApi.add(payload)
+          requireSuccess(await cleanRuleApi.add(payload))
           message.success('新增成功')
         }
         setIsModalVisible(false)
         form.resetFields()
         loadList()
-      } catch {
-        message.error('保存失败，请重试')
+      } catch (err) {
+        message.error(err instanceof Error ? err.message : '保存失败，请重试')
       } finally {
         setSubmitting(false)
       }
@@ -245,11 +246,11 @@ export default function CleanRule() {
       cancelText: '取消',
       onOk: async () => {
         try {
-          await cleanRuleApi.remove(Number(id))
+          requireSuccess(await cleanRuleApi.remove(Number(id)))
           message.success('删除成功')
           loadList()
-        } catch {
-          message.error('删除失败')
+        } catch (err) {
+          message.error(err instanceof Error ? err.message : '删除失败')
         }
       },
     })
@@ -257,10 +258,10 @@ export default function CleanRule() {
 
   const toggleStatus = async (id: string | number, enabled: boolean) => {
     try {
-      await cleanRuleApi.changeStatus(Number(id), enabled ? 0 : 1)
+      requireSuccess(await cleanRuleApi.changeStatus(Number(id), enabled ? 0 : 1))
       loadList()
-    } catch {
-      message.error('状态更新失败')
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '状态更新失败')
     }
   }
 

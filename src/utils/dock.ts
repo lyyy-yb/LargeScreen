@@ -29,6 +29,8 @@ export interface DockItem {
   status?: boolean | string
   /** 0=空闲，1=调试，2=远程调试，3=升级，4=工作中 */
   modeCode?: DockModeCode | number
+  /** 无人机对应的传感器编码数组 */
+  sensorDeviceIds?: string[]
   [key: string]: unknown
 }
 
@@ -43,6 +45,10 @@ export interface NormalizedDock {
   statusText: '在线' | '离线'
   modeCode: DockModeCode
   modeLabel: string
+  /** 关联的首个传感器编码（无值时为 null） */
+  sensorDeviceId: string | null
+  /** 原始传感器编码数组 */
+  sensorDeviceIds: string[]
 }
 
 /** 判断机场在线状态：兼容 boolean 及 字符串/数字 */
@@ -111,6 +117,11 @@ export function normalizeDock(item: DockItem | Record<string, unknown>): Normali
     ? (modeNum as DockModeCode)
     : (0 as DockModeCode)
 
+  const rawSensorIds = Array.isArray(raw.sensorDeviceIds)
+    ? (raw.sensorDeviceIds as unknown[]).map(String).filter(Boolean)
+    : []
+  const sensorDeviceId = rawSensorIds.length > 0 ? rawSensorIds[0] : null
+
   return {
     dockCode,
     dockName,
@@ -121,6 +132,8 @@ export function normalizeDock(item: DockItem | Record<string, unknown>): Normali
     statusText,
     modeCode: normalizedMode,
     modeLabel: getDockModeLabel(normalizedMode),
+    sensorDeviceId,
+    sensorDeviceIds: rawSensorIds,
   }
 }
 

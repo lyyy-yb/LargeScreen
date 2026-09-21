@@ -30,32 +30,85 @@ export const stationColumns: TableColumnsType<AirDataDetailVO> = [
   { title: '样本数', dataIndex: 'sampleCount', key: 'sampleCount', width: 90, align: 'center' as const, render: (v: number | null) => fmt(v) },
 ]
 
-/** 无人机任务列定义 */
-export const droneColumns: TableColumnsType<DroneTaskVO> = [
-  { title: '任务ID', dataIndex: 'taskId', key: 'taskId', width: 160 },
-  { title: '任务名称', dataIndex: 'taskName', key: 'taskName', width: 180 },
-  { title: '机场编码', dataIndex: 'dockCode', key: 'dockCode', width: 140 },
-  {
-    title: '任务状态',
-    dataIndex: 'taskStatus',
-    key: 'taskStatus',
-    width: 100,
-    align: 'center' as const,
-    render: renderTaskStatus,
-  },
-  { title: '执行时间', dataIndex: 'taskTime', key: 'taskTime', width: 170 },
-  { title: '结果数', dataIndex: 'resultCount', key: 'resultCount', width: 90, align: 'center' as const },
-  {
-    title: '数据来源',
-    dataIndex: 'dataSource',
-    key: 'dataSource',
-    width: 110,
-    align: 'center' as const,
-    render: (v: DroneTaskDataSource) => DATA_SOURCE_MAP[v] ?? v,
-  },
-  { title: '失败原因', dataIndex: 'failReason', key: 'failReason', width: 180, render: (v: string) => v || '-' },
-  { title: '创建人', dataIndex: 'createBy', key: 'createBy', width: 110 },
-]
+/**
+ * 无人机任务行操作回调：
+ * - onViewApiResult：api 任务的"查看采集结果"按钮
+ * - onUploadImport：import 任务的"上传资源"按钮
+ * - onViewImport：import 任务的"查看资源"按钮
+ *
+ * 注：columns 工厂需要这组回调才能在 render 中真正触发弹窗，
+ *    这样上层（DataManage 页面）只需传 props 进来，不必用 ref 全局 dispatch。
+ */
+export interface DroneTaskRowActions {
+  onViewApiResult: (task: DroneTaskVO) => void
+  onUploadImport: (task: DroneTaskVO) => void
+  onViewImport: (task: DroneTaskVO) => void
+}
+
+/**
+ * 操作按钮：统一使用全局 .tech-action-btn 系列（详见 src/assets/css/global.less:1429）
+ * - 查看（详情类）  → btn-detail（蓝色）
+ * - 上传（新建类）  → btn-success（绿色）
+ */
+function techBtn(label: string, kind: 'detail' | 'success' | 'danger', onClick: () => void) {
+  return (
+    <button type="button" className={`tech-action-btn btn-${kind}`} onClick={onClick}>
+      {label}
+    </button>
+  )
+}
+
+/** 无人机任务列定义（工厂：依赖行操作回调） */
+export function droneColumns(actions: DroneTaskRowActions): TableColumnsType<DroneTaskVO> {
+  return [
+    { title: '任务ID', dataIndex: 'taskId', key: 'taskId', width: 160 },
+    { title: '任务名称', dataIndex: 'taskName', key: 'taskName', width: 180 },
+    { title: '机场编码', dataIndex: 'dockCode', key: 'dockCode', width: 140 },
+    {
+      title: '任务状态',
+      dataIndex: 'taskStatus',
+      key: 'taskStatus',
+      width: 100,
+      align: 'center' as const,
+      render: renderTaskStatus,
+    },
+    { title: '执行时间', dataIndex: 'taskTime', key: 'taskTime', width: 170 },
+    { title: '结果数', dataIndex: 'resultCount', key: 'resultCount', width: 90, align: 'center' as const },
+    {
+      title: '数据来源',
+      dataIndex: 'dataSource',
+      key: 'dataSource',
+      width: 110,
+      align: 'center' as const,
+      render: (v: DroneTaskDataSource) => DATA_SOURCE_MAP[v] ?? v,
+    },
+    { title: '失败原因', dataIndex: 'failReason', key: 'failReason', width: 180, render: (v: string) => v || '-' },
+    { title: '创建人', dataIndex: 'createBy', key: 'createBy', width: 110 },
+    {
+      title: '操作',
+      key: 'action',
+      width: 220,
+      render: (_, row: DroneTaskVO) => {
+        if (row.dataSource === 'api') {
+          return (
+            <div className="flex items-center gap-2">
+              {techBtn('查看', 'detail', () => actions.onViewApiResult(row))}
+            </div>
+          )
+        }
+        if (row.dataSource === 'import') {
+          return (
+            <div className="flex items-center gap-2">
+              {techBtn('上传', 'success', () => actions.onUploadImport(row))}
+              {techBtn('查看', 'detail', () => actions.onViewImport(row))}
+            </div>
+          )
+        }
+        return '-'
+      },
+    },
+  ]
+}
 
 /**
  * 走航任务表格列定义：

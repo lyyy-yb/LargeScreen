@@ -19,6 +19,8 @@ import type { AlarmItem, PollutionItem, RadarStation } from './shared'
 import AlarmPointPopup from './popups/AlarmPointPopup'
 import DispatchPointPopup from './popups/DispatchPointPopup'
 import CreatePollutionModal from './modals/CreatePollutionModal'
+import CreateManualAlertModal, { type ManualAlertInitial } from '@/pages/alert/modals/CreateManualAlertModal'
+import { buildDeptRegionOptions } from '@/utils/deptRegion'
 import AlarmPointPanel from './panels/AlarmPointPanel'
 import MapPanelHeader from '@/components/MapPanelHeader'
 import MapPopupPortal from '@/components/MapPopupPortal'
@@ -66,7 +68,9 @@ function RadarAlarmView() {
 
   const [flyVisible, setFlyVisible] = useState(false)
   const [flyLngLat, setFlyLngLat] = useState<{ lng: number; lat: number }>({ lng: 0, lat: 0 })
-  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; lng: number; lat: number } | null>(null)
+  const [contextMenu, setContextMenu] = useState<{ x: number; y: number; lng: number; lat: number; item?: AlarmItem } | null>(null)
+  const [manualAlertInitial, setManualAlertInitial] = useState<ManualAlertInitial | null>(null)
+  const lastMarkerContextMenuRef = useRef(0)
   const [alarmPopup, setAlarmPopup] = useState<{ item: AlarmItem; x: number; y: number } | null>(null)
   const [dispatchPopup, setDispatchPopup] = useState<{ x: number; y: number; lng: number; lat: number } | null>(null)
   const [createVisible, setCreateVisible] = useState(false)
@@ -382,6 +386,42 @@ function RadarAlarmView() {
     setAlarmPopup({ item, x: pos.x, y: pos.y })
   }, [])
 
+  const handleMarkerContextMenu = useCallback((feature: Record<string, unknown>, pos: { x: number; y: number }) => {
+    const lng = Number(feature.lng)
+    const lat = Number(feature.lat)
+    if (!Number.isFinite(lng) || !Number.isFinite(lat)) return
+    lastMarkerContextMenuRef.current = Date.now()
+    const [width, height] = sceneRef.current?.getSize() ?? [1920, 1080]
+    setAlarmPopup(null)
+    setDispatchPopup(null)
+    setContextMenu({
+      x: Math.max(0, Math.min(pos.x, width - 180)), y: Math.max(0, Math.min(pos.y, height - 94)), lng, lat,
+      item: { dapLng: lng, dapLat: lat, address: String(feature.name ?? ''), times: Number(feature.times) || 0, type: Number(feature.alarmType) || 1 },
+    })
+  }, [])
+
+  const createManualAlert = (item: AlarmItem) => {
+    const radar = radarList.find(station => String(station.bsiId) === selectedBsiId)
+    const regions = buildDeptRegionOptions(regionContext?.departments ?? [])
+    // 地址能确认归属时才回填，不把地图当前筛选区域当作点位归属。
+    const city = regions.cityOptions.find(option => item.address.includes(option.label))
+    const districtMatches = regions.cityOptions.flatMap(option => regions.getDistrictOptions(option.value)
+      .filter(district => item.address.includes(district.label)).map(district => ({ city: option, district })))
+    const match = districtMatches.length === 1 ? districtMatches[0] : undefined
+    const cityId = match?.city.value ?? city?.value
+    const districtId = match?.district.value
+    const town = regions.getTownOptions(districtId).find(option => item.address.includes(option.label))
+    setManualAlertInitial({
+      dataType: 'radar_station', deviceId: radar ? String(radar.bsiId) : undefined,
+      deviceName: radar?.bsiName,
+      lng: item.dapLng, lat: item.dapLat,
+      cityId: cityId ? Number(cityId) : undefined, districtId: districtId ? Number(districtId) : undefined,
+      townId: town ? Number(town.value) : undefined,
+      triggerReason: `雷达${item.type === 2 ? '突发' : '常规'}点位，监测时段内报警 ${item.times} 次，手动发起预警。`,
+    })
+    setContextMenu(null)
+  }
+
   // 确认为污染源 → 打开新建污染源弹窗并预填经纬度与地址（对齐 antd-demo setToSource → ppObj → CreateModel）
   const confirmAsPollution = (item: AlarmItem) => {
     setAlarmPopup(null)
@@ -412,6 +452,9 @@ function RadarAlarmView() {
       ev.originalEvent?.preventDefault()
       // 阻止事件冒泡到 window 的 contextmenu 监听，避免菜单刚打开就被关闭
       ev.originalEvent?.stopPropagation()
+      if (Date.now() - lastMarkerContextMenuRef.current < 300) return
+      setAlarmPopup(null)
+      setDispatchPopup(null)
       if (ev.lngLat) {
         // 大屏存在 transform 缩放，需将视口坐标换算为地图容器内未缩放的设计坐标，否则菜单位置会按缩放倍数偏移
         const container = scene.getContainer()
@@ -437,8 +480,9 @@ function RadarAlarmView() {
   useEffect(() => {
     const close = () => setContextMenu(null)
     window.addEventListener('click', close)
-    window.addEventListener('contextmenu', close)
-    return () => { window.removeEventListener('click', close); window.removeEventListener('contextmenu', close) }
+    const closeContextMenu = () => { if (Date.now() - lastMarkerContextMenuRef.current >= 300) close() }
+    window.addEventListener('contextmenu', closeContextMenu)
+    return () => { window.removeEventListener('click', close); window.removeEventListener('contextmenu', closeContextMenu) }
   }, [])
 
   // 点击污染源卡片 → 地图定位到该污染源（原项目 rightBar：panTo）
@@ -485,7 +529,7 @@ function RadarAlarmView() {
 
   return (
     <div className="map-screen w-full h-full relative overflow-hidden" style={{ background: '#1a5ab0' }}>
-      <L7MapView id="radar-map" center={mapCenter} zoom={mapZoom} minZoom={6} maxZoom={14} showTiles markers={markers} onSceneLoaded={handleSceneLoaded} onMarkerClick={handleMarkerClick} />
+      <L7MapView id="radar-map" center={mapCenter} zoom={mapZoom} minZoom={6} maxZoom={14} showTiles markers={markers} onSceneLoaded={handleSceneLoaded} onMarkerClick={handleMarkerClick} onMarkerContextMenu={handleMarkerContextMenu} />
       {/* 顶部选择器 */}
       <div className="map-overlay-toolbar map-top-controls">
         <RegionSelector />
@@ -628,6 +672,11 @@ function RadarAlarmView() {
           style={{ left: contextMenu.x, top: contextMenu.y, background: 'rgba(4,22,52,0.95)', border: '1px solid rgba(0,180,255,0.35)', backdropFilter: 'blur(8px)' }}
           onClick={(e) => e.stopPropagation()}
         >
+          {contextMenu.item && <button type="button"
+            className="w-full flex items-center gap-2 px-4 py-2.5 cursor-pointer text-[#A8D6FF] text-13px bg-transparent border-0 hover:bg-[rgba(1,194,255,0.15)]"
+            onClick={() => createManualAlert(contextMenu.item!)}>
+            <ExclamationCircleOutlined className="text-[#01C2FF]" />新增手动预警
+          </button>}
           <div
             className="flex items-center gap-2 px-4 py-2.5 cursor-pointer text-[#A8D6FF] text-13px hover:bg-[rgba(1,194,255,0.15)] transition-colors"
             onClick={() => {
@@ -679,6 +728,7 @@ function RadarAlarmView() {
           lngLat={flyLngLat}
         />
       )}
+      {manualAlertInitial && <CreateManualAlertModal initial={manualAlertInitial} onClose={() => setManualAlertInitial(null)} />}
       {contextHolder}
     </div>
   )

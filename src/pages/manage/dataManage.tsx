@@ -31,6 +31,8 @@ import {
   useDebouncedQuery,
 } from './shared'
 import { buildCarRows, carColumns, droneColumns, stationColumns } from './columns'
+import DroneApiResultModal from './components/DroneApiResultModal'
+import DroneResourceModal from './components/DroneResourceModal'
 
 const { RangePicker } = DatePicker
 
@@ -83,6 +85,11 @@ export default function DataManage() {
   const [droneLoading, setDroneLoading] = useState(false)
   const [droneExporting, setDroneExporting] = useState(false)
   const [droneImporting, setDroneImporting] = useState(false)
+
+  // 无人机任务行操作弹窗（api 来源查看 / import 来源上传 & 查看）
+  const [apiResultTask, setApiResultTask] = useState<DroneTaskVO | null>(null)
+  const [uploadTask, setUploadTask] = useState<DroneTaskVO | null>(null)
+  const [viewTask, setViewTask] = useState<DroneTaskVO | null>(null)
 
   // 设备下拉：微站与走航车（大屏数据源列表，带数据权限）
   useEffect(() => {
@@ -285,7 +292,7 @@ export default function DataManage() {
     setDroneImporting(true)
     try {
       const res = await dataManageApi.droneTaskImportData(file)
-      const text = (res as unknown as { message?: string })?.message
+      const text = typeof res === 'string' ? res : (res as unknown as { message?: string })?.message
       message.success(text || '导入成功')
       await fetchDrone(1, droneSize)
     } catch (err) {
@@ -538,7 +545,11 @@ export default function DataManage() {
           <div className="tech-table-wrapper">
             <Table
               dataSource={droneRows}
-              columns={droneColumns}
+              columns={droneColumns({
+                onViewApiResult: record => setApiResultTask(record),
+                onUploadImport: record => setUploadTask(record),
+                onViewImport: record => setViewTask(record),
+              })}
               rowKey="taskId"
               size="small"
               loading={droneLoading}
@@ -553,6 +564,30 @@ export default function DataManage() {
               }}
             />
           </div>
+
+          {/* 无人机任务：api 来源查看采集结果（listFlyResult） */}
+          <DroneApiResultModal
+            visible={!!apiResultTask}
+            task={apiResultTask}
+            onClose={() => setApiResultTask(null)}
+          />
+
+          {/* 无人机任务：import 来源上传资源（upload + preview + save） */}
+          <DroneResourceModal
+            visible={!!uploadTask}
+            task={uploadTask}
+            mode="upload"
+            onClose={() => setUploadTask(null)}
+            onSaved={() => { void fetchDrone(dronePage, droneSize) }}
+          />
+
+          {/* 无人机任务：import 来源查看资源（只读） */}
+          <DroneResourceModal
+            visible={!!viewTask}
+            task={viewTask}
+            mode="view"
+            onClose={() => setViewTask(null)}
+          />
         </>
       )}
     </div>
